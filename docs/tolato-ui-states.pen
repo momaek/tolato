@@ -1,0 +1,1283 @@
+{
+  "version": "2.8",
+  "children": [
+    {
+      "type": "frame",
+      "id": "hzcc5",
+      "x": 0,
+      "y": 0,
+      "name": "ToLaTo Empty State",
+      "width": 1360,
+      "height": 1020,
+      "fill": "#F6F4EE",
+      "layout": "vertical",
+      "gap": 18,
+      "padding": 24,
+      "children": [
+        {
+          "type": "frame",
+          "id": "pJpKv",
+          "name": "Top Bar",
+          "width": "fill_container",
+          "height": 76,
+          "fill": "#FFFEFB",
+          "cornerRadius": 22,
+          "gap": 16,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "y5g3J",
+              "name": "emptyBrand1",
+              "fill": "#173B2B",
+              "content": "ToLaTo",
+              "fontFamily": "IBM Plex Sans",
+              "fontSize": 26,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "uvYu2",
+              "name": "emptyStatus1",
+              "fill": "#4A4741",
+              "content": "Control server ready · 4 online · 1 offline",
+              "fontFamily": "IBM Plex Sans",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "OkCec",
+          "name": "Body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "jl50N",
+              "name": "Sidebar",
+              "width": 360,
+              "height": "fill_container",
+              "fill": "#FFFEFB",
+              "cornerRadius": 22,
+              "layout": "vertical",
+              "gap": 14,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "w3fhv",
+                  "name": "emptySideHead1",
+                  "fill": "#252522",
+                  "content": "NODES\n4 online · 1 offline",
+                  "fontFamily": "IBM Plex Sans",
+                  "fontSize": 20,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "UbRks",
+                  "name": "All Nodes",
+                  "width": "fill_container",
+                  "fill": "#DDF1E8",
+                  "cornerRadius": 18,
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PPZxo",
+                      "name": "emptyAllText1",
+                      "fill": "#1A4C39",
+                      "content": "≡  All nodes\nBroadcast · 4 active",
+                      "fontFamily": "IBM Plex Sans",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "szZIH",
+                  "name": "emptyNodeList1",
+                  "fill": "#252522",
+                  "content": "● sg-prod-01\nSingapore · Ubuntu 22.04\nonline\n\n● us-east-02\nVirginia · Ubuntu 20.04\nonline\n\n● jp-tokyo-01\nTokyo · Debian 11\nonline\n\n● de-fra-03\nFrankfurt · CentOS 7\nonline\n\n● hk-01\nHong Kong · offline\noffline",
+                  "fontFamily": "IBM Plex Sans",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "xwZPF",
+              "name": "Main",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "5jB8o",
+                  "name": "Header",
+                  "width": "fill_container",
+                  "height": 84,
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "gap": 18,
+                  "padding": 18,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pVGpr",
+                      "name": "emptyTarget1",
+                      "fill": "#1C5140",
+                      "content": "Target:  All nodes (broadcast)",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 18,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YIUYg",
+                      "name": "AI Agent",
+                      "fill": "#173B2B",
+                      "cornerRadius": 18,
+                      "padding": 12,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "BpWxQ",
+                          "name": "emptyModeAText1",
+                          "fill": "#FFFEFB",
+                          "content": "AI Agent",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 16,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "QOx5m",
+                      "name": "Direct Shell",
+                      "fill": "#F3EFE5",
+                      "cornerRadius": 18,
+                      "padding": 12,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ikpwk",
+                          "name": "emptyModeBText1",
+                          "fill": "#6D675F",
+                          "content": "Direct shell",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 16,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "nmcMs",
+                  "name": "Content",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 22,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "dOKeB",
+                      "name": "emptySys1",
+                      "fill": "#4A4F4B",
+                      "content": "[system] Control server ready. 4 agents connected via WebSocket.\n[system] Select a node or stay on broadcast, then describe the task below.",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "aoT0B",
+                      "name": "emptyPrompt1",
+                      "fill": "#8A8479",
+                      "content": "The workspace is empty until a task starts.\nGenerate a plan first, then expand into preview, approval, execution, and result states.",
+                      "fontFamily": "IBM Plex Sans",
+                      "fontSize": 18,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "NvEao",
+                  "name": "Composer",
+                  "width": "fill_container",
+                  "height": 154,
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Xc8fi",
+                      "name": "Input Row",
+                      "width": "fill_container",
+                      "height": 76,
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "6N5yk",
+                          "name": "Input Field",
+                          "width": "fill_container",
+                          "height": "fill_container",
+                          "fill": "#F7F3EA",
+                          "cornerRadius": 18,
+                          "padding": 16,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "rnjBo",
+                              "name": "emptyInputText1",
+                              "fill": "#8A8479",
+                              "content": "描述你的任务，AI 会先生成执行计划，再逐步显示后续状态",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 18,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "IapND",
+                          "name": "Generate",
+                          "width": 150,
+                          "height": "fill_container",
+                          "fill": "#173B2B",
+                          "cornerRadius": 18,
+                          "padding": 16,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "IqsEF",
+                              "name": "emptyGoText1",
+                              "fill": "#FFFEFB",
+                              "content": "生成计划",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 18,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "NaO7c",
+                      "name": "Chip Row",
+                      "width": "fill_container",
+                      "height": 34,
+                      "gap": 10,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "MWesJ",
+                          "name": "emptyChipText1",
+                          "fill": "#6D675F",
+                          "content": "磁盘告警    Docker 状态    日志排查    Nginx 自愈    网络检查",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Qm4GV",
+      "x": 1520,
+      "y": 0,
+      "name": "ToLaTo Plan State",
+      "width": 1360,
+      "height": 1020,
+      "fill": "#F6F4EE",
+      "layout": "vertical",
+      "gap": 18,
+      "padding": 24,
+      "children": [
+        {
+          "type": "frame",
+          "id": "iveRO",
+          "name": "Top Bar",
+          "width": "fill_container",
+          "height": 76,
+          "fill": "#FFFEFB",
+          "cornerRadius": 22,
+          "gap": 16,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "6LJhZ",
+              "name": "planBrand2",
+              "fill": "#173B2B",
+              "content": "ToLaTo · Plan state",
+              "fontFamily": "IBM Plex Sans",
+              "fontSize": 24,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "43xBw",
+              "name": "planStatus2",
+              "fill": "#4A4741",
+              "content": "Task submitted · AI generated a structured plan",
+              "fontFamily": "IBM Plex Sans",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "jhf3Q",
+          "name": "Body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "U1zCr",
+              "name": "Sidebar",
+              "width": 360,
+              "height": "fill_container",
+              "fill": "#FFFEFB",
+              "cornerRadius": 22,
+              "layout": "vertical",
+              "gap": 14,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Owhyq",
+                  "name": "planSideHead2",
+                  "fill": "#252522",
+                  "content": "NODES\n4 online · 1 offline",
+                  "fontFamily": "IBM Plex Sans",
+                  "fontSize": 20,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "QvMWh",
+                  "name": "All Nodes",
+                  "width": "fill_container",
+                  "fill": "#DDF1E8",
+                  "cornerRadius": 18,
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "QuT9U",
+                      "name": "planAllText2",
+                      "fill": "#1A4C39",
+                      "content": "≡  All nodes\nBroadcast · 4 active",
+                      "fontFamily": "IBM Plex Sans",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "9VaIB",
+                  "name": "planNodeList2",
+                  "fill": "#252522",
+                  "content": "● sg-prod-01\nSingapore · Ubuntu 22.04\nonline\n\n● us-east-02\nVirginia · Ubuntu 20.04\nonline\n\n● jp-tokyo-01\nTokyo · Debian 11\nonline\n\n● de-fra-03\nFrankfurt · CentOS 7\nonline\n\n● hk-01\nHong Kong · offline\noffline",
+                  "fontFamily": "IBM Plex Sans",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "QhOx9",
+              "name": "Main",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "YXWe6",
+                  "name": "Header",
+                  "width": "fill_container",
+                  "height": 84,
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "gap": 18,
+                  "padding": 18,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Y8toe",
+                      "name": "planHeader2",
+                      "fill": "#1C5140",
+                      "content": "Target:  All nodes (broadcast)        AI Agent        Direct shell",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 18,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "rst7R",
+                  "name": "Content",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 22,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SbklQ",
+                      "name": "planSys2",
+                      "fill": "#4A4F4B",
+                      "content": "[system] Plan generated from the latest prompt.\n[system] Low-risk read-only steps can proceed automatically after review.",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "RncP9",
+                      "name": "Plan Card",
+                      "width": "fill_container",
+                      "fill": "#FAF8F1",
+                      "cornerRadius": 18,
+                      "layout": "vertical",
+                      "gap": 10,
+                      "padding": 18,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "SvoeV",
+                          "name": "planCardTitle2",
+                          "fill": "#252522",
+                          "content": "Plan preview",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "4OB0k",
+                          "name": "planCardBody2",
+                          "fill": "#37342F",
+                          "content": "Input: 检查所有在线节点的磁盘占用和 Docker 状态\nSummary: 并行检查磁盘使用率、根分区风险和 Docker 运行状态\nSteps:\n1. disk_usage()\n2. docker_ps()\n3. system_status()",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "cN2ru",
+                          "name": "planCardFoot2",
+                          "fill": "#1C5140",
+                          "content": "Risk: low · Impact: read-only inspection · Approval: not required",
+                          "fontFamily": "IBM Plex Mono",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "Gr9Hy",
+                      "name": "planHint2",
+                      "fill": "#8A8479",
+                      "content": "Next state after review: execution stream",
+                      "fontFamily": "IBM Plex Sans",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Zh3pl",
+                  "name": "Composer",
+                  "width": "fill_container",
+                  "height": 154,
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "CrWkp",
+                      "name": "Input Row",
+                      "width": "fill_container",
+                      "height": 76,
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "C705r",
+                          "name": "Input Field",
+                          "width": "fill_container",
+                          "height": "fill_container",
+                          "fill": "#F7F3EA",
+                          "cornerRadius": 18,
+                          "padding": 16,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "mbZ9r",
+                              "name": "planInputText2",
+                              "fill": "#4A4741",
+                              "content": "检查所有在线节点的磁盘占用和 Docker 状态",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 18,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "HekCv",
+                          "name": "Regenerate",
+                          "width": 150,
+                          "height": "fill_container",
+                          "fill": "#173B2B",
+                          "cornerRadius": 18,
+                          "padding": 16,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "lav8R",
+                              "name": "planBtnText2",
+                              "fill": "#FFFEFB",
+                              "content": "重新生成",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 18,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "IB3HQ",
+                      "name": "Chip Row",
+                      "width": "fill_container",
+                      "height": 34,
+                      "gap": 10,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "QXIjV",
+                          "name": "planChipText2",
+                          "fill": "#6D675F",
+                          "content": "计划已生成    审批未触发    可继续执行",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "vME8o",
+      "x": 3040,
+      "y": 0,
+      "name": "ToLaTo Approval State",
+      "width": 1360,
+      "height": 1020,
+      "fill": "#F6F4EE",
+      "layout": "vertical",
+      "gap": 18,
+      "padding": 24,
+      "children": [
+        {
+          "type": "frame",
+          "id": "APwMA",
+          "name": "Top Bar",
+          "width": "fill_container",
+          "height": 76,
+          "fill": "#FFFEFB",
+          "cornerRadius": 22,
+          "gap": 16,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "hWEtW",
+              "name": "approveBrand3",
+              "fill": "#173B2B",
+              "content": "ToLaTo · Approval state",
+              "fontFamily": "IBM Plex Sans",
+              "fontSize": 24,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "rmEQK",
+              "name": "approveStatus3",
+              "fill": "#4A4741",
+              "content": "A medium-risk plan is waiting for approval",
+              "fontFamily": "IBM Plex Sans",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Lw0Ua",
+          "name": "Body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "pZECP",
+              "name": "Sidebar",
+              "width": 360,
+              "height": "fill_container",
+              "fill": "#FFFEFB",
+              "cornerRadius": 22,
+              "layout": "vertical",
+              "gap": 14,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "wB0vh",
+                  "name": "approveSideHead3",
+                  "fill": "#252522",
+                  "content": "NODES\n1 target · 4 online · 1 offline",
+                  "fontFamily": "IBM Plex Sans",
+                  "fontSize": 20,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "vYl14",
+                  "name": "Target Node",
+                  "width": "fill_container",
+                  "fill": "#EEF3EA",
+                  "cornerRadius": 18,
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "jgde0",
+                      "name": "approveTargetText3",
+                      "fill": "#1E3127",
+                      "content": "jp-tokyo-01\nTokyo · Debian 11\nonline · target",
+                      "fontFamily": "IBM Plex Sans",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "4rwfl",
+              "name": "Main",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "SqaPj",
+                  "name": "Header",
+                  "width": "fill_container",
+                  "height": 84,
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "gap": 18,
+                  "padding": 18,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "WamSP",
+                      "name": "approveHeader3",
+                      "fill": "#1C5140",
+                      "content": "Target:  jp-tokyo-01        AI Agent        Direct shell",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 18,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "SE5or",
+                  "name": "Content",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 22,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "66aH7",
+                      "name": "approveSys3",
+                      "fill": "#4A4F4B",
+                      "content": "[system] The latest plan contains restart_service(nginx).\n[system] Execution is blocked until an explicit approval is recorded.",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "y2wtv",
+                      "name": "Compact Plan",
+                      "width": "fill_container",
+                      "fill": "#FAF8F1",
+                      "cornerRadius": 18,
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 18,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "zXzVD",
+                          "name": "approvePlanText3",
+                          "fill": "#37342F",
+                          "content": "Plan summary\nInput: 重启东京节点的 nginx\nAction: restart_service(nginx)\nRisk: medium",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "DMnXg",
+                      "name": "Approval Modal",
+                      "width": 620,
+                      "fill": "#FFF8E9",
+                      "cornerRadius": 18,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 20,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "S8HNP",
+                          "name": "approveModalTitle3",
+                          "fill": "#5D4717",
+                          "content": "Approve restart_service(nginx)?",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 22,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "yWp9W",
+                          "name": "approveModalBody3",
+                          "fill": "#6F571B",
+                          "content": "Risk: medium\nImpact: brief nginx interruption on jp-tokyo-01\nAudit: approver identity and timestamp will be recorded before execution starts.",
+                          "fontFamily": "IBM Plex Sans",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "5beKa",
+                          "name": "Action Row",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "HObv5",
+                              "name": "Approve",
+                              "fill": "#F2E19B",
+                              "cornerRadius": 16,
+                              "padding": 14,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "YInbT",
+                                  "name": "approveBtnText3",
+                                  "fill": "#5D4717",
+                                  "content": "Approve",
+                                  "fontFamily": "IBM Plex Sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "700"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "otGDw",
+                              "name": "Reject",
+                              "fill": "#F6DDD8",
+                              "cornerRadius": 16,
+                              "padding": 14,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "ompdm",
+                                  "name": "rejectBtnText3",
+                                  "fill": "#7A3232",
+                                  "content": "Reject",
+                                  "fontFamily": "IBM Plex Sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "700"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "aCdxX",
+                  "name": "Composer",
+                  "width": "fill_container",
+                  "height": 154,
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "fuEK9",
+                      "name": "Input Row",
+                      "width": "fill_container",
+                      "height": 76,
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "a6Dnw",
+                          "name": "Input Field",
+                          "width": "fill_container",
+                          "height": "fill_container",
+                          "fill": "#F7F3EA",
+                          "cornerRadius": 18,
+                          "padding": 16,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "1Fpyf",
+                              "name": "approveInputText3",
+                              "fill": "#4A4741",
+                              "content": "重启东京节点的 nginx",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 18,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "c1h1H",
+                      "name": "approveChip3",
+                      "fill": "#6D675F",
+                      "content": "审批等待中    执行未开始",
+                      "fontFamily": "IBM Plex Sans",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "iXfKw",
+      "x": 4560,
+      "y": 0,
+      "name": "ToLaTo Execution State",
+      "width": 1360,
+      "height": 1020,
+      "fill": "#F6F4EE",
+      "layout": "vertical",
+      "gap": 18,
+      "padding": 24,
+      "children": [
+        {
+          "type": "frame",
+          "id": "Y5TUP",
+          "name": "Top Bar",
+          "width": "fill_container",
+          "height": 76,
+          "fill": "#FFFEFB",
+          "cornerRadius": 22,
+          "gap": 16,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "kMkXy",
+              "name": "execBrand4",
+              "fill": "#173B2B",
+              "content": "ToLaTo · Execution state",
+              "fontFamily": "IBM Plex Sans",
+              "fontSize": 24,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "qyewF",
+              "name": "execStatus4",
+              "fill": "#4A4741",
+              "content": "Task is running and partial results are already streaming back",
+              "fontFamily": "IBM Plex Sans",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "i4M7V",
+          "name": "Body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "nKPg1",
+              "name": "Sidebar",
+              "width": 360,
+              "height": "fill_container",
+              "fill": "#FFFEFB",
+              "cornerRadius": 22,
+              "layout": "vertical",
+              "gap": 14,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "2JCTJ",
+                  "name": "execSideHead4",
+                  "fill": "#252522",
+                  "content": "NODES\n4 online · 1 offline",
+                  "fontFamily": "IBM Plex Sans",
+                  "fontSize": 20,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "ol0Nf",
+                  "name": "All Nodes",
+                  "width": "fill_container",
+                  "fill": "#DDF1E8",
+                  "cornerRadius": 18,
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "AbQPZ",
+                      "name": "execAllText4",
+                      "fill": "#1A4C39",
+                      "content": "≡  All nodes\nBroadcast · 4 active",
+                      "fontFamily": "IBM Plex Sans",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "nBwC4",
+                  "name": "execNodeList4",
+                  "fill": "#252522",
+                  "content": "● sg-prod-01  online\n● us-east-02  running\n● jp-tokyo-01 online\n● de-fra-03  online\n● hk-01      offline",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "sZG7x",
+              "name": "Main",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Kj1cq",
+                  "name": "Header",
+                  "width": "fill_container",
+                  "height": 84,
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "gap": 18,
+                  "padding": 18,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ZKFNv",
+                      "name": "execHeader4",
+                      "fill": "#1C5140",
+                      "content": "Target:  All nodes (broadcast)        AI Agent        running",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 18,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "u8RSa",
+                  "name": "Content",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 22,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "karpu",
+                      "name": "execSys4",
+                      "fill": "#4A4F4B",
+                      "content": "[system] Task dispatched to 4 online nodes.\n[system] Streaming stdout, stderr, exit codes, and aggregate status.",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qzWP9",
+                      "name": "Execution Log",
+                      "width": "fill_container",
+                      "fill": "#FAF8F1",
+                      "cornerRadius": 18,
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 18,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "KeAvJ",
+                          "name": "execLogText4",
+                          "fill": "#3B3F3B",
+                          "content": "queued -> dispatched -> running\n\nsg-prod-01   success   df -h complete · docker healthy\nus-east-02  running   collecting Docker container state\njp-tokyo-01 success   root usage 61% · nginx healthy\nde-fra-03   success   no anomalies detected",
+                          "fontFamily": "IBM Plex Mono",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "G4eTl",
+                      "name": "Summary Row",
+                      "width": "fill_container",
+                      "gap": 14,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "KKaFj",
+                          "name": "Aggregate",
+                          "width": 280,
+                          "fill": "#E5F3EA",
+                          "cornerRadius": 18,
+                          "layout": "vertical",
+                          "gap": 8,
+                          "padding": 18,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "yjmNj",
+                              "name": "execAggText4",
+                              "fill": "#24503D",
+                              "content": "Aggregate\nTotal: 4\nSuccess: 3\nRunning: 1\nOffline skipped: 1",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 16,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "GBohS",
+                          "name": "AI Summary",
+                          "width": "fill_container",
+                          "fill": "#F0EDFF",
+                          "cornerRadius": 18,
+                          "layout": "vertical",
+                          "gap": 8,
+                          "padding": 18,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "NwtKZ",
+                              "name": "execAiText4",
+                              "fill": "#4A426A",
+                              "content": "AI summary\nCluster is stable overall. sg-prod-01 shows mild disk growth. No write action is recommended yet.",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 16,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "8TIWx",
+                  "name": "Composer",
+                  "width": "fill_container",
+                  "height": 154,
+                  "fill": "#FFFEFB",
+                  "cornerRadius": 22,
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "3UXjL",
+                      "name": "Input Row",
+                      "width": "fill_container",
+                      "height": 76,
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "kK4fQ",
+                          "name": "Input Field",
+                          "width": "fill_container",
+                          "height": "fill_container",
+                          "fill": "#F7F3EA",
+                          "cornerRadius": 18,
+                          "padding": 16,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "PNqi0",
+                              "name": "execInputText4",
+                              "fill": "#4A4741",
+                              "content": "检查所有在线节点的磁盘占用和 Docker 状态",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 18,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "LWQUP",
+                          "name": "Next Task",
+                          "width": 150,
+                          "height": "fill_container",
+                          "fill": "#173B2B",
+                          "cornerRadius": 18,
+                          "padding": 16,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "FXPry",
+                              "name": "execBtnText4",
+                              "fill": "#FFFEFB",
+                              "content": "新任务",
+                              "fontFamily": "IBM Plex Sans",
+                              "fontSize": 18,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "si04e",
+                      "name": "execChip4",
+                      "fill": "#6D675F",
+                      "content": "执行中    日志回传中    结果聚合中",
+                      "fontFamily": "IBM Plex Sans",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
