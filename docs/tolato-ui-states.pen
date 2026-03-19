@@ -1278,6 +1278,355 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "kWLG8",
+      "x": 6040,
+      "y": 0,
+      "name": "Design System",
+      "width": 1120,
+      "height": 860,
+      "fill": "$background",
+      "cornerRadius": "$radius-xl",
+      "stroke": {
+        "thickness": 1,
+        "fill": "$border"
+      },
+      "layout": "vertical",
+      "gap": 18,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "mJ5dD",
+          "name": "dsTitle",
+          "fill": "$foreground",
+          "content": "ToLaTo Design System",
+          "fontFamily": "$font-family-ui",
+          "fontSize": 24,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "PqF4B",
+          "name": "dsSub",
+          "fill": "$muted-foreground",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Reusable components and tokens added from the installed pencil-ui-design skill.",
+          "lineHeight": 1.5,
+          "fontFamily": "$font-family-ui",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "5CYKm",
+          "name": "Button/Primary",
+          "reusable": true,
+          "width": 160,
+          "height": 40,
+          "fill": "$primary",
+          "cornerRadius": "$radius-md",
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#0000001A",
+            "offset": {
+              "x": 0,
+              "y": 1
+            },
+            "blur": 2
+          },
+          "gap": 8,
+          "padding": [
+            16,
+            10
+          ],
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "ZsYMF",
+              "name": "primaryLabel",
+              "fill": "$primary-foreground",
+              "content": "Primary Action",
+              "fontFamily": "$font-family-ui",
+              "fontSize": 14,
+              "fontWeight": "500"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "jWcWO",
+          "name": "Button/Secondary",
+          "reusable": true,
+          "width": 160,
+          "height": 40,
+          "fill": "$secondary",
+          "cornerRadius": "$radius-md",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "gap": 8,
+          "padding": [
+            16,
+            10
+          ],
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "FH51b",
+              "name": "secondaryLabel",
+              "fill": "$foreground",
+              "content": "Secondary",
+              "fontFamily": "$font-family-ui",
+              "fontSize": 14,
+              "fontWeight": "500"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "vPABe",
+          "name": "Button/Destructive",
+          "reusable": true,
+          "width": 160,
+          "height": 40,
+          "fill": "$destructive",
+          "cornerRadius": "$radius-md",
+          "gap": 8,
+          "padding": [
+            16,
+            10
+          ],
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "I19YR",
+              "name": "destructiveLabel",
+              "fill": "$primary-foreground",
+              "content": "Delete",
+              "fontFamily": "$font-family-ui",
+              "fontSize": 14,
+              "fontWeight": "500"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "COZAP",
+          "name": "Input/Default",
+          "reusable": true,
+          "width": 320,
+          "height": 40,
+          "fill": "$card",
+          "cornerRadius": "$radius-md",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "gap": 8,
+          "padding": [
+            12,
+            10
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "DtETb",
+              "name": "inputText",
+              "fill": "$muted-foreground",
+              "content": "Enter a value",
+              "fontFamily": "$font-family-ui",
+              "fontSize": 14
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "qDBSO",
+          "name": "Badge/Default",
+          "reusable": true,
+          "width": 84,
+          "height": 22,
+          "fill": "$muted",
+          "cornerRadius": "$radius-sm",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "padding": [
+            6,
+            8
+          ],
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "5FwCX",
+              "name": "badgeText",
+              "fill": "$foreground",
+              "content": "STATUS",
+              "fontFamily": "$font-family-ui",
+              "fontSize": 10,
+              "fontWeight": "500"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "38sOv",
+          "name": "Card/Default",
+          "reusable": true,
+          "width": 360,
+          "fill": "$card",
+          "cornerRadius": "$radius-lg",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#0000000A",
+            "offset": {
+              "x": 0,
+              "y": 2
+            },
+            "blur": 4
+          },
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "wu3Vi",
+              "name": "cardTitle",
+              "fill": "$card-foreground",
+              "content": "Card Title",
+              "fontFamily": "$font-family-ui",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "MUcCV",
+              "name": "cardBody",
+              "fill": "$muted-foreground",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Use this reusable card as the base for plan previews, summaries, and approval containers.",
+              "lineHeight": 1.5,
+              "fontFamily": "$font-family-ui",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "PpCyf",
+          "name": "dsNote",
+          "fill": "$muted-foreground",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Components are reusable and ready to be referenced from the four UI state screens.",
+          "lineHeight": 1.4,
+          "fontFamily": "$font-family-ui",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
     }
-  ]
+  ],
+  "variables": {
+    "accent": {
+      "type": "color",
+      "value": "#FCD34D"
+    },
+    "background": {
+      "type": "color",
+      "value": "#FAFAFA"
+    },
+    "border": {
+      "type": "color",
+      "value": "#E4E4E7"
+    },
+    "card": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "card-foreground": {
+      "type": "color",
+      "value": "#18181B"
+    },
+    "destructive": {
+      "type": "color",
+      "value": "#EF4444"
+    },
+    "font-family-cn": {
+      "type": "string",
+      "value": "Noto Sans SC"
+    },
+    "font-family-ui": {
+      "type": "string",
+      "value": "Inter"
+    },
+    "foreground": {
+      "type": "color",
+      "value": "#18181B"
+    },
+    "muted": {
+      "type": "color",
+      "value": "#F4F4F5"
+    },
+    "muted-foreground": {
+      "type": "color",
+      "value": "#71717A"
+    },
+    "primary": {
+      "type": "color",
+      "value": "#18181B"
+    },
+    "primary-foreground": {
+      "type": "color",
+      "value": "#FAFAFA"
+    },
+    "radius-lg": {
+      "type": "number",
+      "value": 12
+    },
+    "radius-md": {
+      "type": "number",
+      "value": 8
+    },
+    "radius-sm": {
+      "type": "number",
+      "value": 6
+    },
+    "radius-xl": {
+      "type": "number",
+      "value": 16
+    },
+    "ring": {
+      "type": "color",
+      "value": "#18181B"
+    },
+    "secondary": {
+      "type": "color",
+      "value": "#F4F4F5"
+    }
+  }
 }
