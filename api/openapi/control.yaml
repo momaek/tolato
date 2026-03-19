@@ -1,0 +1,41 @@
+openapi: 3.1.0
+info:
+  title: ToLaTo Control API
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      responses:
+        "200":
+          description: OK
+  /readyz:
+    get:
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Not ready
+  /api/v1/tasks/plan:
+    post:
+      summary: Generate a task plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/plan/task_plan_request.schema.json
+      responses:
+        "200":
+          description: Generated plan
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/plan/task_plan_response.schema.json
+  /api/v1/agent/enroll:
+    post:
+      summary: Enroll a new agent
+      responses:
+        "200":
+          description: Enrollment response

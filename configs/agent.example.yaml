@@ -1,0 +1,10 @@
+agent:
+  hostname: "dev-node-01"
+  region: "local"
+  os: "darwin"
+  version: "0.1.0"
+  data_dir: ".tolato"
+  identity_file: ".tolato/identity.json"
+  server_base_url: "http://localhost:8080"
+  heartbeat_interval: "5s"
+  reconnect_interval: "3s"

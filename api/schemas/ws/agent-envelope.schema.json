@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentEnvelope",
+  "type": "object",
+  "required": ["type", "node_id", "seq", "timestamp", "payload"],
+  "properties": {
+    "type": { "type": "string" },
+    "task_id": { "type": "string" },
+    "node_id": { "type": "string" },
+    "seq": { "type": "integer" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  }
+}

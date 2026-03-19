@@ -1,0 +1,9 @@
+FROM golang:1.24 AS build
+WORKDIR /src
+COPY . .
+RUN go build -o /out/tolato-server ./cmd/tolato-server
+
+FROM debian:bookworm-slim
+WORKDIR /app
+COPY --from=build /out/tolato-server /usr/local/bin/tolato-server
+CMD ["tolato-server", "--config", "configs/server.example.yaml"]

@@ -1,0 +1,16 @@
+[Unit]
+Description=ToLaTo Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tolato
+ExecStart=/usr/local/bin/tolato-agent --config /etc/tolato/agent.yaml
+Restart=always
+RestartSec=5
+User=tolato
+Group=tolato
+
+[Install]
+WantedBy=multi-user.target
