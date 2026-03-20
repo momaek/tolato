@@ -1,5 +1,13 @@
 <script setup lang="ts">
+import { onMounted } from "vue"
+import { useConsoleStore } from "@/entities/console/store"
 import ConsoleWorkspace from "@/widgets/console/ConsoleWorkspace.vue"
+
+const consoleStore = useConsoleStore()
+
+onMounted(() => {
+  consoleStore.setMode("ai_agent")
+})
 </script>
 
 <template>

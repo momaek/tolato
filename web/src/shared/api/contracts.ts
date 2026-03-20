@@ -114,8 +114,9 @@ export const taskDetailSchema = z.object({
 })
 
 export const connectionEventSchema = z.object({
-  type: z.enum(["connection.ready", "connection.synced"]),
+  type: z.enum(["connection.ready", "connection.synced", "connection.disconnected", "connection.error"]),
   timestamp: z.string(),
+  message: z.string().optional(),
 })
 
 export const nodeUpdatedEventSchema = z.object({
@@ -140,11 +141,19 @@ export const taskLogEventSchema = z.object({
   timestamp: z.string(),
 })
 
+export const taskResultEventSchema = z.object({
+  type: z.literal("task.result"),
+  taskId: z.string(),
+  execution: taskExecutionSchema,
+  timestamp: z.string(),
+})
+
 export const uiWsEventSchema = z.discriminatedUnion("type", [
   connectionEventSchema,
   nodeUpdatedEventSchema,
   taskStatusEventSchema,
   taskLogEventSchema,
+  taskResultEventSchema,
 ])
 
 export type ApprovalStatus = z.infer<typeof approvalStatusSchema>

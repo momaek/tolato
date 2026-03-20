@@ -118,7 +118,8 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	User CurrentUser `json:"user"`
+	User  CurrentUser `json:"user"`
+	Token string      `json:"token,omitempty"`
 }
 
 type TaskPlanRequest struct {

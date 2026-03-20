@@ -34,6 +34,10 @@ export const rawMeResponseSchema = z.object({
   user: rawUserSchema,
 })
 
+export const rawLoginResponseSchema = rawMeResponseSchema.extend({
+  token: z.string(),
+})
+
 const rawNodeSchema = z.object({
   id: z.string(),
   hostname: z.string(),
@@ -240,6 +244,19 @@ export function mapMeResponse(input: unknown): SessionInfo {
     name: parsed.user.id,
     role: parsed.user.role,
   })
+}
+
+export function mapLoginResponse(input: unknown): { session: SessionInfo; token: string } {
+  const parsed = rawLoginResponseSchema.parse(input)
+
+  return {
+    session: sessionSchema.parse({
+      id: parsed.user.id,
+      name: parsed.user.id,
+      role: parsed.user.role,
+    }),
+    token: parsed.token,
+  }
 }
 
 export function mapNodesResponse(input: unknown): NodeSummary[] {

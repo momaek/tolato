@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/momaek/tolato/internal/server/app/usecase"
+	domainnode "github.com/momaek/tolato/internal/server/domain/node"
 	infraauth "github.com/momaek/tolato/internal/server/infra/auth"
 	"github.com/momaek/tolato/internal/server/infra/presence"
 	"github.com/momaek/tolato/internal/server/transport/wsui"
@@ -19,7 +20,7 @@ import (
 
 type Handler struct {
 	logger   *zap.Logger
-	auth     infraauth.Service
+	auth     *infraauth.Service
 	usecases usecase.Services
 	db       *pgxpool.Pool
 	redis    *goredis.Client
@@ -50,20 +51,27 @@ func (h Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.auth.Login(req.Username, req.Password)
+	resp, err := h.auth.Login(req.Username, req.Password)
 	if err != nil {
 		errs.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	errs.WriteJSON(w, http.StatusOK, types.LoginResponse{User: user})
+	errs.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (h Handler) Me(w http.ResponseWriter, r *http.Request) {
-	errs.WriteJSON(w, http.StatusOK, types.LoginResponse{User: h.auth.CurrentUser()})
+	user, ok := h.authorizeRequest(w, r)
+	if !ok {
+		return
+	}
+	errs.WriteJSON(w, http.StatusOK, types.LoginResponse{User: user})
 }
 
 func (h Handler) ListNodes(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.ListNodes.Execute(r.Context())
 	if err != nil {
 		errs.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -76,6 +84,9 @@ func (h Handler) ListNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) GetNode(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.GetNode.Execute(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusNotFound, err.Error())
@@ -87,6 +98,9 @@ func (h Handler) GetNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.ListTasks.Execute(r.Context())
 	if err != nil {
 		errs.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -96,6 +110,9 @@ func (h Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) GenerateTaskPlan(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	var req types.TaskPlanRequest
 	if err := errs.DecodeJSON(r, &req); err != nil {
 		errs.WriteError(w, http.StatusBadRequest, "invalid request body")
@@ -113,6 +130,9 @@ func (h Handler) GenerateTaskPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ApproveTask(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.ApproveTask.Execute(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
@@ -123,6 +143,9 @@ func (h Handler) ApproveTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) RejectTask(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.RejectTask.Execute(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
@@ -133,6 +156,9 @@ func (h Handler) RejectTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.CancelTask.Execute(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
@@ -143,6 +169,9 @@ func (h Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) GetTask(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.GetTask.Execute(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
@@ -152,6 +181,9 @@ func (h Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ListTaskExecutions(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.ListTaskExecutions.Execute(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
@@ -161,6 +193,9 @@ func (h Handler) ListTaskExecutions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ListAudits(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.authorizeRequest(w, r); !ok {
+		return
+	}
 	resp, err := h.usecases.ListAuditEvents.Execute(r.Context(), r.URL.Query().Get("task_id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
@@ -186,11 +221,13 @@ func (h Handler) EnrollAgent(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) applyNodePresence(item types.Node) types.Node {
 	if h.presence == nil {
+		item.Status = domainnode.NormalizeStatus(item, time.Now().UTC())
 		return item
 	}
 
 	snapshot, ok := h.presence.Get(item.ID)
 	if !ok {
+		item.Status = domainnode.NormalizeStatus(item, time.Now().UTC())
 		return item
 	}
 
@@ -199,6 +236,7 @@ func (h Handler) applyNodePresence(item types.Node) types.Node {
 	if !snapshot.LastSeenAt.IsZero() {
 		item.LastSeenAt = snapshot.LastSeenAt
 	}
+	item.Status = domainnode.NormalizeStatus(item, time.Now().UTC())
 	return item
 }
 
@@ -207,4 +245,19 @@ func (h Handler) broadcastTaskStatus(taskID, status string) {
 		return
 	}
 	h.uiws.BroadcastTaskStatus(taskID, status, time.Now().UTC())
+}
+
+func (h Handler) authorizeRequest(w http.ResponseWriter, r *http.Request) (types.CurrentUser, bool) {
+	if h.auth == nil {
+		errs.WriteError(w, http.StatusUnauthorized, "authentication is not configured")
+		return types.CurrentUser{}, false
+	}
+
+	user, err := h.auth.AuthenticateRequest(r)
+	if err != nil {
+		errs.WriteError(w, http.StatusUnauthorized, err.Error())
+		return types.CurrentUser{}, false
+	}
+
+	return user, true
 }

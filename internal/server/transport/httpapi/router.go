@@ -18,7 +18,7 @@ import (
 
 type Dependencies struct {
 	Logger   *zap.Logger
-	Auth     infraauth.Service
+	Auth     *infraauth.Service
 	UseCases usecase.Services
 	DB       *pgxpool.Pool
 	Redis    *goredis.Client
@@ -42,7 +42,17 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Get("/healthz", h.Healthz)
 	r.Get("/readyz", h.Readyz)
 
-	r.Get("/ws/ui", deps.UIWS.ServeHTTP)
+	r.Get("/ws/ui", func(w http.ResponseWriter, r *http.Request) {
+		if deps.Auth == nil {
+			http.Error(w, "authentication is not configured", http.StatusUnauthorized)
+			return
+		}
+		if _, err := deps.Auth.AuthenticateRequest(r); err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		deps.UIWS.ServeHTTP(w, r)
+	})
 	r.Get("/ws/agent", deps.AgentWS.ServeHTTP)
 
 	r.Route("/api/v1", func(r chi.Router) {

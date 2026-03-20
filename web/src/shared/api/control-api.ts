@@ -12,6 +12,7 @@ import {
 import {
   mapAuditEventsResponse,
   mapExecutionsResponse,
+  mapLoginResponse,
   mapMeResponse,
   mapNodesResponse,
   mapPlan,
@@ -20,9 +21,20 @@ import {
   rawPlanTaskResponseSchema,
   rawTaskMutationResponseSchema,
 } from "@/shared/api/backend-contracts"
+import { getAuthToken } from "@/shared/api/auth-token"
 import { mockAudits, mockNodes, mockSession, mockTasks } from "@/shared/api/mock-data"
 
+export class ApiError extends Error {
+  status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
 export interface ControlApiAdapter {
+  login(input: { username: string; password: string }): Promise<{ session: SessionInfo; token: string }>
   getSession(): Promise<SessionInfo>
   getNodes(): Promise<NodeSummary[]>
   getTasks(): Promise<TaskDetail[]>
@@ -35,6 +47,13 @@ export interface ControlApiAdapter {
 }
 
 class MockControlApi implements ControlApiAdapter {
+  async login() {
+    return {
+      session: sessionSchema.parse(mockSession),
+      token: "mock-token",
+    }
+  }
+
   async getSession() {
     return sessionSchema.parse(mockSession)
   }
@@ -102,24 +121,28 @@ class RealControlApi implements ControlApiAdapter {
   }
 
   private async readJson<T>(path: string, parser: (value: unknown) => T) {
-    const response = await fetch(new URL(path, this.baseUrl))
+    const response = await fetch(new URL(path, this.baseUrl), {
+      headers: this.authHeaders(),
+    })
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} for ${path}`)
+      throw new ApiError(response.status, `HTTP ${response.status} for ${path}`)
     }
 
     return parser(await response.json())
   }
 
   private async readJsonOrNull<T>(path: string, parser: (value: unknown) => T) {
-    const response = await fetch(new URL(path, this.baseUrl))
+    const response = await fetch(new URL(path, this.baseUrl), {
+      headers: this.authHeaders(),
+    })
 
     if (response.status === 404) {
       return null
     }
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} for ${path}`)
+      throw new ApiError(response.status, `HTTP ${response.status} for ${path}`)
     }
 
     return parser(await response.json())
@@ -130,15 +153,41 @@ class RealControlApi implements ControlApiAdapter {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...this.authHeaders(),
       },
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} for ${path}`)
+      throw new ApiError(response.status, `HTTP ${response.status} for ${path}`)
     }
 
     const payload = rawTaskMutationResponseSchema.parse(await response.json())
     return this.getTask(payload.task_id)
+  }
+
+  private authHeaders() {
+    const token = getAuthToken()
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+    return headers
+  }
+
+  async login(input: { username: string; password: string }) {
+    const response = await fetch(new URL("/api/v1/auth/login", this.baseUrl), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    })
+
+    if (!response.ok) {
+      throw new ApiError(response.status, "Login failed")
+    }
+
+    return mapLoginResponse(await response.json())
   }
 
   async getSession() {
@@ -178,6 +227,7 @@ class RealControlApi implements ControlApiAdapter {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...this.authHeaders(),
       },
       body: JSON.stringify({
         mode: input.mode === "direct_shell" ? "manual_command" : input.mode,
@@ -187,7 +237,7 @@ class RealControlApi implements ControlApiAdapter {
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} for /api/v1/tasks/plan`)
+      throw new ApiError(response.status, `HTTP ${response.status} for /api/v1/tasks/plan`)
     }
 
     const payload = rawPlanTaskResponseSchema.parse(await response.json())
@@ -231,7 +281,7 @@ class RealControlApi implements ControlApiAdapter {
   }
 }
 
-const useMock = import.meta.env.VITE_USE_MOCK !== "false"
+const useMock = import.meta.env.VITE_USE_MOCK === "true"
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080"
 
 export const controlApi: ControlApiAdapter = useMock

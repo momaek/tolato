@@ -15,6 +15,12 @@ type Job struct {
 	TimeoutSec  int
 }
 
+type CancelRequest struct {
+	TaskID      string
+	ExecutionID string
+	Reason      string
+}
+
 type Result struct {
 	Status     string
 	ExitCode   int

@@ -5,8 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/sha
 import { formatDateTime } from "@/shared/lib/format"
 
 const connectionStore = useConnectionStore()
-const { state, lastSyncAt } = storeToRefs(connectionStore)
-const mockMode = import.meta.env.VITE_USE_MOCK ?? "true"
+const { state, lastSyncAt, message } = storeToRefs(connectionStore)
+const mockMode = import.meta.env.VITE_USE_MOCK ?? "false"
 </script>
 
 <template>
@@ -23,7 +23,7 @@ const mockMode = import.meta.env.VITE_USE_MOCK ?? "true"
         <CardHeader>
           <CardTitle>Frontend mode</CardTitle>
           <CardDescription>
-            当前默认使用 mock contracts，可通过环境变量切换到真实后端。
+            当前默认直连真实后端，可通过环境变量切回 mock contracts。
           </CardDescription>
         </CardHeader>
         <CardContent class="text-sm text-muted-foreground">
@@ -38,6 +38,7 @@ const mockMode = import.meta.env.VITE_USE_MOCK ?? "true"
         <CardContent class="space-y-2 text-sm text-muted-foreground">
           <p>Status · {{ state }}</p>
           <p>Last sync · {{ formatDateTime(lastSyncAt) }}</p>
+          <p v-if="message">Message · {{ message }}</p>
         </CardContent>
       </Card>
 

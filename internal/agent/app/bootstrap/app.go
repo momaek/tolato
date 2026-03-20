@@ -6,6 +6,7 @@ import (
 	"github.com/momaek/tolato/internal/agent/executor/runner"
 	validatorpkg "github.com/momaek/tolato/internal/agent/executor/validator"
 	"github.com/momaek/tolato/internal/agent/infra/agentstate"
+	"github.com/momaek/tolato/internal/agent/infra/cancellation"
 	"github.com/momaek/tolato/internal/agent/infra/persistence"
 	"github.com/momaek/tolato/internal/agent/infra/sysinfo"
 	"github.com/momaek/tolato/internal/agent/infra/telemetry"
@@ -44,9 +45,11 @@ func NewAgentApp(configPath string) (*AgentApp, error) {
 
 	incoming := make(chan protocol.Envelope, 32)
 	queue := make(chan runner.Job, 32)
-	runnerImpl := runner.NewNoopRunner()
+	cancelQueue := make(chan runner.CancelRequest, 32)
+	runnerImpl := runner.NewActionRunner()
 	validatorImpl := validatorpkg.NewRegistryValidator()
 	busyTracker := agentstate.NewBusyTracker()
+	cancelStore := cancellation.NewStore()
 	sysInfoCollector := sysinfo.NewCollector(busyTracker)
 
 	connectionLoop := connection.Loop{
@@ -62,16 +65,19 @@ func NewAgentApp(configPath string) (*AgentApp, error) {
 		Logger:   logger,
 		Incoming: incoming,
 		Queue:    queue,
+		Cancel:   cancelQueue,
 		WSClient: client,
 	}
 	executionLoop := execution.Loop{
 		Logger:    logger,
 		NodeID:    cfg.Agent.Hostname,
 		Queue:     queue,
+		Cancel:    cancelQueue,
 		Runner:    runnerImpl,
 		Validator: validatorImpl,
 		WSClient:  client,
 		Busy:      busyTracker,
+		Cancels:   cancelStore,
 	}
 	supervisorLoop := supervisor.Loop{
 		Logger: logger,

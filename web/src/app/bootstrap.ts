@@ -1,3 +1,4 @@
+import { hasAuthToken } from "@/shared/api/auth-token"
 import { controlApi } from "@/shared/api/control-api"
 import { controlWs } from "@/shared/api/control-ws"
 import { useAuditsStore } from "@/entities/audits/store"
@@ -21,6 +22,11 @@ export function bootstrapApp() {
   const auditsStore = useAuditsStore()
 
   bootstrapPromise = (async () => {
+    if (import.meta.env.VITE_USE_MOCK !== "true" && !hasAuthToken()) {
+      connectionStore.markConnecting()
+      return
+    }
+
     connectionStore.markConnecting()
 
     const [session, nodes, tasks, audits] = await Promise.all([
@@ -43,5 +49,14 @@ export function bootstrapApp() {
     })
   })()
 
-  return bootstrapPromise
+  return bootstrapPromise.catch((error) => {
+    bootstrapPromise = null
+    throw error
+  })
+}
+
+export function resetBootstrapApp() {
+  stopWs?.()
+  stopWs = null
+  bootstrapPromise = null
 }

@@ -10,6 +10,8 @@ import (
 type ServerConfig struct {
 	Server struct {
 		Address string `yaml:"address"`
+		TLSCert string `yaml:"tls_cert"`
+		TLSKey  string `yaml:"tls_key"`
 	} `yaml:"server"`
 	Postgres struct {
 		DSN string `yaml:"dsn"`

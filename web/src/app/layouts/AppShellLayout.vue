@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue"
-import { RouterLink, RouterView, useRoute } from "vue-router"
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import { storeToRefs } from "pinia"
-import { bootstrapApp } from "@/app/bootstrap"
+import { bootstrapApp, resetBootstrapApp } from "@/app/bootstrap"
+import { ApiError } from "@/shared/api/control-api"
 import TaskStatusBadge from "@/features/tasks/TaskStatusBadge.vue"
 import { useConnectionStore } from "@/entities/connection/store"
 import { useSessionStore } from "@/entities/session/store"
@@ -11,11 +12,12 @@ import { Badge } from "@/shared/ui"
 import { formatDateTime } from "@/shared/lib/format"
 
 const route = useRoute()
+const router = useRouter()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
 const tasksStore = useTasksStore()
 
-const { state, lastSyncAt } = storeToRefs(connectionStore)
+const { state, lastSyncAt, message } = storeToRefs(connectionStore)
 const { currentUser } = storeToRefs(sessionStore)
 const { activeTask } = storeToRefs(tasksStore)
 
@@ -33,7 +35,13 @@ const sectionTitle = computed(() => {
 })
 
 onMounted(() => {
-  void bootstrapApp()
+  void bootstrapApp().catch(async (error) => {
+    if (error instanceof ApiError && error.status === 401) {
+      resetBootstrapApp()
+      sessionStore.clearSession()
+      await router.push("/login")
+    }
+  })
 })
 </script>
 
@@ -54,6 +62,9 @@ onMounted(() => {
           </Badge>
           <Badge variant="outline" class="rounded-full border-border px-3 py-1">
             Last sync {{ formatDateTime(lastSyncAt) }}
+          </Badge>
+          <Badge v-if="message" variant="outline" class="rounded-full border-border px-3 py-1">
+            {{ message }}
           </Badge>
           <TaskStatusBadge v-if="activeTask" :status="activeTask.status" />
           <div class="rounded-full border border-border px-3 py-1 text-sm text-muted-foreground">

@@ -95,6 +95,26 @@ func (h *Handler) BroadcastTaskLog(taskID, executionID, nodeID, stream, chunk st
 	})
 }
 
+func (h *Handler) BroadcastTaskResult(taskID string, execution types.TaskExecution, at time.Time) {
+	h.broadcast(map[string]any{
+		"type":   "task.result",
+		"taskId": taskID,
+		"execution": map[string]any{
+			"id":            execution.ID,
+			"taskId":        execution.TaskID,
+			"nodeId":        execution.NodeID,
+			"status":        execution.Status,
+			"startedAt":     execution.StartedAt.UTC().Format(time.RFC3339),
+			"finishedAt":    execution.FinishedAt.UTC().Format(time.RFC3339),
+			"exitCode":      execution.ExitCode,
+			"stdoutTail":    execution.StdoutTail,
+			"stderrTail":    execution.StderrTail,
+			"streamSummary": execution.StatusReason,
+		},
+		"timestamp": at.UTC().Format(time.RFC3339),
+	})
+}
+
 func (h *Handler) register(conn *websocket.Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

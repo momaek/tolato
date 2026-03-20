@@ -12,6 +12,7 @@ import (
 	"github.com/momaek/tolato/internal/server/domain/policy"
 	"github.com/momaek/tolato/internal/server/domain/task"
 	infraauth "github.com/momaek/tolato/internal/server/infra/auth"
+	"github.com/momaek/tolato/internal/server/infra/dispatch"
 	"github.com/momaek/tolato/internal/server/infra/idgen"
 	"github.com/momaek/tolato/internal/server/infra/llm"
 	"github.com/momaek/tolato/internal/server/infra/memory"
@@ -54,6 +55,7 @@ func NewServerApp(ctx context.Context, configPath string) (*ServerApp, error) {
 	planner := llm.NewStubPlanner()
 	schemaValidator := plan.StaticSchemaValidator{}
 	policyValidator := policy.NewStaticValidator()
+	dispatcher := dispatch.NewManager(logger)
 
 	var (
 		nodeRepo     node.Repository
@@ -76,7 +78,7 @@ func NewServerApp(ctx context.Context, configPath string) (*ServerApp, error) {
 		auditRepo = memAuditRepo
 	}
 
-	usecases := usecase.NewServices(planner, schemaValidator, policyValidator, nodeRepo, sessionStore, taskRepo, auditRepo, idGenerator)
+	usecases := usecase.NewServices(planner, schemaValidator, policyValidator, nodeRepo, sessionStore, taskRepo, auditRepo, idGenerator, dispatcher)
 
 	uiWS := wsui.NewHandler(logger)
 	presenceStore := presence.NewStore()
@@ -87,12 +89,13 @@ func NewServerApp(ctx context.Context, configPath string) (*ServerApp, error) {
 		usecases.GetNode,
 		usecases.RecordTaskLog,
 		usecases.RecordTaskResult,
+		dispatcher,
 		presenceStore,
 		uiWS,
 	)
 	router := httpapi.NewRouter(httpapi.Dependencies{
 		Logger:   logger,
-		Auth:     authService,
+		Auth:     &authService,
 		UseCases: usecases,
 		DB:       pool,
 		Redis:    redisClient,
@@ -119,7 +122,13 @@ func (a *ServerApp) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if a.cfg.Server.TLSCert != "" && a.cfg.Server.TLSKey != "" {
+			err = a.httpServer.ListenAndServeTLS(a.cfg.Server.TLSCert, a.cfg.Server.TLSKey)
+		} else {
+			err = a.httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()

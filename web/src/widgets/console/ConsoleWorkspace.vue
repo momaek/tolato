@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { storeToRefs } from "pinia"
+import { useRouter } from "vue-router"
 import ConsoleSidebar from "@/widgets/console/ConsoleSidebar.vue"
 import RiskBadge from "@/features/tasks/RiskBadge.vue"
 import TaskStatusBadge from "@/features/tasks/TaskStatusBadge.vue"
@@ -29,8 +30,9 @@ import { formatDateTime } from "@/shared/lib/format"
 const consoleStore = useConsoleStore()
 const nodesStore = useNodesStore()
 const tasksStore = useTasksStore()
+const router = useRouter()
 
-const { composerText, targetNodeId } = storeToRefs(consoleStore)
+const { composerText, mode, targetNodeId } = storeToRefs(consoleStore)
 const { activeTask } = storeToRefs(tasksStore)
 
 const isPlanDialogOpen = ref(false)
@@ -54,9 +56,18 @@ const quickActions = [
 ]
 
 const usesApproval = computed(() => activeTask.value?.plan.requiresApproval ?? false)
+const isDirectShellMode = computed(() => mode.value === "direct_shell")
 
 const requestTarget = computed(() => {
-  return targetNodeId.value === "all" ? ["all"] : [targetNodeId.value]
+  if (targetNodeId.value === "all") {
+    const onlineNodeIds = nodesStore.items
+      .filter((node) => node.status === "online")
+      .map((node) => node.id)
+
+    return onlineNodeIds.length > 0 ? onlineNodeIds : nodesStore.items.map((node) => node.id)
+  }
+
+  return [targetNodeId.value]
 })
 
 async function runTaskMutation(action: "plan" | "approve" | "reject" | "cancel") {
@@ -110,8 +121,8 @@ async function runTaskMutation(action: "plan" | "approve" | "reject" | "cancel")
           </div>
           <div class="flex items-center gap-3">
             <TaskStatusBadge v-if="activeTask" :status="activeTask.status" />
-            <Button size="sm" variant="secondary">AI Agent</Button>
-            <Button size="sm" variant="outline" disabled>Direct shell</Button>
+            <Button size="sm" :variant="isDirectShellMode ? 'outline' : 'secondary'" @click="router.push('/console/agent')">AI Agent</Button>
+            <Button size="sm" :variant="isDirectShellMode ? 'secondary' : 'outline'" @click="router.push('/console/direct-shell')">Direct shell</Button>
           </div>
         </CardContent>
       </Card>
@@ -123,7 +134,7 @@ async function runTaskMutation(action: "plan" | "approve" | "reject" | "cancel")
           </p>
           <CardTitle>Control server ready</CardTitle>
           <CardDescription>
-            当前目标 {{ targetLabel }}。广播模式只自动执行低风险只读计划。
+            当前目标 {{ targetLabel }}。{{ isDirectShellMode ? "命令风格输入会先解析成 allowlist action。" : "广播模式只自动执行低风险只读计划。" }}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -259,7 +270,7 @@ async function runTaskMutation(action: "plan" | "approve" | "reject" | "cancel")
         <CardHeader>
           <CardTitle>Composer</CardTitle>
           <CardDescription>
-            描述你的任务，系统会先生成计划。高风险操作不会直接执行。
+            {{ isDirectShellMode ? "输入受限命令，系统会先解析再生成计划。" : "描述你的任务，系统会先生成计划。高风险操作不会直接执行。" }}
           </CardDescription>
         </CardHeader>
         <CardContent class="space-y-4">

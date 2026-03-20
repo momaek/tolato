@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { storeToRefs } from "pinia"
 import { useRoute } from "vue-router"
 import RiskBadge from "@/features/tasks/RiskBadge.vue"
@@ -15,6 +15,7 @@ const tasksStore = useTasksStore()
 const auditsStore = useAuditsStore()
 const isLoading = ref(false)
 const loadError = ref("")
+let pollTimer: number | null = null
 
 const { byId } = storeToRefs(tasksStore)
 const taskId = computed(() => String(route.params.taskId))
@@ -29,11 +30,14 @@ const taskAudits = computed(() => {
 })
 
 async function ensureTaskLoaded() {
-  if (task.value || !taskId.value) {
+  if (!taskId.value) {
     return
   }
 
-  isLoading.value = true
+  const shouldShowLoader = !task.value
+  if (shouldShowLoader) {
+    isLoading.value = true
+  }
   loadError.value = ""
 
   try {
@@ -55,16 +59,27 @@ async function ensureTaskLoaded() {
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : "Failed to load task"
   } finally {
-    isLoading.value = false
+    if (shouldShowLoader) {
+      isLoading.value = false
+    }
   }
 }
 
 onMounted(() => {
   void ensureTaskLoaded()
+  pollTimer = window.setInterval(() => {
+    void ensureTaskLoaded()
+  }, 5000)
 })
 
 watch(taskId, () => {
   void ensureTaskLoaded()
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer)
+  }
 })
 </script>
 

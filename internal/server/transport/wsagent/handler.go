@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/momaek/tolato/internal/server/app/usecase"
+	"github.com/momaek/tolato/internal/server/infra/dispatch"
 	"github.com/momaek/tolato/internal/server/infra/presence"
 	"github.com/momaek/tolato/internal/server/transport/wsui"
 	"github.com/momaek/tolato/internal/shared/protocol"
@@ -22,6 +23,7 @@ type Handler struct {
 	getNode           usecase.GetNode
 	recordTaskLog     usecase.RecordTaskLog
 	recordTaskResult  usecase.RecordTaskResult
+	dispatcher        *dispatch.Manager
 	presence          *presence.Store
 	uiws              *wsui.Handler
 	upgrader          websocket.Upgrader
@@ -34,6 +36,7 @@ func NewHandler(
 	getNode usecase.GetNode,
 	recordTaskLog usecase.RecordTaskLog,
 	recordTaskResult usecase.RecordTaskResult,
+	dispatcher *dispatch.Manager,
 	presenceStore *presence.Store,
 	uiwsHandler *wsui.Handler,
 ) *Handler {
@@ -44,6 +47,7 @@ func NewHandler(
 		getNode:           getNode,
 		recordTaskLog:     recordTaskLog,
 		recordTaskResult:  recordTaskResult,
+		dispatcher:        dispatcher,
 		presence:          presenceStore,
 		uiws:              uiwsHandler,
 		upgrader: websocket.Upgrader{
@@ -69,6 +73,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	currentNode := *authenticatedNode
+	if h.dispatcher != nil {
+		h.dispatcher.Register(currentNode.ID, conn)
+		defer h.dispatcher.Unregister(currentNode.ID, conn)
+	}
 
 	for {
 		var env protocol.Envelope
@@ -80,6 +88,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch env.Type {
 		case protocol.TypeHello, protocol.TypeHeartbeat:
 			currentNode = h.handlePresence(r, env, currentNode)
+		case protocol.TypeTaskAck:
+			h.logger.Info("ws/agent task acknowledged", zap.String("task_id", env.TaskID), zap.String("node_id", nodeID))
 		case protocol.TypeTaskLog:
 			h.handleTaskLog(r, env, currentNode.ID)
 		case protocol.TypeTaskResult:
@@ -195,6 +205,18 @@ func (h *Handler) handleTaskResult(r *http.Request, env protocol.Envelope, nodeI
 
 	if h.uiws != nil {
 		h.uiws.BroadcastTaskStatus(resp.Task.ID, resp.Task.FinalStatus, env.Timestamp.UTC())
+		h.uiws.BroadcastTaskResult(resp.Task.ID, types.TaskExecution{
+			ID:           payload.ExecutionID,
+			TaskID:       resp.Task.ID,
+			NodeID:       nodeID,
+			Status:       payload.Status,
+			StartedAt:    env.Timestamp.UTC(),
+			FinishedAt:   env.Timestamp.UTC(),
+			ExitCode:     payload.ExitCode,
+			StdoutTail:   payload.StdoutTail,
+			StderrTail:   payload.StderrTail,
+			StatusReason: payload.Status,
+		}, env.Timestamp.UTC())
 	}
 }
 

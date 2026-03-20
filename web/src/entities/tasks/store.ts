@@ -41,6 +41,29 @@ export const useTasksStore = defineStore("tasks", {
         status,
       }
     },
+    upsertExecution(taskId: string, execution: TaskDetail["executions"][number]) {
+      const task = this.byId[taskId]
+      if (!task) {
+        return
+      }
+
+      const executions = [...task.executions]
+      const index = executions.findIndex((item) => item.id === execution.id)
+      if (index === -1) {
+        executions.unshift(execution)
+      } else {
+        executions[index] = {
+          ...executions[index],
+          ...execution,
+        }
+      }
+
+      this.byId[taskId] = {
+        ...task,
+        executions,
+        aggregate: computeAggregate(task.target.length || task.plan.targetNodes.length, executions),
+      }
+    },
     appendTaskLog(taskId: string, executionId: string, nodeId: string, stream: "stdout" | "stderr", chunk: string, timestamp: string) {
       const task = this.byId[taskId]
 
@@ -80,6 +103,7 @@ export const useTasksStore = defineStore("tasks", {
         ...task,
         status: "running",
         executions,
+        aggregate: computeAggregate(task.target.length || task.plan.targetNodes.length, executions),
       }
     },
     consumeWsEvent(event: UiWsEvent) {
@@ -90,6 +114,10 @@ export const useTasksStore = defineStore("tasks", {
       if (event.type === "task.log") {
         this.appendTaskLog(event.taskId, event.executionId, event.nodeId, event.stream, event.chunk, event.timestamp)
       }
+
+      if (event.type === "task.result") {
+        this.upsertExecution(event.taskId, event.execution)
+      }
     },
   },
 })
@@ -98,4 +126,19 @@ function appendTail(existing: string, chunk: string) {
   const maxTailLength = 4096
   const next = [existing, chunk].filter(Boolean).join("\n")
   return next.length > maxTailLength ? next.slice(-maxTailLength) : next
+}
+
+function computeAggregate(total: number, executions: TaskDetail["executions"]) {
+  const runningStates: TaskStatus[] = ["approved", "queued", "dispatched", "running"]
+  const success = executions.filter((item) => item.status === "success").length
+  const failed = executions.filter((item) => ["failed", "partial_failed", "timeout", "cancelled"].includes(item.status)).length
+  const running = executions.filter((item) => runningStates.includes(item.status)).length
+
+  return {
+    total,
+    success,
+    failed,
+    offlineSkipped: Math.max(total - success - failed - running, 0),
+    running,
+  }
 }

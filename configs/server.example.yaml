@@ -1,5 +1,7 @@
 server:
   address: ":8080"
+  tls_cert: ""
+  tls_key: ""
 
 postgres:
   dsn: "postgres://tolato:tolato@localhost:5432/tolato?sslmode=disable"

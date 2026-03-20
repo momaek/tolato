@@ -9,7 +9,7 @@ import { formatDateTime } from "@/shared/lib/format"
 
 const tasksStore = useTasksStore()
 const { items } = storeToRefs(tasksStore)
-const isMockMode = import.meta.env.VITE_USE_MOCK !== "false"
+const isMockMode = import.meta.env.VITE_USE_MOCK === "true"
 </script>
 
 <template>
@@ -27,7 +27,7 @@ const isMockMode = import.meta.env.VITE_USE_MOCK !== "false"
       </CardHeader>
       <CardContent>
         <div v-if="items.length === 0" class="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-          {{ isMockMode ? "No tasks in mock state." : "当前后端还没有 GET /api/v1/tasks，列表页暂时无法直接加载历史任务。可从控制台新建任务，或通过 /tasks/:id 查看单任务详情。" }}
+          {{ isMockMode ? "No tasks in mock state." : "当前还没有历史任务。可从控制台先创建一条任务。" }}
         </div>
         <Table v-else>
           <TableHeader>

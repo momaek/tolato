@@ -34,6 +34,11 @@ type Services struct {
 	RecordTaskResult   RecordTaskResult
 }
 
+type TaskDispatcher interface {
+	DispatchTask(ctx context.Context, nodeID, taskID, executionID string, steps []types.PlanStep, timeoutSec int) error
+	CancelTask(ctx context.Context, nodeID, taskID, executionID, reason string) error
+}
+
 type dependencies struct {
 	Planner         plan.Planner
 	SchemaValidator plan.SchemaValidator
@@ -43,6 +48,7 @@ type dependencies struct {
 	TaskRepo        task.Repository
 	AuditRepo       audit.Repository
 	IDGen           idgen.Generator
+	Dispatcher      TaskDispatcher
 }
 
 type RegisterNode struct {
@@ -125,9 +131,11 @@ type GenerateTaskPlan struct {
 	Planner         plan.Planner
 	SchemaValidator plan.SchemaValidator
 	PolicyValidator policy.Validator
+	NodeRepo        node.Repository
 	TaskRepo        task.Repository
 	AuditRepo       audit.Repository
 	IDGen           idgen.Generator
+	Dispatcher      TaskDispatcher
 }
 
 func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanRequest) (types.TaskPlanResponse, error) {
@@ -141,10 +149,16 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 		return types.TaskPlanResponse{}, errors.New("input_text is required")
 	}
 
+	resolvedTargets, err := resolveTargetNodes(ctx, uc.NodeRepo, task.Task{Target: req.Target})
+	if err != nil {
+		return types.TaskPlanResponse{}, err
+	}
+
 	draft, err := uc.Planner.GeneratePlan(ctx, plan.Input{
 		Mode:      req.Mode,
 		Target:    req.Target,
 		InputText: req.InputText,
+		Nodes:     resolvedTargets,
 	})
 	if err != nil {
 		return types.TaskPlanResponse{}, err
@@ -223,6 +237,13 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 		}
 	}
 
+	if !draft.RequiresApproval {
+		if err := uc.dispatchTask(ctx, &model, "auto-approved low-risk task"); err != nil {
+			return types.TaskPlanResponse{}, err
+		}
+		finalStatus = model.FinalStatus
+	}
+
 	return types.TaskPlanResponse{
 		TaskID: taskID,
 		Status: finalStatus,
@@ -231,9 +252,11 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 }
 
 type taskMutation struct {
+	NodeRepo   node.Repository
 	TaskRepo   task.Repository
 	AuditRepo  audit.Repository
 	IDGen      idgen.Generator
+	Dispatcher TaskDispatcher
 	status     string
 	finalState string
 	eventType  string
@@ -279,6 +302,18 @@ func (uc taskMutation) Execute(ctx context.Context, taskID string) (types.TaskMu
 		CreatedAt: current.UpdatedAt,
 	}); err != nil {
 		return types.TaskMutationResponse{}, err
+	}
+
+	if uc.status == "approved" {
+		if err := uc.dispatchTask(ctx, current, uc.message); err != nil {
+			return types.TaskMutationResponse{}, err
+		}
+	}
+
+	if uc.status == "cancelled" {
+		if err := uc.cancelTask(ctx, current, uc.message); err != nil {
+			return types.TaskMutationResponse{}, err
+		}
 	}
 
 	return types.TaskMutationResponse{
@@ -407,7 +442,9 @@ type TaskLogInput struct {
 }
 
 type RecordTaskLog struct {
-	TaskRepo task.Repository
+	TaskRepo  task.Repository
+	AuditRepo audit.Repository
+	IDGen     idgen.Generator
 }
 
 func (uc RecordTaskLog) Execute(ctx context.Context, in TaskLogInput) (types.TaskResponse, error) {
@@ -422,6 +459,7 @@ func (uc RecordTaskLog) Execute(ctx context.Context, in TaskLogInput) (types.Tas
 	}
 
 	execution := findExecution(executions, in.ExecutionID)
+	wasNewExecution := execution == nil
 	if execution == nil {
 		execution = &task.TaskExecution{
 			ID:      in.ExecutionID,
@@ -453,6 +491,20 @@ func (uc RecordTaskLog) Execute(ctx context.Context, in TaskLogInput) (types.Tas
 		return types.TaskResponse{}, err
 	}
 
+	if wasNewExecution && uc.AuditRepo != nil {
+		_ = uc.AuditRepo.Create(ctx, audit.AuditEvent{
+			ID:        uc.IDGen.New(),
+			TaskID:    in.TaskID,
+			ActorID:   in.NodeID,
+			EventType: "task_execution_started",
+			Payload: map[string]any{
+				"execution_id": in.ExecutionID,
+				"node_id":      in.NodeID,
+			},
+			CreatedAt: in.Timestamp.UTC(),
+		})
+	}
+
 	return hydrateTaskResponse(ctx, uc.TaskRepo, *model)
 }
 
@@ -468,7 +520,9 @@ type TaskResultInput struct {
 }
 
 type RecordTaskResult struct {
-	TaskRepo task.Repository
+	TaskRepo  task.Repository
+	AuditRepo audit.Repository
+	IDGen     idgen.Generator
 }
 
 func (uc RecordTaskResult) Execute(ctx context.Context, in TaskResultInput) (types.TaskResponse, error) {
@@ -523,10 +577,33 @@ func (uc RecordTaskResult) Execute(ctx context.Context, in TaskResultInput) (typ
 		return types.TaskResponse{}, err
 	}
 
+	if uc.AuditRepo != nil {
+		eventType := "task_execution_finished"
+		if in.Status == "timeout" {
+			eventType = "task_execution_timeout"
+		}
+		if in.Status == "cancelled" {
+			eventType = "task_execution_cancelled"
+		}
+		_ = uc.AuditRepo.Create(ctx, audit.AuditEvent{
+			ID:        uc.IDGen.New(),
+			TaskID:    in.TaskID,
+			ActorID:   in.NodeID,
+			EventType: eventType,
+			Payload: map[string]any{
+				"execution_id": in.ExecutionID,
+				"node_id":      in.NodeID,
+				"status":       in.Status,
+				"exit_code":    in.ExitCode,
+			},
+			CreatedAt: in.Timestamp.UTC(),
+		})
+	}
+
 	return hydrateTaskResponse(ctx, uc.TaskRepo, *model)
 }
 
-func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, policyValidator policy.Validator, nodeRepo node.Repository, sessionStore node.SessionStore, taskRepo task.Repository, auditRepo audit.Repository, idGenerator idgen.Generator) Services {
+func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, policyValidator policy.Validator, nodeRepo node.Repository, sessionStore node.SessionStore, taskRepo task.Repository, auditRepo audit.Repository, idGenerator idgen.Generator, dispatcher TaskDispatcher) Services {
 	return Services{
 		RegisterNode:      RegisterNode{NodeRepo: nodeRepo, IDGen: idGenerator},
 		AuthenticateAgent: AuthenticateAgent{NodeRepo: nodeRepo},
@@ -535,32 +612,40 @@ func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, pol
 			Planner:         planner,
 			SchemaValidator: schemaValidator,
 			PolicyValidator: policyValidator,
+			NodeRepo:        nodeRepo,
 			TaskRepo:        taskRepo,
 			AuditRepo:       auditRepo,
 			IDGen:           idGenerator,
+			Dispatcher:      dispatcher,
 		},
 		ApproveTask: ApproveTask{taskMutation{
+			NodeRepo:   nodeRepo,
 			TaskRepo:   taskRepo,
 			AuditRepo:  auditRepo,
 			IDGen:      idGenerator,
+			Dispatcher: dispatcher,
 			status:     "approved",
 			finalState: "approved",
 			eventType:  "task_approved",
 			message:    "task approved",
 		}},
 		RejectTask: RejectTask{taskMutation{
+			NodeRepo:   nodeRepo,
 			TaskRepo:   taskRepo,
 			AuditRepo:  auditRepo,
 			IDGen:      idGenerator,
+			Dispatcher: dispatcher,
 			status:     "rejected",
 			finalState: "cancelled",
 			eventType:  "task_rejected",
 			message:    "task rejected",
 		}},
 		CancelTask: CancelTask{taskMutation{
+			NodeRepo:   nodeRepo,
 			TaskRepo:   taskRepo,
 			AuditRepo:  auditRepo,
 			IDGen:      idGenerator,
+			Dispatcher: dispatcher,
 			status:     "cancelled",
 			finalState: "cancelled",
 			eventType:  "task_cancelled",
@@ -572,8 +657,8 @@ func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, pol
 		GetTask:            GetTask{TaskRepo: taskRepo},
 		ListTaskExecutions: ListTaskExecutions{TaskRepo: taskRepo},
 		ListAuditEvents:    ListAuditEvents{AuditRepo: auditRepo},
-		RecordTaskLog:      RecordTaskLog{TaskRepo: taskRepo},
-		RecordTaskResult:   RecordTaskResult{TaskRepo: taskRepo},
+		RecordTaskLog:      RecordTaskLog{TaskRepo: taskRepo, AuditRepo: auditRepo, IDGen: idGenerator},
+		RecordTaskResult:   RecordTaskResult{TaskRepo: taskRepo, AuditRepo: auditRepo, IDGen: idGenerator},
 	}
 }
 
@@ -613,6 +698,11 @@ func buildTaskAggregate(model task.Task, executions []task.TaskExecution) types.
 		Total: targetCount(model),
 	}
 	for _, execution := range executions {
+		if isOfflineSkippedExecution(execution) {
+			aggregate.OfflineSkipped++
+			continue
+		}
+
 		switch execution.Status {
 		case "success":
 			aggregate.Success++
@@ -626,11 +716,11 @@ func buildTaskAggregate(model task.Task, executions []task.TaskExecution) types.
 		}
 	}
 
-	if aggregate.Total < aggregate.Success+aggregate.Failed+aggregate.Running {
-		aggregate.Total = aggregate.Success + aggregate.Failed + aggregate.Running
+	if aggregate.Total < aggregate.Success+aggregate.Failed+aggregate.Running+aggregate.OfflineSkipped {
+		aggregate.Total = aggregate.Success + aggregate.Failed + aggregate.Running + aggregate.OfflineSkipped
 	}
 	if model.FinalStatus == "success" || model.FinalStatus == "failed" || model.FinalStatus == "partial_failed" || model.FinalStatus == "timeout" || model.FinalStatus == "cancelled" {
-		known := aggregate.Success + aggregate.Failed + aggregate.Running
+		known := aggregate.Success + aggregate.Failed + aggregate.Running + aggregate.OfflineSkipped
 		if aggregate.Total > known {
 			aggregate.OfflineSkipped = aggregate.Total - known
 		}
@@ -668,7 +758,7 @@ func finalTaskStatus(model task.Task, aggregate types.TaskAggregate) string {
 	if aggregate.Running > 0 {
 		return "running"
 	}
-	if aggregate.Success+aggregate.Failed < aggregate.Total {
+	if aggregate.Success+aggregate.Failed+aggregate.OfflineSkipped < aggregate.Total {
 		return "running"
 	}
 	if aggregate.Failed > 0 && aggregate.Success > 0 {
@@ -714,4 +804,212 @@ func finalExecutionSummary(execution task.TaskExecution) string {
 		return execution.StatusReason
 	}
 	return fmt.Sprintf("%s · exit=%d", execution.Status, execution.ExitCode)
+}
+
+func (uc GenerateTaskPlan) dispatchTask(ctx context.Context, model *task.Task, reason string) error {
+	return dispatchTask(ctx, uc.NodeRepo, uc.TaskRepo, uc.AuditRepo, uc.IDGen, uc.Dispatcher, model, reason)
+}
+
+func (uc taskMutation) dispatchTask(ctx context.Context, model *task.Task, reason string) error {
+	return dispatchTask(ctx, uc.NodeRepo, uc.TaskRepo, uc.AuditRepo, uc.IDGen, uc.Dispatcher, model, reason)
+}
+
+func (uc taskMutation) cancelTask(ctx context.Context, model *task.Task, reason string) error {
+	return cancelTask(ctx, uc.TaskRepo, uc.AuditRepo, uc.IDGen, uc.Dispatcher, model, reason)
+}
+
+func dispatchTask(ctx context.Context, nodeRepo node.Repository, taskRepo task.Repository, auditRepo audit.Repository, idGen idgen.Generator, dispatcher TaskDispatcher, model *task.Task, reason string) error {
+	if dispatcher == nil {
+		return errors.New("task dispatcher is not configured")
+	}
+
+	targets, err := resolveTargetNodes(ctx, nodeRepo, *model)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	model.Target = make([]string, 0, len(targets))
+	model.Plan.TargetNodes = make([]string, 0, len(targets))
+
+	for _, target := range targets {
+		model.Target = append(model.Target, target.ID)
+		model.Plan.TargetNodes = append(model.Plan.TargetNodes, target.ID)
+
+		execution := task.TaskExecution{
+			ID:      idGen.New(),
+			TaskID:  model.ID,
+			NodeID:  target.ID,
+			Attempt: 1,
+		}
+
+		if node.NormalizeStatus(target, now) != "online" {
+			execution.Status = "cancelled"
+			execution.ExitCode = 0
+			execution.FinishedAt = now
+			execution.StatusReason = "offline skipped"
+			if err := taskRepo.UpsertExecution(ctx, execution); err != nil {
+				return err
+			}
+			recordAudit(ctx, auditRepo, idGen, model.ID, "system", "task_execution_skipped", map[string]any{
+				"execution_id": execution.ID,
+				"node_id":      target.ID,
+				"reason":       execution.StatusReason,
+			}, now)
+			continue
+		}
+
+		execution.Status = "queued"
+		execution.StatusReason = "queued on control plane"
+		if err := taskRepo.UpsertExecution(ctx, execution); err != nil {
+			return err
+		}
+		recordAudit(ctx, auditRepo, idGen, model.ID, "system", "task_execution_queued", map[string]any{
+			"execution_id": execution.ID,
+			"node_id":      target.ID,
+			"reason":       reason,
+		}, now)
+
+		if err := dispatcher.DispatchTask(ctx, target.ID, model.ID, execution.ID, model.Plan.Steps, maxStepTimeout(model.Plan.Steps)); err != nil {
+			execution.Status = "failed"
+			execution.FinishedAt = now
+			execution.ExitCode = 1
+			execution.StatusReason = fmt.Sprintf("dispatch failed: %v", err)
+			if err := taskRepo.UpsertExecution(ctx, execution); err != nil {
+				return err
+			}
+			recordAudit(ctx, auditRepo, idGen, model.ID, "system", "task_execution_dispatch_failed", map[string]any{
+				"execution_id": execution.ID,
+				"node_id":      target.ID,
+				"reason":       execution.StatusReason,
+			}, now)
+			continue
+		}
+
+		execution.Status = "dispatched"
+		execution.StatusReason = "dispatched to agent"
+		if err := taskRepo.UpsertExecution(ctx, execution); err != nil {
+			return err
+		}
+		recordAudit(ctx, auditRepo, idGen, model.ID, "system", "task_execution_dispatched", map[string]any{
+			"execution_id": execution.ID,
+			"node_id":      target.ID,
+		}, now)
+	}
+
+	return syncTaskState(ctx, taskRepo, model, now)
+}
+
+func cancelTask(ctx context.Context, taskRepo task.Repository, auditRepo audit.Repository, idGen idgen.Generator, dispatcher TaskDispatcher, model *task.Task, reason string) error {
+	executions, err := taskRepo.ListExecutions(ctx, model.ID)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	for _, execution := range executions {
+		if execution.Status == "success" || execution.Status == "failed" || execution.Status == "timeout" || execution.Status == "cancelled" {
+			continue
+		}
+
+		if dispatcher != nil {
+			_ = dispatcher.CancelTask(ctx, execution.NodeID, model.ID, execution.ID, reason)
+		}
+
+		execution.Status = "cancelled"
+		execution.FinishedAt = now
+		execution.StatusReason = reason
+		if err := taskRepo.UpsertExecution(ctx, execution); err != nil {
+			return err
+		}
+		recordAudit(ctx, auditRepo, idGen, model.ID, "system", "task_execution_cancel_requested", map[string]any{
+			"execution_id": execution.ID,
+			"node_id":      execution.NodeID,
+			"reason":       reason,
+		}, now)
+	}
+
+	model.FinalStatus = "cancelled"
+	model.StatusReason = reason
+	model.UpdatedAt = now
+	return taskRepo.Update(ctx, *model)
+}
+
+func resolveTargetNodes(ctx context.Context, repo node.Repository, model task.Task) ([]types.Node, error) {
+	if repo == nil {
+		return nil, errors.New("node repository is not configured")
+	}
+
+	if len(model.Target) == 1 && model.Target[0] == "all" {
+		items, err := repo.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		out := make([]types.Node, 0, len(items))
+		for _, item := range items {
+			out = append(out, item)
+		}
+		return out, nil
+	}
+
+	out := make([]types.Node, 0, len(model.Target))
+	for _, nodeID := range model.Target {
+		item, err := repo.Get(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *item)
+	}
+	return out, nil
+}
+
+func syncTaskState(ctx context.Context, repo task.Repository, model *task.Task, now time.Time) error {
+	executions, err := repo.ListExecutions(ctx, model.ID)
+	if err != nil {
+		return err
+	}
+
+	aggregate := buildTaskAggregate(*model, executions)
+	switch {
+	case aggregate.Running > 0:
+		model.FinalStatus = "dispatched"
+		model.StatusReason = "task dispatched to target nodes"
+	case aggregate.Failed > 0 && aggregate.Success == 0 && aggregate.OfflineSkipped == aggregate.Total:
+		model.FinalStatus = "cancelled"
+		model.StatusReason = "all target nodes were skipped because they are offline"
+	default:
+		model.FinalStatus = finalTaskStatus(*model, aggregate)
+		model.StatusReason = buildTaskSummary(*model, aggregate)
+	}
+	model.UpdatedAt = now
+	return repo.Update(ctx, *model)
+}
+
+func maxStepTimeout(steps []types.PlanStep) int {
+	maxTimeout := 10
+	for _, step := range steps {
+		if step.TimeoutSec > maxTimeout {
+			maxTimeout = step.TimeoutSec
+		}
+	}
+	return maxTimeout
+}
+
+func recordAudit(ctx context.Context, repo audit.Repository, idGen idgen.Generator, taskID, actorID, eventType string, payload map[string]any, at time.Time) {
+	if repo == nil {
+		return
+	}
+	_ = repo.Create(ctx, audit.AuditEvent{
+		ID:        idGen.New(),
+		TaskID:    taskID,
+		ActorID:   actorID,
+		EventType: eventType,
+		Payload:   payload,
+		CreatedAt: at,
+	})
+}
+
+func isOfflineSkippedExecution(execution task.TaskExecution) bool {
+	return strings.EqualFold(execution.StatusReason, "offline skipped")
 }
