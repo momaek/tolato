@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/momaek/tolato/internal/agent/infra/persistence"
+	"github.com/momaek/tolato/internal/agent/infra/sysinfo"
 	"github.com/momaek/tolato/internal/agent/transport/enroll"
 	"github.com/momaek/tolato/internal/agent/transport/wsclient"
 	"github.com/momaek/tolato/internal/shared/config"
@@ -24,6 +26,7 @@ type Loop struct {
 	EnrollClient enroll.Client
 	WSClient     wsclient.Client
 	Incoming     chan<- protocol.Envelope
+	SysInfo      *sysinfo.Collector
 }
 
 func (l Loop) Run(ctx context.Context) error {
@@ -176,13 +179,7 @@ func (l Loop) runSession(ctx context.Context, identity types.AgentIdentity) erro
 		case err := <-l.WSClient.Errors():
 			return err
 		case <-heartbeatTicker.C:
-			payload := protocol.HeartbeatPayload{
-				Hostname: identity.Hostname,
-				Load:     "placeholder",
-				Memory:   "placeholder",
-				Disk:     "placeholder",
-				Busy:     false,
-			}
+			payload := l.buildHeartbeatPayload(identity)
 			env, err := protocol.NewEnvelope(protocol.TypeHeartbeat, "", identity.NodeID, seq, payload)
 			if err != nil {
 				return fmt.Errorf("build heartbeat envelope: %w", err)
@@ -193,4 +190,34 @@ func (l Loop) runSession(ctx context.Context, identity types.AgentIdentity) erro
 			}
 		}
 	}
+}
+
+func (l Loop) buildHeartbeatPayload(identity types.AgentIdentity) protocol.HeartbeatPayload {
+	payload := protocol.HeartbeatPayload{
+		Hostname: identity.Hostname,
+		Load:     "0",
+		Memory:   "0",
+		Disk:     "0",
+		Busy:     false,
+	}
+
+	if l.SysInfo == nil {
+		return payload
+	}
+
+	snapshot, err := l.SysInfo.Snapshot()
+	if err != nil {
+		l.Logger.Debug("collect heartbeat metrics failed", zap.Error(err))
+		return payload
+	}
+
+	payload.Load = formatPercent(snapshot.CPU)
+	payload.Memory = formatPercent(snapshot.Memory)
+	payload.Disk = formatPercent(snapshot.Disk)
+	payload.Busy = snapshot.Busy
+	return payload
+}
+
+func formatPercent(value float64) string {
+	return strconv.FormatFloat(value, 'f', 2, 64)
 }

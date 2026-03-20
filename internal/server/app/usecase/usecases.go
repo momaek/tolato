@@ -3,6 +3,8 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/momaek/tolato/internal/server/domain/audit"
@@ -24,9 +26,12 @@ type Services struct {
 	CancelTask         CancelTask
 	ListNodes          ListNodes
 	GetNode            GetNode
+	ListTasks          ListTasks
 	GetTask            GetTask
 	ListTaskExecutions ListTaskExecutions
 	ListAuditEvents    ListAuditEvents
+	RecordTaskLog      RecordTaskLog
+	RecordTaskResult   RecordTaskResult
 }
 
 type dependencies struct {
@@ -316,7 +321,56 @@ func (uc GetTask) Execute(ctx context.Context, taskID string) (types.TaskRespons
 	if err != nil {
 		return types.TaskResponse{}, err
 	}
-	return types.TaskResponse{Task: *model}, nil
+
+	executions, err := uc.TaskRepo.ListExecutions(ctx, taskID)
+	if err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	aggregate := buildTaskAggregate(*model, executions)
+	summary := buildTaskSummary(*model, aggregate)
+	model.Aggregate = aggregate
+	model.Summary = summary
+
+	return types.TaskResponse{
+		Task:      *model,
+		Aggregate: aggregate,
+		Summary:   summary,
+	}, nil
+}
+
+type ListTasks struct {
+	TaskRepo task.Repository
+}
+
+func (uc ListTasks) Execute(ctx context.Context) (types.ListTasksResponse, error) {
+	items, err := uc.TaskRepo.List(ctx)
+	if err != nil {
+		return types.ListTasksResponse{}, err
+	}
+
+	resp := types.ListTasksResponse{
+		Tasks: make([]types.TaskResponseItem, 0, len(items)),
+	}
+
+	for _, item := range items {
+		executions, err := uc.TaskRepo.ListExecutions(ctx, item.ID)
+		if err != nil {
+			return types.ListTasksResponse{}, err
+		}
+
+		aggregate := buildTaskAggregate(item, executions)
+		summary := buildTaskSummary(item, aggregate)
+		item.Aggregate = aggregate
+		item.Summary = summary
+		resp.Tasks = append(resp.Tasks, types.TaskResponseItem{
+			Task:      item,
+			Aggregate: aggregate,
+			Summary:   summary,
+		})
+	}
+
+	return resp, nil
 }
 
 type ListTaskExecutions struct {
@@ -341,6 +395,135 @@ func (uc ListAuditEvents) Execute(ctx context.Context, taskID string) (types.Aud
 		return types.AuditEventsResponse{}, err
 	}
 	return types.AuditEventsResponse{Events: events}, nil
+}
+
+type TaskLogInput struct {
+	TaskID      string
+	ExecutionID string
+	NodeID      string
+	Stream      string
+	Chunk       string
+	Timestamp   time.Time
+}
+
+type RecordTaskLog struct {
+	TaskRepo task.Repository
+}
+
+func (uc RecordTaskLog) Execute(ctx context.Context, in TaskLogInput) (types.TaskResponse, error) {
+	model, err := uc.TaskRepo.Get(ctx, in.TaskID)
+	if err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	executions, err := uc.TaskRepo.ListExecutions(ctx, in.TaskID)
+	if err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	execution := findExecution(executions, in.ExecutionID)
+	if execution == nil {
+		execution = &task.TaskExecution{
+			ID:      in.ExecutionID,
+			TaskID:  in.TaskID,
+			NodeID:  in.NodeID,
+			Attempt: 1,
+		}
+	}
+
+	if execution.StartedAt.IsZero() {
+		execution.StartedAt = in.Timestamp.UTC()
+	}
+	execution.Status = "running"
+	execution.StatusReason = fmt.Sprintf("streaming %s output", in.Stream)
+	if in.Stream == "stderr" {
+		execution.StderrTail = appendTail(execution.StderrTail, in.Chunk)
+	} else {
+		execution.StdoutTail = appendTail(execution.StdoutTail, in.Chunk)
+	}
+
+	if err := uc.TaskRepo.UpsertExecution(ctx, *execution); err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	model.FinalStatus = "running"
+	model.UpdatedAt = in.Timestamp.UTC()
+	model.StatusReason = "receiving live execution output"
+	if err := uc.TaskRepo.Update(ctx, *model); err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	return hydrateTaskResponse(ctx, uc.TaskRepo, *model)
+}
+
+type TaskResultInput struct {
+	TaskID      string
+	ExecutionID string
+	NodeID      string
+	Status      string
+	ExitCode    int
+	StdoutTail  string
+	StderrTail  string
+	Timestamp   time.Time
+}
+
+type RecordTaskResult struct {
+	TaskRepo task.Repository
+}
+
+func (uc RecordTaskResult) Execute(ctx context.Context, in TaskResultInput) (types.TaskResponse, error) {
+	model, err := uc.TaskRepo.Get(ctx, in.TaskID)
+	if err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	executions, err := uc.TaskRepo.ListExecutions(ctx, in.TaskID)
+	if err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	execution := findExecution(executions, in.ExecutionID)
+	if execution == nil {
+		execution = &task.TaskExecution{
+			ID:      in.ExecutionID,
+			TaskID:  in.TaskID,
+			NodeID:  in.NodeID,
+			Attempt: 1,
+		}
+	}
+
+	if execution.StartedAt.IsZero() {
+		execution.StartedAt = in.Timestamp.UTC()
+	}
+	execution.FinishedAt = in.Timestamp.UTC()
+	execution.Status = in.Status
+	execution.ExitCode = in.ExitCode
+	if in.StdoutTail != "" {
+		execution.StdoutTail = in.StdoutTail
+	}
+	if in.StderrTail != "" {
+		execution.StderrTail = in.StderrTail
+	}
+	execution.StatusReason = finalExecutionSummary(*execution)
+
+	if err := uc.TaskRepo.UpsertExecution(ctx, *execution); err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	refreshed, err := uc.TaskRepo.ListExecutions(ctx, in.TaskID)
+	if err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	aggregate := buildTaskAggregate(*model, refreshed)
+	model.FinalStatus = finalTaskStatus(*model, aggregate)
+	model.UpdatedAt = in.Timestamp.UTC()
+	model.StatusReason = buildTaskSummary(*model, aggregate)
+	if err := uc.TaskRepo.Update(ctx, *model); err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	return hydrateTaskResponse(ctx, uc.TaskRepo, *model)
 }
 
 func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, policyValidator policy.Validator, nodeRepo node.Repository, sessionStore node.SessionStore, taskRepo task.Repository, auditRepo audit.Repository, idGenerator idgen.Generator) Services {
@@ -385,8 +568,150 @@ func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, pol
 		}},
 		ListNodes:          ListNodes{NodeRepo: nodeRepo},
 		GetNode:            GetNode{NodeRepo: nodeRepo},
+		ListTasks:          ListTasks{TaskRepo: taskRepo},
 		GetTask:            GetTask{TaskRepo: taskRepo},
 		ListTaskExecutions: ListTaskExecutions{TaskRepo: taskRepo},
 		ListAuditEvents:    ListAuditEvents{AuditRepo: auditRepo},
+		RecordTaskLog:      RecordTaskLog{TaskRepo: taskRepo},
+		RecordTaskResult:   RecordTaskResult{TaskRepo: taskRepo},
 	}
+}
+
+func hydrateTaskResponse(ctx context.Context, repo task.Repository, model task.Task) (types.TaskResponse, error) {
+	executions, err := repo.ListExecutions(ctx, model.ID)
+	if err != nil {
+		return types.TaskResponse{}, err
+	}
+
+	aggregate := buildTaskAggregate(model, executions)
+	summary := buildTaskSummary(model, aggregate)
+	model.Aggregate = aggregate
+	model.Summary = summary
+
+	return types.TaskResponse{
+		Task:      model,
+		Aggregate: aggregate,
+		Summary:   summary,
+	}, nil
+}
+
+func buildTaskAggregate(model task.Task, executions []task.TaskExecution) types.TaskAggregate {
+	runningStatuses := map[string]struct{}{
+		"approved":   {},
+		"queued":     {},
+		"dispatched": {},
+		"running":    {},
+	}
+	failedStatuses := map[string]struct{}{
+		"failed":         {},
+		"partial_failed": {},
+		"timeout":        {},
+		"cancelled":      {},
+	}
+
+	aggregate := types.TaskAggregate{
+		Total: targetCount(model),
+	}
+	for _, execution := range executions {
+		switch execution.Status {
+		case "success":
+			aggregate.Success++
+		default:
+			if _, ok := runningStatuses[execution.Status]; ok {
+				aggregate.Running++
+			}
+			if _, ok := failedStatuses[execution.Status]; ok {
+				aggregate.Failed++
+			}
+		}
+	}
+
+	if aggregate.Total < aggregate.Success+aggregate.Failed+aggregate.Running {
+		aggregate.Total = aggregate.Success + aggregate.Failed + aggregate.Running
+	}
+	if model.FinalStatus == "success" || model.FinalStatus == "failed" || model.FinalStatus == "partial_failed" || model.FinalStatus == "timeout" || model.FinalStatus == "cancelled" {
+		known := aggregate.Success + aggregate.Failed + aggregate.Running
+		if aggregate.Total > known {
+			aggregate.OfflineSkipped = aggregate.Total - known
+		}
+	}
+
+	return aggregate
+}
+
+func buildTaskSummary(model task.Task, aggregate types.TaskAggregate) string {
+	if model.FinalStatus == "waiting_approval" {
+		return "Task is waiting for approval."
+	}
+	if model.FinalStatus == "approved" && aggregate.Running == 0 && aggregate.Success == 0 && aggregate.Failed == 0 {
+		return "Task approved and waiting for execution."
+	}
+	if model.FinalStatus == "cancelled" && model.StatusReason != "" {
+		return model.StatusReason
+	}
+	if aggregate.Running > 0 {
+		return fmt.Sprintf("Task is running: %d/%d running, %d succeeded, %d failed.", aggregate.Running, aggregate.Total, aggregate.Success, aggregate.Failed)
+	}
+	if aggregate.Success > 0 || aggregate.Failed > 0 || aggregate.OfflineSkipped > 0 {
+		return fmt.Sprintf("Task finished: %d/%d succeeded, %d failed, %d offline skipped.", aggregate.Success, aggregate.Total, aggregate.Failed, aggregate.OfflineSkipped)
+	}
+	if model.StatusReason != "" {
+		return model.StatusReason
+	}
+	return model.Plan.Summary
+}
+
+func finalTaskStatus(model task.Task, aggregate types.TaskAggregate) string {
+	if model.FinalStatus == "cancelled" || model.FinalStatus == "timeout" {
+		return model.FinalStatus
+	}
+	if aggregate.Running > 0 {
+		return "running"
+	}
+	if aggregate.Success+aggregate.Failed < aggregate.Total {
+		return "running"
+	}
+	if aggregate.Failed > 0 && aggregate.Success > 0 {
+		return "partial_failed"
+	}
+	if aggregate.Failed > 0 {
+		return "failed"
+	}
+	if aggregate.Success > 0 {
+		return "success"
+	}
+	return model.FinalStatus
+}
+
+func targetCount(model task.Task) int {
+	if len(model.Plan.TargetNodes) > len(model.Target) {
+		return len(model.Plan.TargetNodes)
+	}
+	return len(model.Target)
+}
+
+func findExecution(executions []task.TaskExecution, executionID string) *task.TaskExecution {
+	for idx := range executions {
+		if executions[idx].ID == executionID {
+			item := executions[idx]
+			return &item
+		}
+	}
+	return nil
+}
+
+func appendTail(existing, chunk string) string {
+	const maxTailLength = 4096
+	combined := strings.TrimSpace(strings.TrimSpace(existing) + "\n" + strings.TrimSpace(chunk))
+	if len(combined) <= maxTailLength {
+		return combined
+	}
+	return combined[len(combined)-maxTailLength:]
+}
+
+func finalExecutionSummary(execution task.TaskExecution) string {
+	if execution.StatusReason != "" {
+		return execution.StatusReason
+	}
+	return fmt.Sprintf("%s · exit=%d", execution.Status, execution.ExitCode)
 }

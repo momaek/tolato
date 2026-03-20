@@ -16,6 +16,7 @@ import {
   mapNodesResponse,
   mapPlan,
   mapTaskDetailResponse,
+  mapTasksResponse,
   rawPlanTaskResponseSchema,
   rawTaskMutationResponseSchema,
 } from "@/shared/api/backend-contracts"
@@ -149,7 +150,7 @@ class RealControlApi implements ControlApiAdapter {
   }
 
   async getTasks() {
-    const tasks = await this.readJsonOrNull("/api/v1/tasks", taskDetailSchema.array().parse)
+    const tasks = await this.readJsonOrNull("/api/v1/tasks", mapTasksResponse)
     return tasks ?? []
   }
 

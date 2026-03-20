@@ -616,6 +616,18 @@ forbidden
 
 ⸻
 
+13.1 当前前后端交互 Schema
+
+单独维护在：
+- [api_contract.md](/Users/wentx/momaek/src/tolato/docs/api_contract.md)
+
+内容包括：
+	•	后端当前真实 HTTP / WebSocket schema
+	•	前端当前 Zod 合同
+	•	当前前后端 contract mismatch
+
+⸻
+
 14. 关键数据对象
 
 Node

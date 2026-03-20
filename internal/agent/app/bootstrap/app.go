@@ -5,7 +5,9 @@ import (
 
 	"github.com/momaek/tolato/internal/agent/executor/runner"
 	validatorpkg "github.com/momaek/tolato/internal/agent/executor/validator"
+	"github.com/momaek/tolato/internal/agent/infra/agentstate"
 	"github.com/momaek/tolato/internal/agent/infra/persistence"
+	"github.com/momaek/tolato/internal/agent/infra/sysinfo"
 	"github.com/momaek/tolato/internal/agent/infra/telemetry"
 	"github.com/momaek/tolato/internal/agent/loop/connection"
 	"github.com/momaek/tolato/internal/agent/loop/dispatch"
@@ -44,6 +46,8 @@ func NewAgentApp(configPath string) (*AgentApp, error) {
 	queue := make(chan runner.Job, 32)
 	runnerImpl := runner.NewNoopRunner()
 	validatorImpl := validatorpkg.NewRegistryValidator()
+	busyTracker := agentstate.NewBusyTracker()
+	sysInfoCollector := sysinfo.NewCollector(busyTracker)
 
 	connectionLoop := connection.Loop{
 		Logger:       logger,
@@ -52,6 +56,7 @@ func NewAgentApp(configPath string) (*AgentApp, error) {
 		EnrollClient: enrollClient,
 		WSClient:     client,
 		Incoming:     incoming,
+		SysInfo:      sysInfoCollector,
 	}
 	dispatchLoop := dispatch.Loop{
 		Logger:   logger,
@@ -66,6 +71,7 @@ func NewAgentApp(configPath string) (*AgentApp, error) {
 		Runner:    runnerImpl,
 		Validator: validatorImpl,
 		WSClient:  client,
+		Busy:      busyTracker,
 	}
 	supervisorLoop := supervisor.Loop{
 		Logger: logger,

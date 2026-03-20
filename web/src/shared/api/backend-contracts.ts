@@ -46,10 +46,28 @@ const rawNodeSchema = z.object({
   auth_secret_version: z.number(),
   created_at: z.string(),
   updated_at: z.string(),
+  busy: z.boolean().optional().default(false),
+  metrics: z.object({
+    cpu: z.number().optional().default(0),
+    memory: z.number().optional().default(0),
+    disk: z.number().optional().default(0),
+  }).optional().default({
+    cpu: 0,
+    memory: 0,
+    disk: 0,
+  }),
 })
 
 export const rawNodesResponseSchema = z.object({
   nodes: z.array(rawNodeSchema),
+})
+
+const rawTaskAggregateSchema = z.object({
+  total: z.number(),
+  success: z.number(),
+  failed: z.number(),
+  offline_skipped: z.number(),
+  running: z.number(),
 })
 
 const rawPlanStepSchema = z.object({
@@ -86,8 +104,16 @@ const rawTaskSchema = z.object({
   updated_at: z.string(),
 })
 
-export const rawTaskDetailResponseSchema = z.object({
+const rawTaskDetailEnvelopeSchema = z.object({
   task: rawTaskSchema,
+  aggregate: rawTaskAggregateSchema.optional(),
+  summary: z.string().optional(),
+})
+
+export const rawTaskDetailResponseSchema = rawTaskDetailEnvelopeSchema
+
+export const rawTasksResponseSchema = z.object({
+  tasks: z.array(rawTaskDetailEnvelopeSchema),
 })
 
 const rawExecutionSchema = z.object({
@@ -196,6 +222,16 @@ function buildAggregate(executions: TaskExecution[], targetCount: number): TaskA
   }
 }
 
+function mapAggregate(input: z.infer<typeof rawTaskAggregateSchema>): TaskAggregate {
+  return {
+    total: input.total,
+    success: input.success,
+    failed: input.failed,
+    offlineSkipped: input.offline_skipped,
+    running: input.running,
+  }
+}
+
 export function mapMeResponse(input: unknown): SessionInfo {
   const parsed = rawMeResponseSchema.parse(input)
 
@@ -218,12 +254,12 @@ export function mapNodesResponse(input: unknown): NodeSummary[] {
       version: node.version,
       tags: node.tags,
       status: normalizeNodeStatus(node.status),
-      busy: false,
+      busy: node.busy,
       lastSeen: node.last_seen_at,
       metrics: {
-        cpu: 0,
-        memory: 0,
-        disk: 0,
+        cpu: node.metrics.cpu,
+        memory: node.metrics.memory,
+        disk: node.metrics.disk,
       },
     })),
   )
@@ -276,6 +312,10 @@ export function mapExecutionsResponse(input: unknown): TaskExecution[] {
 export function mapTaskDetailResponse(input: unknown, executions: TaskExecution[] = []): TaskDetail {
   const parsed = rawTaskDetailResponseSchema.parse(input)
   const plan = mapPlan(parsed.task.plan)
+  const aggregate = parsed.aggregate
+    ? mapAggregate(parsed.aggregate)
+    : buildAggregate(executions, parsed.task.target.length || plan.targetNodes.length)
+  const summary = parsed.summary ?? (parsed.task.status_reason || plan.summary)
 
   return taskDetailSchema.parse({
     id: parsed.task.id,
@@ -289,10 +329,18 @@ export function mapTaskDetailResponse(input: unknown, executions: TaskExecution[
     riskLevel: normalizeRiskLevel(parsed.task.risk_level),
     statusReason: parsed.task.status_reason,
     plan,
-    aggregate: buildAggregate(executions, parsed.task.target.length || plan.targetNodes.length),
-    summary: parsed.task.status_reason || plan.summary,
+    aggregate,
+    summary,
     executions,
   })
+}
+
+export function mapTasksResponse(input: unknown): TaskDetail[] {
+  const parsed = rawTasksResponseSchema.parse(input)
+
+  return taskDetailSchema.array().parse(
+    parsed.tasks.map((item) => mapTaskDetailResponse(item, [])),
+  )
 }
 
 export function mapAuditEventsResponse(input: unknown): AuditEvent[] {

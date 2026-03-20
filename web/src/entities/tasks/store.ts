@@ -41,10 +41,61 @@ export const useTasksStore = defineStore("tasks", {
         status,
       }
     },
+    appendTaskLog(taskId: string, executionId: string, nodeId: string, stream: "stdout" | "stderr", chunk: string, timestamp: string) {
+      const task = this.byId[taskId]
+
+      if (!task) {
+        return
+      }
+
+      const executions = [...task.executions]
+      const index = executions.findIndex((item) => item.id === executionId)
+      const nextChunk = chunk.trim()
+
+      if (index === -1) {
+        executions.unshift({
+          id: executionId,
+          taskId,
+          nodeId,
+          status: "running",
+          startedAt: timestamp,
+          exitCode: null,
+          stdoutTail: stream === "stdout" ? nextChunk : "",
+          stderrTail: stream === "stderr" ? nextChunk : "",
+          streamSummary: `live ${stream}`,
+        })
+      } else {
+        const current = executions[index]
+        executions[index] = {
+          ...current,
+          status: "running",
+          startedAt: current.startedAt ?? timestamp,
+          stdoutTail: stream === "stdout" ? appendTail(current.stdoutTail, nextChunk) : current.stdoutTail,
+          stderrTail: stream === "stderr" ? appendTail(current.stderrTail, nextChunk) : current.stderrTail,
+          streamSummary: `live ${stream}`,
+        }
+      }
+
+      this.byId[taskId] = {
+        ...task,
+        status: "running",
+        executions,
+      }
+    },
     consumeWsEvent(event: UiWsEvent) {
       if (event.type === "task.status") {
         this.updateTaskStatus(event.taskId, event.status)
       }
+
+      if (event.type === "task.log") {
+        this.appendTaskLog(event.taskId, event.executionId, event.nodeId, event.stream, event.chunk, event.timestamp)
+      }
     },
   },
 })
+
+function appendTail(existing: string, chunk: string) {
+  const maxTailLength = 4096
+  const next = [existing, chunk].filter(Boolean).join("\n")
+  return next.length > maxTailLength ? next.slice(-maxTailLength) : next
+}

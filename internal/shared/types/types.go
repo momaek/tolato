@@ -2,19 +2,27 @@ package types
 
 import "time"
 
+type NodeMetrics struct {
+	CPU    float64 `json:"cpu"`
+	Memory float64 `json:"memory"`
+	Disk   float64 `json:"disk"`
+}
+
 type Node struct {
-	ID                string    `json:"id"`
-	Hostname          string    `json:"hostname"`
-	Region            string    `json:"region"`
-	OS                string    `json:"os"`
-	Version           string    `json:"version"`
-	Tags              []string  `json:"tags"`
-	Status            string    `json:"status"`
-	LastSeenAt        time.Time `json:"last_seen_at"`
-	AuthSecretVersion int       `json:"auth_secret_version"`
-	AgentSecret       string    `json:"-"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                string      `json:"id"`
+	Hostname          string      `json:"hostname"`
+	Region            string      `json:"region"`
+	OS                string      `json:"os"`
+	Version           string      `json:"version"`
+	Tags              []string    `json:"tags"`
+	Status            string      `json:"status"`
+	LastSeenAt        time.Time   `json:"last_seen_at"`
+	AuthSecretVersion int         `json:"auth_secret_version"`
+	AgentSecret       string      `json:"-"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+	Busy              bool        `json:"busy"`
+	Metrics           NodeMetrics `json:"metrics"`
 }
 
 type NodeSession struct {
@@ -48,19 +56,21 @@ type PlanStep struct {
 }
 
 type Task struct {
-	ID             string    `json:"id"`
-	ParentTaskID   string    `json:"parent_task_id,omitempty"`
-	Mode           string    `json:"mode"`
-	InitiatorID    string    `json:"initiator_id"`
-	Target         []string  `json:"target"`
-	InputText      string    `json:"input_text"`
-	Plan           Plan      `json:"plan"`
-	RiskLevel      string    `json:"risk_level"`
-	ApprovalStatus string    `json:"approval_status"`
-	FinalStatus    string    `json:"final_status"`
-	StatusReason   string    `json:"status_reason"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string        `json:"id"`
+	ParentTaskID   string        `json:"parent_task_id,omitempty"`
+	Mode           string        `json:"mode"`
+	InitiatorID    string        `json:"initiator_id"`
+	Target         []string      `json:"target"`
+	InputText      string        `json:"input_text"`
+	Plan           Plan          `json:"plan"`
+	RiskLevel      string        `json:"risk_level"`
+	ApprovalStatus string        `json:"approval_status"`
+	FinalStatus    string        `json:"final_status"`
+	StatusReason   string        `json:"status_reason"`
+	CreatedAt      time.Time     `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
+	Aggregate      TaskAggregate `json:"aggregate,omitempty"`
+	Summary        string        `json:"summary,omitempty"`
 }
 
 type TaskExecution struct {
@@ -123,6 +133,14 @@ type TaskPlanResponse struct {
 	Plan   Plan   `json:"plan"`
 }
 
+type TaskAggregate struct {
+	Total          int `json:"total"`
+	Success        int `json:"success"`
+	Failed         int `json:"failed"`
+	OfflineSkipped int `json:"offline_skipped"`
+	Running        int `json:"running"`
+}
+
 type TaskMutationResponse struct {
 	TaskID  string `json:"task_id"`
 	Status  string `json:"status"`
@@ -133,8 +151,20 @@ type ListNodesResponse struct {
 	Nodes []Node `json:"nodes"`
 }
 
+type ListTasksResponse struct {
+	Tasks []TaskResponseItem `json:"tasks"`
+}
+
 type TaskResponse struct {
-	Task Task `json:"task"`
+	Task      Task          `json:"task"`
+	Aggregate TaskAggregate `json:"aggregate"`
+	Summary   string        `json:"summary"`
+}
+
+type TaskResponseItem struct {
+	Task      Task          `json:"task"`
+	Aggregate TaskAggregate `json:"aggregate"`
+	Summary   string        `json:"summary"`
 }
 
 type TaskExecutionsResponse struct {

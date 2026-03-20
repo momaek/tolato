@@ -166,6 +166,28 @@ func (r *TaskRepo) Get(ctx context.Context, id string) (*task.Task, error) {
 	return &item, nil
 }
 
+func (r *TaskRepo) List(ctx context.Context) ([]task.Task, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, COALESCE(parent_task_id, ''), mode, initiator_id, target, input_text, plan_json,
+		       risk_level, approval_status, final_status, status_reason, created_at, updated_at
+		FROM tasks
+		ORDER BY created_at DESC, id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]task.Task, 0)
+	for rows.Next() {
+		item, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *TaskRepo) Update(ctx context.Context, t task.Task) error {
 	target, err := json.Marshal(t.Target)
 	if err != nil {
@@ -217,6 +239,32 @@ func (r *TaskRepo) ListExecutions(ctx context.Context, taskID string) ([]task.Ta
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (r *TaskRepo) UpsertExecution(ctx context.Context, execution task.TaskExecution) error {
+	exitCode := any(nil)
+	if execution.Status != "approved" && execution.Status != "queued" && execution.Status != "dispatched" && execution.Status != "running" {
+		exitCode = execution.ExitCode
+	}
+
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO task_executions (
+			id, task_id, node_id, status, attempt, started_at, finished_at, exit_code, stdout_tail, stderr_tail, status_reason
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (id) DO UPDATE SET
+			status = EXCLUDED.status,
+			attempt = EXCLUDED.attempt,
+			started_at = COALESCE(task_executions.started_at, EXCLUDED.started_at),
+			finished_at = COALESCE(EXCLUDED.finished_at, task_executions.finished_at),
+			exit_code = COALESCE(EXCLUDED.exit_code, task_executions.exit_code),
+			stdout_tail = EXCLUDED.stdout_tail,
+			stderr_tail = EXCLUDED.stderr_tail,
+			status_reason = EXCLUDED.status_reason`,
+		execution.ID, execution.TaskID, execution.NodeID, execution.Status, execution.Attempt,
+		nullableTime(execution.StartedAt), nullableTime(execution.FinishedAt), exitCode,
+		execution.StdoutTail, execution.StderrTail, execution.StatusReason,
+	)
+	return err
 }
 
 func (r *AuditRepo) Create(ctx context.Context, event audit.AuditEvent) error {

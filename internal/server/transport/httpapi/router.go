@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/momaek/tolato/internal/server/app/usecase"
 	infraauth "github.com/momaek/tolato/internal/server/infra/auth"
+	"github.com/momaek/tolato/internal/server/infra/presence"
 	infraredis "github.com/momaek/tolato/internal/server/infra/redis"
 	"github.com/momaek/tolato/internal/server/transport/wsagent"
 	"github.com/momaek/tolato/internal/server/transport/wsui"
@@ -21,6 +22,7 @@ type Dependencies struct {
 	UseCases usecase.Services
 	DB       *pgxpool.Pool
 	Redis    *goredis.Client
+	Presence *presence.Store
 	UIWS     *wsui.Handler
 	AgentWS  *wsagent.Handler
 }
@@ -32,6 +34,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		usecases: deps.UseCases,
 		db:       deps.DB,
 		redis:    deps.Redis,
+		presence: deps.Presence,
+		uiws:     deps.UIWS,
 	}
 
 	r := chi.NewRouter()
@@ -46,6 +50,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/me", h.Me)
 		r.Get("/nodes", h.ListNodes)
 		r.Get("/nodes/{id}", h.GetNode)
+		r.Get("/tasks", h.ListTasks)
 		r.Post("/tasks/plan", h.GenerateTaskPlan)
 		r.Post("/tasks/{id}/approve", h.ApproveTask)
 		r.Post("/tasks/{id}/reject", h.RejectTask)

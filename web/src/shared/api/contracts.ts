@@ -130,10 +130,21 @@ export const taskStatusEventSchema = z.object({
   timestamp: z.string(),
 })
 
+export const taskLogEventSchema = z.object({
+  type: z.literal("task.log"),
+  taskId: z.string(),
+  executionId: z.string(),
+  nodeId: z.string(),
+  stream: z.enum(["stdout", "stderr"]),
+  chunk: z.string(),
+  timestamp: z.string(),
+})
+
 export const uiWsEventSchema = z.discriminatedUnion("type", [
   connectionEventSchema,
   nodeUpdatedEventSchema,
   taskStatusEventSchema,
+  taskLogEventSchema,
 ])
 
 export type ApprovalStatus = z.infer<typeof approvalStatusSchema>

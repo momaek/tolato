@@ -16,6 +16,7 @@ import (
 	"github.com/momaek/tolato/internal/server/infra/llm"
 	"github.com/momaek/tolato/internal/server/infra/memory"
 	infpostgres "github.com/momaek/tolato/internal/server/infra/postgres"
+	"github.com/momaek/tolato/internal/server/infra/presence"
 	infraredis "github.com/momaek/tolato/internal/server/infra/redis"
 	"github.com/momaek/tolato/internal/server/infra/telemetry"
 	"github.com/momaek/tolato/internal/server/transport/httpapi"
@@ -78,13 +79,24 @@ func NewServerApp(ctx context.Context, configPath string) (*ServerApp, error) {
 	usecases := usecase.NewServices(planner, schemaValidator, policyValidator, nodeRepo, sessionStore, taskRepo, auditRepo, idGenerator)
 
 	uiWS := wsui.NewHandler(logger)
-	agentWS := wsagent.NewHandler(logger, usecases.AuthenticateAgent, usecases.HeartbeatNode)
+	presenceStore := presence.NewStore()
+	agentWS := wsagent.NewHandler(
+		logger,
+		usecases.AuthenticateAgent,
+		usecases.HeartbeatNode,
+		usecases.GetNode,
+		usecases.RecordTaskLog,
+		usecases.RecordTaskResult,
+		presenceStore,
+		uiWS,
+	)
 	router := httpapi.NewRouter(httpapi.Dependencies{
 		Logger:   logger,
 		Auth:     authService,
 		UseCases: usecases,
 		DB:       pool,
 		Redis:    redisClient,
+		Presence: presenceStore,
 		UIWS:     uiWS,
 		AgentWS:  agentWS,
 	})

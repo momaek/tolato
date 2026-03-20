@@ -141,6 +141,21 @@ func (r *TaskRepo) Get(ctx context.Context, id string) (*task.Task, error) {
 	return &copyTask, nil
 }
 
+func (r *TaskRepo) List(ctx context.Context) ([]task.Task, error) {
+	_ = ctx
+	r.b.mu.RLock()
+	defer r.b.mu.RUnlock()
+
+	items := make([]task.Task, 0, len(r.b.tasks))
+	for _, item := range r.b.tasks {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	return items, nil
+}
+
 func (r *TaskRepo) Update(ctx context.Context, t task.Task) error {
 	_ = ctx
 	r.b.mu.Lock()
@@ -158,6 +173,37 @@ func (r *TaskRepo) ListExecutions(ctx context.Context, taskID string) ([]task.Ta
 	r.b.mu.RLock()
 	defer r.b.mu.RUnlock()
 	return slices.Clone(r.b.executions[taskID]), nil
+}
+
+func (r *TaskRepo) UpsertExecution(ctx context.Context, execution task.TaskExecution) error {
+	_ = ctx
+	r.b.mu.Lock()
+	defer r.b.mu.Unlock()
+
+	items := slices.Clone(r.b.executions[execution.TaskID])
+	for idx, existing := range items {
+		if existing.ID == execution.ID {
+			items[idx] = execution
+			r.b.executions[execution.TaskID] = items
+			return nil
+		}
+	}
+
+	items = append(items, execution)
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].StartedAt.Equal(items[j].StartedAt) {
+			return items[i].ID < items[j].ID
+		}
+		if items[i].StartedAt.IsZero() {
+			return false
+		}
+		if items[j].StartedAt.IsZero() {
+			return true
+		}
+		return items[i].StartedAt.Before(items[j].StartedAt)
+	})
+	r.b.executions[execution.TaskID] = items
+	return nil
 }
 
 func (r *AuditRepo) Create(ctx context.Context, event audit.AuditEvent) error {
