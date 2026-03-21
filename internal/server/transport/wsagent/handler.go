@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -20,6 +21,7 @@ type Handler struct {
 	logger            *zap.Logger
 	authenticateAgent usecase.AuthenticateAgent
 	heartbeatNode     usecase.HeartbeatNode
+	disconnectNode    usecase.DisconnectNode
 	getNode           usecase.GetNode
 	recordTaskLog     usecase.RecordTaskLog
 	recordTaskResult  usecase.RecordTaskResult
@@ -33,6 +35,7 @@ func NewHandler(
 	logger *zap.Logger,
 	authenticateAgent usecase.AuthenticateAgent,
 	heartbeatNode usecase.HeartbeatNode,
+	disconnectNode usecase.DisconnectNode,
 	getNode usecase.GetNode,
 	recordTaskLog usecase.RecordTaskLog,
 	recordTaskResult usecase.RecordTaskResult,
@@ -44,6 +47,7 @@ func NewHandler(
 		logger:            logger,
 		authenticateAgent: authenticateAgent,
 		heartbeatNode:     heartbeatNode,
+		disconnectNode:    disconnectNode,
 		getNode:           getNode,
 		recordTaskLog:     recordTaskLog,
 		recordTaskResult:  recordTaskResult,
@@ -73,10 +77,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	currentNode := *authenticatedNode
+	currentSessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
 	if h.dispatcher != nil {
 		h.dispatcher.Register(currentNode.ID, conn)
 		defer h.dispatcher.Unregister(currentNode.ID, conn)
 	}
+	defer func() {
+		if h.disconnectNode.NodeRepo != nil {
+			_ = h.disconnectNode.Execute(context.Background(), usecase.DisconnectNodeInput{
+				NodeID:    currentNode.ID,
+				SessionID: currentSessionID,
+				Reason:    "ws agent connection closed",
+			})
+		}
+	}()
 
 	for {
 		var env protocol.Envelope
@@ -87,7 +101,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		switch env.Type {
 		case protocol.TypeHello, protocol.TypeHeartbeat:
-			currentNode = h.handlePresence(r, env, currentNode)
+			currentNode, currentSessionID = h.handlePresence(r, env, currentNode, currentSessionID)
 		case protocol.TypeTaskAck:
 			h.logger.Info("ws/agent task acknowledged", zap.String("task_id", env.TaskID), zap.String("node_id", nodeID))
 		case protocol.TypeTaskLog:
@@ -100,7 +114,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) handlePresence(r *http.Request, env protocol.Envelope, currentNode types.Node) types.Node {
+func (h *Handler) handlePresence(r *http.Request, env protocol.Envelope, currentNode types.Node, currentSessionID string) (types.Node, string) {
 	input := usecase.HeartbeatInput{
 		NodeID:     currentNode.ID,
 		RemoteAddr: r.RemoteAddr,
@@ -110,6 +124,7 @@ func (h *Handler) handlePresence(r *http.Request, env protocol.Envelope, current
 		var payload protocol.HelloPayload
 		if err := json.Unmarshal(env.Payload, &payload); err == nil {
 			input.SessionID = payload.SessionID
+			currentSessionID = payload.SessionID
 			input.AgentVersion = payload.AgentVersion
 			input.Capabilities = payload.Capabilities
 			h.logger.Debug("agent hello payload", zap.Any("payload", payload))
@@ -117,7 +132,7 @@ func (h *Handler) handlePresence(r *http.Request, env protocol.Envelope, current
 	}
 
 	if env.Type == protocol.TypeHeartbeat {
-		input.SessionID = r.URL.Query().Get("session_id")
+		input.SessionID = currentSessionID
 	}
 
 	if err := h.heartbeatNode.Execute(r.Context(), input); err != nil {
@@ -152,7 +167,7 @@ func (h *Handler) handlePresence(r *http.Request, env protocol.Envelope, current
 		currentNode = *nodeView
 	}
 
-	return currentNode
+	return currentNode, currentSessionID
 }
 
 func (h *Handler) handleTaskLog(r *http.Request, env protocol.Envelope, nodeID string) {

@@ -9,9 +9,11 @@ import (
 
 type ServerConfig struct {
 	Server struct {
-		Address string `yaml:"address"`
-		TLSCert string `yaml:"tls_cert"`
-		TLSKey  string `yaml:"tls_key"`
+		Address       string `yaml:"address"`
+		Environment   string `yaml:"environment"`
+		TLSCert       string `yaml:"tls_cert"`
+		TLSKey        string `yaml:"tls_key"`
+		TrustProxyTLS bool   `yaml:"trust_proxy_tls"`
 	} `yaml:"server"`
 	Postgres struct {
 		DSN string `yaml:"dsn"`
@@ -23,7 +25,22 @@ type ServerConfig struct {
 	Auth struct {
 		AdminUsername string `yaml:"admin_username"`
 		AdminPassword string `yaml:"admin_password"`
+		Users         []struct {
+			ID           string `yaml:"id"`
+			Name         string `yaml:"name"`
+			Username     string `yaml:"username"`
+			Password     string `yaml:"password"`
+			PasswordHash string `yaml:"password_hash"`
+			Role         string `yaml:"role"`
+		} `yaml:"users"`
+		SessionTTL string `yaml:"session_ttl"`
 	} `yaml:"auth"`
+	LLM struct {
+		Provider string `yaml:"provider"`
+		BaseURL  string `yaml:"base_url"`
+		APIKey   string `yaml:"api_key"`
+		Model    string `yaml:"model"`
+	} `yaml:"llm"`
 }
 
 type AgentConfig struct {
@@ -48,6 +65,12 @@ func LoadServerConfig(path string) (ServerConfig, error) {
 
 	if cfg.Server.Address == "" {
 		cfg.Server.Address = ":8080"
+	}
+	if cfg.Server.Environment == "" {
+		cfg.Server.Environment = "dev"
+	}
+	if cfg.Auth.SessionTTL == "" {
+		cfg.Auth.SessionTTL = "24h"
 	}
 
 	return cfg, nil

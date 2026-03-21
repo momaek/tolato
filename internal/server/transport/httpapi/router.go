@@ -17,32 +17,40 @@ import (
 )
 
 type Dependencies struct {
-	Logger   *zap.Logger
-	Auth     *infraauth.Service
-	UseCases usecase.Services
-	DB       *pgxpool.Pool
-	Redis    *goredis.Client
-	Presence *presence.Store
-	UIWS     *wsui.Handler
-	AgentWS  *wsagent.Handler
+	Logger                 *zap.Logger
+	Auth                   *infraauth.Service
+	UseCases               usecase.Services
+	DB                     *pgxpool.Pool
+	Redis                  *goredis.Client
+	Presence               *presence.Store
+	UIWS                   *wsui.Handler
+	AgentWS                *wsagent.Handler
+	RequireSecureTransport bool
+	TrustProxyTLS          bool
 }
 
 func NewRouter(deps Dependencies) http.Handler {
 	h := Handler{
-		logger:   deps.Logger,
-		auth:     deps.Auth,
-		usecases: deps.UseCases,
-		db:       deps.DB,
-		redis:    deps.Redis,
-		presence: deps.Presence,
-		uiws:     deps.UIWS,
+		logger:                 deps.Logger,
+		auth:                   deps.Auth,
+		usecases:               deps.UseCases,
+		db:                     deps.DB,
+		redis:                  deps.Redis,
+		presence:               deps.Presence,
+		uiws:                   deps.UIWS,
+		requireSecureTransport: deps.RequireSecureTransport,
+		trustProxyTLS:          deps.TrustProxyTLS,
 	}
 
 	r := chi.NewRouter()
+	r.Use(withCORS)
 	r.Get("/healthz", h.Healthz)
 	r.Get("/readyz", h.Readyz)
 
 	r.Get("/ws/ui", func(w http.ResponseWriter, r *http.Request) {
+		if !h.ensureSecureTransport(w, r) {
+			return
+		}
 		if deps.Auth == nil {
 			http.Error(w, "authentication is not configured", http.StatusUnauthorized)
 			return

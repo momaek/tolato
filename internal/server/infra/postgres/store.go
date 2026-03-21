@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/momaek/tolato/internal/server/domain/audit"
 	"github.com/momaek/tolato/internal/server/domain/node"
+	"github.com/momaek/tolato/internal/server/domain/outbox"
 	"github.com/momaek/tolato/internal/server/domain/task"
 )
 
@@ -16,9 +17,10 @@ type NodeRepo struct{ pool *pgxpool.Pool }
 type SessionRepo struct{ pool *pgxpool.Pool }
 type TaskRepo struct{ pool *pgxpool.Pool }
 type AuditRepo struct{ pool *pgxpool.Pool }
+type OutboxRepo struct{ pool *pgxpool.Pool }
 
-func NewStores(pool *pgxpool.Pool) (*NodeRepo, *SessionRepo, *TaskRepo, *AuditRepo) {
-	return &NodeRepo{pool: pool}, &SessionRepo{pool: pool}, &TaskRepo{pool: pool}, &AuditRepo{pool: pool}
+func NewStores(pool *pgxpool.Pool) (*NodeRepo, *SessionRepo, *TaskRepo, *AuditRepo, *OutboxRepo) {
+	return &NodeRepo{pool: pool}, &SessionRepo{pool: pool}, &TaskRepo{pool: pool}, &AuditRepo{pool: pool}, &OutboxRepo{pool: pool}
 }
 
 func (r *NodeRepo) List(ctx context.Context) ([]node.Node, error) {
@@ -118,16 +120,61 @@ func (r *SessionRepo) Upsert(ctx context.Context, session node.NodeSession) erro
 
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO node_sessions (
-			session_id, node_id, connected_at, last_heartbeat_at, remote_addr, status, capabilities
-		) VALUES ($1,$2,$3,$4,$5,$6,$7)
+			session_id, node_id, connected_at, last_heartbeat_at, disconnected_at, remote_addr, status, capabilities
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (session_id) DO UPDATE SET
 			last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+			disconnected_at = EXCLUDED.disconnected_at,
 			remote_addr = EXCLUDED.remote_addr,
 			status = EXCLUDED.status,
 			capabilities = EXCLUDED.capabilities`,
 		session.SessionID, session.NodeID, zeroToNow(session.ConnectedAt), zeroToNow(session.LastHeartbeatAt),
-		session.RemoteAddr, session.Status, capabilities,
+		nullableTime(session.DisconnectedAt), session.RemoteAddr, session.Status, capabilities,
 	)
+	return err
+}
+
+func (r *SessionRepo) Get(ctx context.Context, sessionID string) (*node.NodeSession, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT session_id, node_id, connected_at, last_heartbeat_at, disconnected_at, remote_addr, status, capabilities
+		FROM node_sessions
+		WHERE session_id = $1`, sessionID)
+
+	item, err := scanSession(row)
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (r *SessionRepo) ListByNodeID(ctx context.Context, nodeID string) ([]node.NodeSession, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT session_id, node_id, connected_at, last_heartbeat_at, disconnected_at, remote_addr, status, capabilities
+		FROM node_sessions
+		WHERE node_id = $1
+		ORDER BY connected_at ASC`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]node.NodeSession, 0)
+	for rows.Next() {
+		item, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *SessionRepo) MarkDisconnected(ctx context.Context, sessionID string, at time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE node_sessions
+		SET status = 'disconnected',
+			disconnected_at = $2
+		WHERE session_id = $1`, sessionID, at.UTC())
 	return err
 }
 
@@ -220,8 +267,8 @@ func (r *TaskRepo) Update(ctx context.Context, t task.Task) error {
 
 func (r *TaskRepo) ListExecutions(ctx context.Context, taskID string) ([]task.TaskExecution, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, task_id, node_id, status, attempt, COALESCE(started_at, NOW()),
-		       COALESCE(finished_at, NOW()), COALESCE(exit_code, 0), stdout_tail, stderr_tail, status_reason
+		SELECT id, task_id, node_id, status, attempt, started_at,
+		       finished_at, COALESCE(exit_code, 0), stdout_tail, stderr_tail, status_reason
 		FROM task_executions
 		WHERE task_id = $1
 		ORDER BY started_at ASC NULLS LAST, id ASC`, taskID)
@@ -315,6 +362,63 @@ func (r *AuditRepo) ListByTaskID(ctx context.Context, taskID string) ([]audit.Au
 	return items, rows.Err()
 }
 
+func (r *OutboxRepo) Create(ctx context.Context, message outbox.Message) error {
+	payload, err := json.Marshal(message.Payload)
+	if err != nil {
+		return err
+	}
+
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO task_outbox (id, topic, task_id, execution_id, node_id, payload, created_at, published_at, attempts)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		message.ID, message.Topic, message.TaskID, emptyToNil(message.ExecutionID), emptyToNil(message.NodeID),
+		payload, zeroToNow(message.CreatedAt), nullableTime(message.PublishedAt), message.Attempts,
+	)
+	return err
+}
+
+func (r *OutboxRepo) ListPending(ctx context.Context, limit int) ([]outbox.Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, topic, task_id, COALESCE(execution_id, ''), COALESCE(node_id, ''), payload, created_at, published_at, attempts
+		FROM task_outbox
+		WHERE published_at IS NULL
+		ORDER BY created_at ASC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]outbox.Message, 0)
+	for rows.Next() {
+		item, err := scanOutbox(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *OutboxRepo) MarkPublished(ctx context.Context, id string, at time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE task_outbox
+		SET published_at = $2
+		WHERE id = $1`, id, at.UTC())
+	return err
+}
+
+func (r *OutboxRepo) IncrementAttempts(ctx context.Context, id string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE task_outbox
+		SET attempts = attempts + 1
+		WHERE id = $1`, id)
+	return err
+}
+
 type pgxScanner interface {
 	Scan(dest ...any) error
 }
@@ -345,6 +449,28 @@ func scanNode(scanner pgxScanner) (node.Node, error) {
 	return item, nil
 }
 
+func scanSession(scanner pgxScanner) (node.NodeSession, error) {
+	var (
+		item            node.NodeSession
+		disconnectedAt  *time.Time
+		capabilitiesRaw []byte
+	)
+	err := scanner.Scan(
+		&item.SessionID, &item.NodeID, &item.ConnectedAt, &item.LastHeartbeatAt, &disconnectedAt,
+		&item.RemoteAddr, &item.Status, &capabilitiesRaw,
+	)
+	if err != nil {
+		return node.NodeSession{}, err
+	}
+	if disconnectedAt != nil {
+		item.DisconnectedAt = disconnectedAt.UTC()
+	}
+	if len(capabilitiesRaw) > 0 {
+		_ = json.Unmarshal(capabilitiesRaw, &item.Capabilities)
+	}
+	return item, nil
+}
+
 func scanTask(scanner pgxScanner) (task.Task, error) {
 	var (
 		item    task.Task
@@ -368,11 +494,21 @@ func scanTask(scanner pgxScanner) (task.Task, error) {
 }
 
 func scanExecution(scanner pgxScanner) (task.TaskExecution, error) {
-	var item task.TaskExecution
+	var (
+		item       task.TaskExecution
+		startedAt  *time.Time
+		finishedAt *time.Time
+	)
 	err := scanner.Scan(
 		&item.ID, &item.TaskID, &item.NodeID, &item.Status, &item.Attempt,
-		&item.StartedAt, &item.FinishedAt, &item.ExitCode, &item.StdoutTail, &item.StderrTail, &item.StatusReason,
+		&startedAt, &finishedAt, &item.ExitCode, &item.StdoutTail, &item.StderrTail, &item.StatusReason,
 	)
+	if startedAt != nil {
+		item.StartedAt = startedAt.UTC()
+	}
+	if finishedAt != nil {
+		item.FinishedAt = finishedAt.UTC()
+	}
 	return item, err
 }
 
@@ -384,6 +520,28 @@ func scanAudit(scanner pgxScanner) (audit.AuditEvent, error) {
 	err := scanner.Scan(&item.ID, &item.TaskID, &item.ActorID, &item.EventType, &payloadRaw, &item.CreatedAt)
 	if err != nil {
 		return audit.AuditEvent{}, err
+	}
+	if len(payloadRaw) > 0 {
+		_ = json.Unmarshal(payloadRaw, &item.Payload)
+	}
+	return item, nil
+}
+
+func scanOutbox(scanner pgxScanner) (outbox.Message, error) {
+	var (
+		item        outbox.Message
+		payloadRaw  []byte
+		publishedAt *time.Time
+	)
+	err := scanner.Scan(
+		&item.ID, &item.Topic, &item.TaskID, &item.ExecutionID, &item.NodeID,
+		&payloadRaw, &item.CreatedAt, &publishedAt, &item.Attempts,
+	)
+	if err != nil {
+		return outbox.Message{}, err
+	}
+	if publishedAt != nil {
+		item.PublishedAt = publishedAt.UTC()
 	}
 	if len(payloadRaw) > 0 {
 		_ = json.Unmarshal(payloadRaw, &item.Payload)

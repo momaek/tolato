@@ -9,8 +9,10 @@ import (
 
 	"github.com/momaek/tolato/internal/server/domain/audit"
 	"github.com/momaek/tolato/internal/server/domain/node"
+	"github.com/momaek/tolato/internal/server/domain/outbox"
 	"github.com/momaek/tolato/internal/server/domain/plan"
 	"github.com/momaek/tolato/internal/server/domain/policy"
+	domainsummary "github.com/momaek/tolato/internal/server/domain/summary"
 	"github.com/momaek/tolato/internal/server/domain/task"
 	"github.com/momaek/tolato/internal/server/infra/idgen"
 	"github.com/momaek/tolato/internal/shared/types"
@@ -20,6 +22,7 @@ type Services struct {
 	RegisterNode       RegisterNode
 	AuthenticateAgent  AuthenticateAgent
 	HeartbeatNode      HeartbeatNode
+	DisconnectNode     DisconnectNode
 	GenerateTaskPlan   GenerateTaskPlan
 	ApproveTask        ApproveTask
 	RejectTask         RejectTask
@@ -32,6 +35,7 @@ type Services struct {
 	ListAuditEvents    ListAuditEvents
 	RecordTaskLog      RecordTaskLog
 	RecordTaskResult   RecordTaskResult
+	TimeoutTasks       TimeoutTasks
 }
 
 type TaskDispatcher interface {
@@ -43,10 +47,12 @@ type dependencies struct {
 	Planner         plan.Planner
 	SchemaValidator plan.SchemaValidator
 	PolicyValidator policy.Validator
+	SummaryService  domainsummary.Service
 	NodeRepo        node.Repository
 	SessionStore    node.SessionStore
 	TaskRepo        task.Repository
 	AuditRepo       audit.Repository
+	OutboxRepo      outbox.Repository
 	IDGen           idgen.Generator
 	Dispatcher      TaskDispatcher
 }
@@ -119,7 +125,7 @@ func (uc HeartbeatNode) Execute(ctx context.Context, in HeartbeatInput) error {
 	return uc.SessionStore.Upsert(ctx, node.NodeSession{
 		NodeID:          in.NodeID,
 		SessionID:       in.SessionID,
-		ConnectedAt:     now,
+		ConnectedAt:     connectedAt(uc.SessionStore, ctx, in.SessionID, now),
 		LastHeartbeatAt: now,
 		RemoteAddr:      in.RemoteAddr,
 		Capabilities:    in.Capabilities,
@@ -127,18 +133,95 @@ func (uc HeartbeatNode) Execute(ctx context.Context, in HeartbeatInput) error {
 	})
 }
 
+type DisconnectNodeInput struct {
+	NodeID    string
+	SessionID string
+	Reason    string
+}
+
+type DisconnectNode struct {
+	NodeRepo     node.Repository
+	SessionStore node.SessionStore
+	TaskRepo     task.Repository
+	AuditRepo    audit.Repository
+	OutboxRepo   outbox.Repository
+	IDGen        idgen.Generator
+}
+
+func (uc DisconnectNode) Execute(ctx context.Context, in DisconnectNodeInput) error {
+	if in.NodeID == "" || in.SessionID == "" {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	if uc.SessionStore != nil {
+		_ = uc.SessionStore.MarkDisconnected(ctx, in.SessionID, now)
+	}
+	if uc.NodeRepo != nil {
+		_ = uc.NodeRepo.UpdatePresence(ctx, in.NodeID, "", "stale", now)
+	}
+
+	if uc.TaskRepo == nil {
+		return nil
+	}
+
+	tasks, err := uc.TaskRepo.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range tasks {
+		executions, err := uc.TaskRepo.ListExecutions(ctx, item.ID)
+		if err != nil {
+			return err
+		}
+		for _, execution := range executions {
+			if execution.NodeID != in.NodeID {
+				continue
+			}
+			switch execution.Status {
+			case "queued", "dispatched":
+				execution.Status = "queued"
+				execution.StatusReason = "agent disconnected before execution"
+				if err := uc.TaskRepo.UpsertExecution(ctx, execution); err != nil {
+					return err
+				}
+				enqueueOutbox(ctx, uc.OutboxRepo, uc.IDGen, types.OutboxMessage{
+					ID:          uc.IDGen.New(),
+					Topic:       "task.dispatch",
+					TaskID:      item.ID,
+					ExecutionID: execution.ID,
+					NodeID:      execution.NodeID,
+					Payload: map[string]any{
+						"steps":       item.Plan.Steps,
+						"timeout_sec": maxStepTimeout(item.Plan.Steps),
+					},
+					CreatedAt: now,
+				})
+			case "running":
+				recordAudit(ctx, uc.AuditRepo, uc.IDGen, item.ID, "system", "task_execution_agent_disconnected", map[string]any{
+					"execution_id": execution.ID,
+					"node_id":      execution.NodeID,
+					"reason":       in.Reason,
+				}, now)
+			}
+		}
+	}
+	return nil
+}
+
 type GenerateTaskPlan struct {
 	Planner         plan.Planner
 	SchemaValidator plan.SchemaValidator
 	PolicyValidator policy.Validator
+	SummaryService  domainsummary.Service
 	NodeRepo        node.Repository
 	TaskRepo        task.Repository
 	AuditRepo       audit.Repository
+	OutboxRepo      outbox.Repository
 	IDGen           idgen.Generator
-	Dispatcher      TaskDispatcher
 }
 
-func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanRequest) (types.TaskPlanResponse, error) {
+func (uc GenerateTaskPlan) Execute(ctx context.Context, user types.CurrentUser, req types.TaskPlanRequest) (types.TaskPlanResponse, error) {
 	if req.Mode == "" {
 		return types.TaskPlanResponse{}, errors.New("mode is required")
 	}
@@ -161,6 +244,9 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 		Nodes:     resolvedTargets,
 	})
 	if err != nil {
+		if req.Mode == "manual_command" {
+			return uc.createRejectedManualCommand(ctx, user, req, err)
+		}
 		return types.TaskPlanResponse{}, err
 	}
 
@@ -177,9 +263,15 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 	if err := uc.PolicyValidator.ValidatePlan(ctx, &draft); err != nil {
 		draft, err = uc.Planner.RepairPlan(ctx, plan.RepairInput{Original: draft, Reason: err.Error()})
 		if err != nil {
+			if req.Mode == "manual_command" {
+				return uc.createRejectedManualCommand(ctx, user, req, err)
+			}
 			return types.TaskPlanResponse{}, err
 		}
 		if err := uc.PolicyValidator.ValidatePlan(ctx, &draft); err != nil {
+			if req.Mode == "manual_command" {
+				return uc.createRejectedManualCommand(ctx, user, req, err)
+			}
 			return types.TaskPlanResponse{}, err
 		}
 	}
@@ -194,17 +286,20 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 	}
 
 	model := task.Task{
-		ID:             taskID,
-		Mode:           req.Mode,
-		InitiatorID:    "u_admin",
-		Target:         req.Target,
-		InputText:      req.InputText,
-		Plan:           types.Plan(draft),
-		RiskLevel:      draft.RiskLevel,
-		ApprovalStatus: approvalStatus,
-		FinalStatus:    finalStatus,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:                   taskID,
+		Mode:                 req.Mode,
+		InitiatorID:          user.ID,
+		InitiatorRole:        user.Role,
+		Target:               req.Target,
+		InputText:            req.InputText,
+		Plan:                 types.Plan(draft),
+		RiskLevel:            draft.RiskLevel,
+		ApprovalStatus:       approvalStatus,
+		RequiredApprovalRole: draft.RequiredApprovalRole,
+		FinalStatus:          finalStatus,
+		SummarySource:        "planner",
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	if err := uc.TaskRepo.Create(ctx, model); err != nil {
 		return types.TaskPlanResponse{}, err
@@ -213,11 +308,15 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 	if err := uc.AuditRepo.Create(ctx, audit.AuditEvent{
 		ID:        uc.IDGen.New(),
 		TaskID:    taskID,
-		ActorID:   "u_admin",
+		ActorID:   user.ID,
 		EventType: "task_planned",
 		Payload: map[string]any{
-			"mode":   req.Mode,
-			"target": req.Target,
+			"mode":            req.Mode,
+			"target":          req.Target,
+			"target_nodes":    draft.TargetNodes,
+			"input_text":      req.InputText,
+			"approval_status": approvalStatus,
+			"plan_json":       draft,
 		},
 		CreatedAt: now,
 	}); err != nil {
@@ -230,7 +329,7 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 			TaskID:    taskID,
 			ActorID:   "system",
 			EventType: "task_approval_requested",
-			Payload:   map[string]any{"risk_level": draft.RiskLevel},
+			Payload:   map[string]any{"risk_level": draft.RiskLevel, "required_approval_role": draft.RequiredApprovalRole},
 			CreatedAt: now,
 		}); err != nil {
 			return types.TaskPlanResponse{}, err
@@ -251,19 +350,58 @@ func (uc GenerateTaskPlan) Execute(ctx context.Context, req types.TaskPlanReques
 	}, nil
 }
 
-type taskMutation struct {
-	NodeRepo   node.Repository
-	TaskRepo   task.Repository
-	AuditRepo  audit.Repository
-	IDGen      idgen.Generator
-	Dispatcher TaskDispatcher
-	status     string
-	finalState string
-	eventType  string
-	message    string
+func (uc GenerateTaskPlan) createRejectedManualCommand(ctx context.Context, user types.CurrentUser, req types.TaskPlanRequest, reason error) (types.TaskPlanResponse, error) {
+	now := time.Now().UTC()
+	taskID := uc.IDGen.New()
+	model := task.Task{
+		ID:             taskID,
+		Mode:           req.Mode,
+		InitiatorID:    user.ID,
+		InitiatorRole:  user.Role,
+		Target:         req.Target,
+		InputText:      req.InputText,
+		Plan:           types.Plan{TargetNodes: req.Target, Summary: "manual command rejected", EstimatedImpact: "策略拒绝该命令", RiskLevel: "forbidden"},
+		RiskLevel:      "forbidden",
+		ApprovalStatus: "rejected",
+		FinalStatus:    "cancelled",
+		StatusReason:   reason.Error(),
+		ResultSummary:  reason.Error(),
+		Summary:        reason.Error(),
+		SummarySource:  "policy",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := uc.TaskRepo.Create(ctx, model); err != nil {
+		return types.TaskPlanResponse{}, err
+	}
+	recordAudit(ctx, uc.AuditRepo, uc.IDGen, taskID, user.ID, "manual_command_rejected", map[string]any{
+		"input_text":      req.InputText,
+		"target_nodes":    req.Target,
+		"approval_status": model.ApprovalStatus,
+		"result_summary":  reason.Error(),
+		"reason":          reason.Error(),
+	}, now)
+	return types.TaskPlanResponse{
+		TaskID: taskID,
+		Status: model.FinalStatus,
+		Plan:   model.Plan,
+	}, nil
 }
 
-func (uc taskMutation) Execute(ctx context.Context, taskID string) (types.TaskMutationResponse, error) {
+type taskMutation struct {
+	NodeRepo       node.Repository
+	TaskRepo       task.Repository
+	AuditRepo      audit.Repository
+	OutboxRepo     outbox.Repository
+	SummaryService domainsummary.Service
+	IDGen          idgen.Generator
+	status         string
+	finalState     string
+	eventType      string
+	message        string
+}
+
+func (uc taskMutation) Execute(ctx context.Context, user types.CurrentUser, taskID string) (types.TaskMutationResponse, error) {
 	if taskID == "" {
 		return types.TaskMutationResponse{}, errors.New("task id is required")
 	}
@@ -278,6 +416,9 @@ func (uc taskMutation) Execute(ctx context.Context, taskID string) (types.TaskMu
 		if current.ApprovalStatus != "pending" {
 			return types.TaskMutationResponse{}, errors.New("task is not waiting for approval")
 		}
+		if current.RequiredApprovalRole == "admin" && user.Role != "admin" {
+			return types.TaskMutationResponse{}, errors.New("task requires admin approval")
+		}
 	case "rejected":
 		if current.ApprovalStatus != "pending" {
 			return types.TaskMutationResponse{}, errors.New("task is not waiting for rejection")
@@ -287,6 +428,7 @@ func (uc taskMutation) Execute(ctx context.Context, taskID string) (types.TaskMu
 	current.ApprovalStatus = uc.status
 	current.FinalStatus = uc.finalState
 	current.StatusReason = uc.message
+	current.ApproverID = user.ID
 	current.UpdatedAt = time.Now().UTC()
 
 	if err := uc.TaskRepo.Update(ctx, *current); err != nil {
@@ -296,9 +438,9 @@ func (uc taskMutation) Execute(ctx context.Context, taskID string) (types.TaskMu
 	if err := uc.AuditRepo.Create(ctx, audit.AuditEvent{
 		ID:        uc.IDGen.New(),
 		TaskID:    current.ID,
-		ActorID:   "u_admin",
+		ActorID:   user.ID,
 		EventType: uc.eventType,
-		Payload:   map[string]any{"final_status": current.FinalStatus},
+		Payload:   map[string]any{"final_status": current.FinalStatus, "approval_status": current.ApprovalStatus, "approver_id": current.ApproverID},
 		CreatedAt: current.UpdatedAt,
 	}); err != nil {
 		return types.TaskMutationResponse{}, err
@@ -520,9 +662,10 @@ type TaskResultInput struct {
 }
 
 type RecordTaskResult struct {
-	TaskRepo  task.Repository
-	AuditRepo audit.Repository
-	IDGen     idgen.Generator
+	TaskRepo       task.Repository
+	AuditRepo      audit.Repository
+	SummaryService domainsummary.Service
+	IDGen          idgen.Generator
 }
 
 func (uc RecordTaskResult) Execute(ctx context.Context, in TaskResultInput) (types.TaskResponse, error) {
@@ -570,9 +713,9 @@ func (uc RecordTaskResult) Execute(ctx context.Context, in TaskResultInput) (typ
 	}
 
 	aggregate := buildTaskAggregate(*model, refreshed)
-	model.FinalStatus = finalTaskStatus(*model, aggregate)
+	model.FinalStatus = finalTaskStatus(*model, refreshed, aggregate)
 	model.UpdatedAt = in.Timestamp.UTC()
-	model.StatusReason = buildTaskSummary(*model, aggregate)
+	applyTaskSummary(ctx, uc.SummaryService, model, refreshed, aggregate)
 	if err := uc.TaskRepo.Update(ctx, *model); err != nil {
 		return types.TaskResponse{}, err
 	}
@@ -603,53 +746,58 @@ func (uc RecordTaskResult) Execute(ctx context.Context, in TaskResultInput) (typ
 	return hydrateTaskResponse(ctx, uc.TaskRepo, *model)
 }
 
-func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, policyValidator policy.Validator, nodeRepo node.Repository, sessionStore node.SessionStore, taskRepo task.Repository, auditRepo audit.Repository, idGenerator idgen.Generator, dispatcher TaskDispatcher) Services {
+func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, policyValidator policy.Validator, summaryService domainsummary.Service, nodeRepo node.Repository, sessionStore node.SessionStore, taskRepo task.Repository, auditRepo audit.Repository, outboxRepo outbox.Repository, idGenerator idgen.Generator) Services {
 	return Services{
 		RegisterNode:      RegisterNode{NodeRepo: nodeRepo, IDGen: idGenerator},
 		AuthenticateAgent: AuthenticateAgent{NodeRepo: nodeRepo},
 		HeartbeatNode:     HeartbeatNode{NodeRepo: nodeRepo, SessionStore: sessionStore},
+		DisconnectNode:    DisconnectNode{NodeRepo: nodeRepo, SessionStore: sessionStore, TaskRepo: taskRepo, AuditRepo: auditRepo, OutboxRepo: outboxRepo, IDGen: idGenerator},
 		GenerateTaskPlan: GenerateTaskPlan{
 			Planner:         planner,
 			SchemaValidator: schemaValidator,
 			PolicyValidator: policyValidator,
+			SummaryService:  summaryService,
 			NodeRepo:        nodeRepo,
 			TaskRepo:        taskRepo,
 			AuditRepo:       auditRepo,
+			OutboxRepo:      outboxRepo,
 			IDGen:           idGenerator,
-			Dispatcher:      dispatcher,
 		},
 		ApproveTask: ApproveTask{taskMutation{
-			NodeRepo:   nodeRepo,
-			TaskRepo:   taskRepo,
-			AuditRepo:  auditRepo,
-			IDGen:      idGenerator,
-			Dispatcher: dispatcher,
-			status:     "approved",
-			finalState: "approved",
-			eventType:  "task_approved",
-			message:    "task approved",
+			NodeRepo:       nodeRepo,
+			TaskRepo:       taskRepo,
+			AuditRepo:      auditRepo,
+			OutboxRepo:     outboxRepo,
+			SummaryService: summaryService,
+			IDGen:          idGenerator,
+			status:         "approved",
+			finalState:     "approved",
+			eventType:      "task_approved",
+			message:        "task approved",
 		}},
 		RejectTask: RejectTask{taskMutation{
-			NodeRepo:   nodeRepo,
-			TaskRepo:   taskRepo,
-			AuditRepo:  auditRepo,
-			IDGen:      idGenerator,
-			Dispatcher: dispatcher,
-			status:     "rejected",
-			finalState: "cancelled",
-			eventType:  "task_rejected",
-			message:    "task rejected",
+			NodeRepo:       nodeRepo,
+			TaskRepo:       taskRepo,
+			AuditRepo:      auditRepo,
+			OutboxRepo:     outboxRepo,
+			SummaryService: summaryService,
+			IDGen:          idGenerator,
+			status:         "rejected",
+			finalState:     "cancelled",
+			eventType:      "task_rejected",
+			message:        "task rejected",
 		}},
 		CancelTask: CancelTask{taskMutation{
-			NodeRepo:   nodeRepo,
-			TaskRepo:   taskRepo,
-			AuditRepo:  auditRepo,
-			IDGen:      idGenerator,
-			Dispatcher: dispatcher,
-			status:     "cancelled",
-			finalState: "cancelled",
-			eventType:  "task_cancelled",
-			message:    "task cancelled",
+			NodeRepo:       nodeRepo,
+			TaskRepo:       taskRepo,
+			AuditRepo:      auditRepo,
+			OutboxRepo:     outboxRepo,
+			SummaryService: summaryService,
+			IDGen:          idGenerator,
+			status:         "cancelled",
+			finalState:     "cancelled",
+			eventType:      "task_cancelled",
+			message:        "task cancelled",
 		}},
 		ListNodes:          ListNodes{NodeRepo: nodeRepo},
 		GetNode:            GetNode{NodeRepo: nodeRepo},
@@ -658,7 +806,8 @@ func NewServices(planner plan.Planner, schemaValidator plan.SchemaValidator, pol
 		ListTaskExecutions: ListTaskExecutions{TaskRepo: taskRepo},
 		ListAuditEvents:    ListAuditEvents{AuditRepo: auditRepo},
 		RecordTaskLog:      RecordTaskLog{TaskRepo: taskRepo, AuditRepo: auditRepo, IDGen: idGenerator},
-		RecordTaskResult:   RecordTaskResult{TaskRepo: taskRepo, AuditRepo: auditRepo, IDGen: idGenerator},
+		RecordTaskResult:   RecordTaskResult{TaskRepo: taskRepo, AuditRepo: auditRepo, SummaryService: summaryService, IDGen: idGenerator},
+		TimeoutTasks:       TimeoutTasks{TaskRepo: taskRepo, AuditRepo: auditRepo, IDGen: idGenerator},
 	}
 }
 
@@ -672,6 +821,9 @@ func hydrateTaskResponse(ctx context.Context, repo task.Repository, model task.T
 	summary := buildTaskSummary(model, aggregate)
 	model.Aggregate = aggregate
 	model.Summary = summary
+	if model.ResultSummary == "" {
+		model.ResultSummary = summary
+	}
 
 	return types.TaskResponse{
 		Task:      model,
@@ -730,10 +882,13 @@ func buildTaskAggregate(model task.Task, executions []task.TaskExecution) types.
 }
 
 func buildTaskSummary(model task.Task, aggregate types.TaskAggregate) string {
+	if model.ResultSummary != "" && aggregate.Running == 0 && model.FinalStatus != "waiting_approval" {
+		return model.ResultSummary
+	}
 	if model.FinalStatus == "waiting_approval" {
 		return "Task is waiting for approval."
 	}
-	if model.FinalStatus == "approved" && aggregate.Running == 0 && aggregate.Success == 0 && aggregate.Failed == 0 {
+	if (model.FinalStatus == "approved" || model.FinalStatus == "queued") && aggregate.Running == 0 && aggregate.Success == 0 && aggregate.Failed == 0 {
 		return "Task approved and waiting for execution."
 	}
 	if model.FinalStatus == "cancelled" && model.StatusReason != "" {
@@ -751,7 +906,7 @@ func buildTaskSummary(model task.Task, aggregate types.TaskAggregate) string {
 	return model.Plan.Summary
 }
 
-func finalTaskStatus(model task.Task, aggregate types.TaskAggregate) string {
+func finalTaskStatus(model task.Task, executions []task.TaskExecution, aggregate types.TaskAggregate) string {
 	if model.FinalStatus == "cancelled" || model.FinalStatus == "timeout" {
 		return model.FinalStatus
 	}
@@ -761,7 +916,22 @@ func finalTaskStatus(model task.Task, aggregate types.TaskAggregate) string {
 	if aggregate.Success+aggregate.Failed+aggregate.OfflineSkipped < aggregate.Total {
 		return "running"
 	}
-	if aggregate.Failed > 0 && aggregate.Success > 0 {
+
+	timeoutCount := 0
+	hardFailureCount := 0
+	for _, execution := range executions {
+		switch execution.Status {
+		case "timeout":
+			timeoutCount++
+		case "failed", "partial_failed":
+			hardFailureCount++
+		}
+	}
+
+	if timeoutCount > 0 && aggregate.Success == 0 && hardFailureCount == 0 {
+		return "timeout"
+	}
+	if aggregate.Failed > 0 && (aggregate.Success > 0 || timeoutCount > 0) {
 		return "partial_failed"
 	}
 	if aggregate.Failed > 0 {
@@ -807,20 +977,20 @@ func finalExecutionSummary(execution task.TaskExecution) string {
 }
 
 func (uc GenerateTaskPlan) dispatchTask(ctx context.Context, model *task.Task, reason string) error {
-	return dispatchTask(ctx, uc.NodeRepo, uc.TaskRepo, uc.AuditRepo, uc.IDGen, uc.Dispatcher, model, reason)
+	return dispatchTask(ctx, uc.NodeRepo, uc.TaskRepo, uc.AuditRepo, uc.OutboxRepo, uc.IDGen, model, reason)
 }
 
 func (uc taskMutation) dispatchTask(ctx context.Context, model *task.Task, reason string) error {
-	return dispatchTask(ctx, uc.NodeRepo, uc.TaskRepo, uc.AuditRepo, uc.IDGen, uc.Dispatcher, model, reason)
+	return dispatchTask(ctx, uc.NodeRepo, uc.TaskRepo, uc.AuditRepo, uc.OutboxRepo, uc.IDGen, model, reason)
 }
 
 func (uc taskMutation) cancelTask(ctx context.Context, model *task.Task, reason string) error {
-	return cancelTask(ctx, uc.TaskRepo, uc.AuditRepo, uc.IDGen, uc.Dispatcher, model, reason)
+	return cancelTask(ctx, uc.TaskRepo, uc.AuditRepo, uc.OutboxRepo, uc.IDGen, model, reason)
 }
 
-func dispatchTask(ctx context.Context, nodeRepo node.Repository, taskRepo task.Repository, auditRepo audit.Repository, idGen idgen.Generator, dispatcher TaskDispatcher, model *task.Task, reason string) error {
-	if dispatcher == nil {
-		return errors.New("task dispatcher is not configured")
+func dispatchTask(ctx context.Context, nodeRepo node.Repository, taskRepo task.Repository, auditRepo audit.Repository, outboxRepo outbox.Repository, idGen idgen.Generator, model *task.Task, reason string) error {
+	if outboxRepo == nil {
+		return errors.New("outbox repository is not configured")
 	}
 
 	targets, err := resolveTargetNodes(ctx, nodeRepo, *model)
@@ -869,38 +1039,24 @@ func dispatchTask(ctx context.Context, nodeRepo node.Repository, taskRepo task.R
 			"node_id":      target.ID,
 			"reason":       reason,
 		}, now)
-
-		if err := dispatcher.DispatchTask(ctx, target.ID, model.ID, execution.ID, model.Plan.Steps, maxStepTimeout(model.Plan.Steps)); err != nil {
-			execution.Status = "failed"
-			execution.FinishedAt = now
-			execution.ExitCode = 1
-			execution.StatusReason = fmt.Sprintf("dispatch failed: %v", err)
-			if err := taskRepo.UpsertExecution(ctx, execution); err != nil {
-				return err
-			}
-			recordAudit(ctx, auditRepo, idGen, model.ID, "system", "task_execution_dispatch_failed", map[string]any{
-				"execution_id": execution.ID,
-				"node_id":      target.ID,
-				"reason":       execution.StatusReason,
-			}, now)
-			continue
-		}
-
-		execution.Status = "dispatched"
-		execution.StatusReason = "dispatched to agent"
-		if err := taskRepo.UpsertExecution(ctx, execution); err != nil {
-			return err
-		}
-		recordAudit(ctx, auditRepo, idGen, model.ID, "system", "task_execution_dispatched", map[string]any{
-			"execution_id": execution.ID,
-			"node_id":      target.ID,
-		}, now)
+		enqueueOutbox(ctx, outboxRepo, idGen, types.OutboxMessage{
+			ID:          idGen.New(),
+			Topic:       "task.dispatch",
+			TaskID:      model.ID,
+			ExecutionID: execution.ID,
+			NodeID:      target.ID,
+			Payload: map[string]any{
+				"steps":       model.Plan.Steps,
+				"timeout_sec": maxStepTimeout(model.Plan.Steps),
+			},
+			CreatedAt: now,
+		})
 	}
 
 	return syncTaskState(ctx, taskRepo, model, now)
 }
 
-func cancelTask(ctx context.Context, taskRepo task.Repository, auditRepo audit.Repository, idGen idgen.Generator, dispatcher TaskDispatcher, model *task.Task, reason string) error {
+func cancelTask(ctx context.Context, taskRepo task.Repository, auditRepo audit.Repository, outboxRepo outbox.Repository, idGen idgen.Generator, model *task.Task, reason string) error {
 	executions, err := taskRepo.ListExecutions(ctx, model.ID)
 	if err != nil {
 		return err
@@ -912,16 +1068,21 @@ func cancelTask(ctx context.Context, taskRepo task.Repository, auditRepo audit.R
 			continue
 		}
 
-		if dispatcher != nil {
-			_ = dispatcher.CancelTask(ctx, execution.NodeID, model.ID, execution.ID, reason)
-		}
-
 		execution.Status = "cancelled"
 		execution.FinishedAt = now
 		execution.StatusReason = reason
 		if err := taskRepo.UpsertExecution(ctx, execution); err != nil {
 			return err
 		}
+		enqueueOutbox(ctx, outboxRepo, idGen, types.OutboxMessage{
+			ID:          idGen.New(),
+			Topic:       "task.cancel",
+			TaskID:      model.ID,
+			ExecutionID: execution.ID,
+			NodeID:      execution.NodeID,
+			Payload:     map[string]any{"reason": reason},
+			CreatedAt:   now,
+		})
 		recordAudit(ctx, auditRepo, idGen, model.ID, "system", "task_execution_cancel_requested", map[string]any{
 			"execution_id": execution.ID,
 			"node_id":      execution.NodeID,
@@ -972,6 +1133,9 @@ func syncTaskState(ctx context.Context, repo task.Repository, model *task.Task, 
 
 	aggregate := buildTaskAggregate(*model, executions)
 	switch {
+	case hasQueuedExecution(executions):
+		model.FinalStatus = "queued"
+		model.StatusReason = "task queued for dispatch workers"
 	case aggregate.Running > 0:
 		model.FinalStatus = "dispatched"
 		model.StatusReason = "task dispatched to target nodes"
@@ -979,7 +1143,7 @@ func syncTaskState(ctx context.Context, repo task.Repository, model *task.Task, 
 		model.FinalStatus = "cancelled"
 		model.StatusReason = "all target nodes were skipped because they are offline"
 	default:
-		model.FinalStatus = finalTaskStatus(*model, aggregate)
+		model.FinalStatus = finalTaskStatus(*model, executions, aggregate)
 		model.StatusReason = buildTaskSummary(*model, aggregate)
 	}
 	model.UpdatedAt = now
@@ -1012,4 +1176,79 @@ func recordAudit(ctx context.Context, repo audit.Repository, idGen idgen.Generat
 
 func isOfflineSkippedExecution(execution task.TaskExecution) bool {
 	return strings.EqualFold(execution.StatusReason, "offline skipped")
+}
+
+func connectedAt(store node.SessionStore, ctx context.Context, sessionID string, fallback time.Time) time.Time {
+	if store == nil || sessionID == "" {
+		return fallback
+	}
+	item, err := store.Get(ctx, sessionID)
+	if err != nil || item == nil || item.ConnectedAt.IsZero() {
+		return fallback
+	}
+	return item.ConnectedAt.UTC()
+}
+
+func enqueueOutbox(ctx context.Context, repo outbox.Repository, idGen idgen.Generator, message types.OutboxMessage) {
+	if repo == nil {
+		return
+	}
+	if message.ID == "" {
+		message.ID = idGen.New()
+	}
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
+	}
+	message.Attempts = 0
+	_ = repo.Create(ctx, message)
+}
+
+func applyTaskSummary(ctx context.Context, service domainsummary.Service, model *task.Task, executions []task.TaskExecution, aggregate types.TaskAggregate) {
+	if service == nil {
+		model.StatusReason = buildTaskSummary(*model, aggregate)
+		model.ResultSummary = model.StatusReason
+		model.Summary = model.StatusReason
+		model.SummarySource = "rule_fallback"
+		model.FailureNodeIDs = failureNodeIDs(executions)
+		return
+	}
+
+	result, err := service.SummarizeTask(ctx, *model, executions, aggregate)
+	if err != nil || strings.TrimSpace(result.Summary) == "" {
+		model.StatusReason = buildTaskSummary(*model, aggregate)
+		model.ResultSummary = model.StatusReason
+		model.Summary = model.StatusReason
+		model.SummarySource = "rule_fallback"
+		model.FailureNodeIDs = failureNodeIDs(executions)
+		return
+	}
+
+	model.StatusReason = result.Summary
+	model.ResultSummary = result.ResultSummary
+	if model.ResultSummary == "" {
+		model.ResultSummary = result.Summary
+	}
+	model.Summary = result.Summary
+	model.SummarySource = result.Source
+	model.FailureNodeIDs = result.FailureNodeIDs
+}
+
+func failureNodeIDs(executions []task.TaskExecution) []string {
+	items := make([]string, 0)
+	for _, execution := range executions {
+		switch execution.Status {
+		case "failed", "partial_failed", "timeout", "cancelled":
+			items = append(items, execution.NodeID)
+		}
+	}
+	return items
+}
+
+func hasQueuedExecution(executions []task.TaskExecution) bool {
+	for _, execution := range executions {
+		if execution.Status == "queued" {
+			return true
+		}
+	}
+	return false
 }

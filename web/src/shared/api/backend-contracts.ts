@@ -27,6 +27,8 @@ import {
 
 const rawUserSchema = z.object({
   id: z.string(),
+  name: z.string().optional(),
+  username: z.string().optional(),
   role: z.string(),
 })
 
@@ -97,13 +99,19 @@ const rawTaskSchema = z.object({
   parent_task_id: z.string().nullable().optional(),
   mode: z.string(),
   initiator_id: z.string(),
+  initiator_role: z.string().optional(),
   target: z.array(z.string()).default([]),
   input_text: z.string(),
   plan: rawPlanSchema,
   risk_level: z.string(),
   approval_status: z.string(),
+  required_approval_role: z.string().optional().default(""),
+  approver_id: z.string().optional().default(""),
   final_status: z.string(),
   status_reason: z.string().optional().default(""),
+  result_summary: z.string().optional().default(""),
+  failure_node_ids: z.array(z.string()).optional().default([]),
+  summary_source: z.string().optional().default(""),
   created_at: z.string(),
   updated_at: z.string(),
 })
@@ -241,7 +249,8 @@ export function mapMeResponse(input: unknown): SessionInfo {
 
   return sessionSchema.parse({
     id: parsed.user.id,
-    name: parsed.user.id,
+    name: parsed.user.name ?? parsed.user.id,
+    username: parsed.user.username,
     role: parsed.user.role,
   })
 }
@@ -252,7 +261,8 @@ export function mapLoginResponse(input: unknown): { session: SessionInfo; token:
   return {
     session: sessionSchema.parse({
       id: parsed.user.id,
-      name: parsed.user.id,
+      name: parsed.user.name ?? parsed.user.id,
+      username: parsed.user.username,
       role: parsed.user.role,
     }),
     token: parsed.token,
@@ -343,11 +353,15 @@ export function mapTaskDetailResponse(input: unknown, executions: TaskExecution[
     updatedAt: parsed.task.updated_at,
     status: normalizeTaskStatus(parsed.task.final_status),
     approvalStatus: normalizeApprovalStatus(parsed.task.approval_status),
+    requiredApprovalRole: parsed.task.required_approval_role || undefined,
     riskLevel: normalizeRiskLevel(parsed.task.risk_level),
     statusReason: parsed.task.status_reason,
     plan,
     aggregate,
     summary,
+    resultSummary: parsed.task.result_summary || summary,
+    failureNodeIds: parsed.task.failure_node_ids,
+    summarySource: parsed.task.summary_source || undefined,
     executions,
   })
 }

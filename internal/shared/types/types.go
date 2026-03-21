@@ -30,19 +30,21 @@ type NodeSession struct {
 	SessionID       string    `json:"session_id"`
 	ConnectedAt     time.Time `json:"connected_at"`
 	LastHeartbeatAt time.Time `json:"last_heartbeat_at"`
+	DisconnectedAt  time.Time `json:"disconnected_at,omitempty"`
 	RemoteAddr      string    `json:"remote_addr"`
 	Capabilities    []string  `json:"capabilities"`
 	Status          string    `json:"status"`
 }
 
 type Plan struct {
-	TargetNodes      []string          `json:"target_nodes"`
-	Summary          string            `json:"summary"`
-	EstimatedImpact  string            `json:"estimated_impact"`
-	RiskLevel        string            `json:"risk_level"`
-	RequiresApproval bool              `json:"requires_approval"`
-	Steps            []PlanStep        `json:"steps"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
+	TargetNodes          []string          `json:"target_nodes"`
+	Summary              string            `json:"summary"`
+	EstimatedImpact      string            `json:"estimated_impact"`
+	RiskLevel            string            `json:"risk_level"`
+	RequiresApproval     bool              `json:"requires_approval"`
+	RequiredApprovalRole string            `json:"required_approval_role,omitempty"`
+	Steps                []PlanStep        `json:"steps"`
+	Metadata             map[string]string `json:"metadata,omitempty"`
 }
 
 type PlanDraft = Plan
@@ -56,21 +58,27 @@ type PlanStep struct {
 }
 
 type Task struct {
-	ID             string        `json:"id"`
-	ParentTaskID   string        `json:"parent_task_id,omitempty"`
-	Mode           string        `json:"mode"`
-	InitiatorID    string        `json:"initiator_id"`
-	Target         []string      `json:"target"`
-	InputText      string        `json:"input_text"`
-	Plan           Plan          `json:"plan"`
-	RiskLevel      string        `json:"risk_level"`
-	ApprovalStatus string        `json:"approval_status"`
-	FinalStatus    string        `json:"final_status"`
-	StatusReason   string        `json:"status_reason"`
-	CreatedAt      time.Time     `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
-	Aggregate      TaskAggregate `json:"aggregate,omitempty"`
-	Summary        string        `json:"summary,omitempty"`
+	ID                   string        `json:"id"`
+	ParentTaskID         string        `json:"parent_task_id,omitempty"`
+	Mode                 string        `json:"mode"`
+	InitiatorID          string        `json:"initiator_id"`
+	InitiatorRole        string        `json:"initiator_role,omitempty"`
+	Target               []string      `json:"target"`
+	InputText            string        `json:"input_text"`
+	Plan                 Plan          `json:"plan"`
+	RiskLevel            string        `json:"risk_level"`
+	ApprovalStatus       string        `json:"approval_status"`
+	RequiredApprovalRole string        `json:"required_approval_role,omitempty"`
+	ApproverID           string        `json:"approver_id,omitempty"`
+	FinalStatus          string        `json:"final_status"`
+	StatusReason         string        `json:"status_reason"`
+	ResultSummary        string        `json:"result_summary,omitempty"`
+	FailureNodeIDs       []string      `json:"failure_node_ids,omitempty"`
+	SummarySource        string        `json:"summary_source,omitempty"`
+	CreatedAt            time.Time     `json:"created_at"`
+	UpdatedAt            time.Time     `json:"updated_at"`
+	Aggregate            TaskAggregate `json:"aggregate,omitempty"`
+	Summary              string        `json:"summary,omitempty"`
 }
 
 type TaskExecution struct {
@@ -108,8 +116,10 @@ type ActionSpec struct {
 }
 
 type CurrentUser struct {
-	ID   string `json:"id"`
-	Role string `json:"role"`
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	Username string `json:"username,omitempty"`
+	Role     string `json:"role"`
 }
 
 type LoginRequest struct {
@@ -174,6 +184,25 @@ type TaskExecutionsResponse struct {
 
 type AuditEventsResponse struct {
 	Events []AuditEvent `json:"events"`
+}
+
+type LLMConfig struct {
+	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
+type OutboxMessage struct {
+	ID          string         `json:"id"`
+	Topic       string         `json:"topic"`
+	TaskID      string         `json:"task_id"`
+	ExecutionID string         `json:"execution_id,omitempty"`
+	NodeID      string         `json:"node_id,omitempty"`
+	Payload     map[string]any `json:"payload"`
+	CreatedAt   time.Time      `json:"created_at"`
+	PublishedAt time.Time      `json:"published_at,omitempty"`
+	Attempts    int            `json:"attempts"`
 }
 
 type EnrollRequest struct {

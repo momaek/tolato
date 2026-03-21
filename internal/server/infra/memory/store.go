@@ -10,6 +10,7 @@ import (
 
 	"github.com/momaek/tolato/internal/server/domain/audit"
 	"github.com/momaek/tolato/internal/server/domain/node"
+	"github.com/momaek/tolato/internal/server/domain/outbox"
 	"github.com/momaek/tolato/internal/server/domain/task"
 )
 
@@ -20,22 +21,25 @@ type backend struct {
 	tasks      map[string]task.Task
 	executions map[string][]task.TaskExecution
 	audits     []audit.AuditEvent
+	outbox     map[string]outbox.Message
 }
 
 type NodeRepo struct{ b *backend }
 type SessionRepo struct{ b *backend }
 type TaskRepo struct{ b *backend }
 type AuditRepo struct{ b *backend }
+type OutboxRepo struct{ b *backend }
 
-func NewStores() (*NodeRepo, *SessionRepo, *TaskRepo, *AuditRepo) {
+func NewStores() (*NodeRepo, *SessionRepo, *TaskRepo, *AuditRepo, *OutboxRepo) {
 	b := &backend{
 		nodes:      make(map[string]node.Node),
 		sessions:   make(map[string]node.NodeSession),
 		tasks:      make(map[string]task.Task),
 		executions: make(map[string][]task.TaskExecution),
 		audits:     make([]audit.AuditEvent, 0),
+		outbox:     make(map[string]outbox.Message),
 	}
-	return &NodeRepo{b: b}, &SessionRepo{b: b}, &TaskRepo{b: b}, &AuditRepo{b: b}
+	return &NodeRepo{b: b}, &SessionRepo{b: b}, &TaskRepo{b: b}, &AuditRepo{b: b}, &OutboxRepo{b: b}
 }
 
 func (r *NodeRepo) List(ctx context.Context) ([]node.Node, error) {
@@ -117,6 +121,54 @@ func (r *SessionRepo) Upsert(ctx context.Context, session node.NodeSession) erro
 	r.b.mu.Lock()
 	defer r.b.mu.Unlock()
 	r.b.sessions[session.SessionID] = session
+	return nil
+}
+
+func (r *SessionRepo) Get(ctx context.Context, sessionID string) (*node.NodeSession, error) {
+	_ = ctx
+	r.b.mu.RLock()
+	defer r.b.mu.RUnlock()
+
+	item, ok := r.b.sessions[sessionID]
+	if !ok {
+		return nil, errors.New("session not found")
+	}
+	copyItem := item
+	return &copyItem, nil
+}
+
+func (r *SessionRepo) ListByNodeID(ctx context.Context, nodeID string) ([]node.NodeSession, error) {
+	_ = ctx
+	r.b.mu.RLock()
+	defer r.b.mu.RUnlock()
+
+	items := make([]node.NodeSession, 0)
+	for _, session := range r.b.sessions {
+		if session.NodeID == nodeID {
+			items = append(items, session)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].ConnectedAt.Before(items[j].ConnectedAt)
+	})
+	return items, nil
+}
+
+func (r *SessionRepo) MarkDisconnected(ctx context.Context, sessionID string, at time.Time) error {
+	_ = ctx
+	r.b.mu.Lock()
+	defer r.b.mu.Unlock()
+
+	item, ok := r.b.sessions[sessionID]
+	if !ok {
+		return errors.New("session not found")
+	}
+	item.Status = "disconnected"
+	item.DisconnectedAt = at.UTC()
+	if item.LastHeartbeatAt.IsZero() {
+		item.LastHeartbeatAt = at.UTC()
+	}
+	r.b.sessions[sessionID] = item
 	return nil
 }
 
@@ -230,4 +282,60 @@ func (r *AuditRepo) ListByTaskID(ctx context.Context, taskID string) ([]audit.Au
 		}
 	}
 	return events, nil
+}
+
+func (r *OutboxRepo) Create(ctx context.Context, message outbox.Message) error {
+	_ = ctx
+	r.b.mu.Lock()
+	defer r.b.mu.Unlock()
+	r.b.outbox[message.ID] = message
+	return nil
+}
+
+func (r *OutboxRepo) ListPending(ctx context.Context, limit int) ([]outbox.Message, error) {
+	_ = ctx
+	r.b.mu.RLock()
+	defer r.b.mu.RUnlock()
+
+	items := make([]outbox.Message, 0)
+	for _, item := range r.b.outbox {
+		if item.PublishedAt.IsZero() {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func (r *OutboxRepo) MarkPublished(ctx context.Context, id string, at time.Time) error {
+	_ = ctx
+	r.b.mu.Lock()
+	defer r.b.mu.Unlock()
+
+	item, ok := r.b.outbox[id]
+	if !ok {
+		return errors.New("outbox message not found")
+	}
+	item.PublishedAt = at.UTC()
+	r.b.outbox[id] = item
+	return nil
+}
+
+func (r *OutboxRepo) IncrementAttempts(ctx context.Context, id string) error {
+	_ = ctx
+	r.b.mu.Lock()
+	defer r.b.mu.Unlock()
+
+	item, ok := r.b.outbox[id]
+	if !ok {
+		return errors.New("outbox message not found")
+	}
+	item.Attempts++
+	r.b.outbox[id] = item
+	return nil
 }

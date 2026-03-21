@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,13 +20,15 @@ import (
 )
 
 type Handler struct {
-	logger   *zap.Logger
-	auth     *infraauth.Service
-	usecases usecase.Services
-	db       *pgxpool.Pool
-	redis    *goredis.Client
-	presence *presence.Store
-	uiws     *wsui.Handler
+	logger                 *zap.Logger
+	auth                   *infraauth.Service
+	usecases               usecase.Services
+	db                     *pgxpool.Pool
+	redis                  *goredis.Client
+	presence               *presence.Store
+	uiws                   *wsui.Handler
+	requireSecureTransport bool
+	trustProxyTLS          bool
 }
 
 func (h Handler) Healthz(w http.ResponseWriter, r *http.Request) {
@@ -45,13 +48,16 @@ func (h Handler) Readyz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) Login(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureSecureTransport(w, r) {
+		return
+	}
 	var req types.LoginRequest
 	if err := errs.DecodeJSON(r, &req); err != nil {
 		errs.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	resp, err := h.auth.Login(req.Username, req.Password)
+	resp, err := h.auth.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		errs.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -110,7 +116,8 @@ func (h Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) GenerateTaskPlan(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorizeRequest(w, r); !ok {
+	user, ok := h.authorizeRequest(w, r)
+	if !ok {
 		return
 	}
 	var req types.TaskPlanRequest
@@ -119,7 +126,7 @@ func (h Handler) GenerateTaskPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.usecases.GenerateTaskPlan.Execute(r.Context(), req)
+	resp, err := h.usecases.GenerateTaskPlan.Execute(r.Context(), user, req)
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -130,10 +137,11 @@ func (h Handler) GenerateTaskPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ApproveTask(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorizeRequest(w, r); !ok {
+	user, ok := h.authorizeRequest(w, r)
+	if !ok {
 		return
 	}
-	resp, err := h.usecases.ApproveTask.Execute(r.Context(), chi.URLParam(r, "id"))
+	resp, err := h.usecases.ApproveTask.Execute(r.Context(), user, chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -143,10 +151,11 @@ func (h Handler) ApproveTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) RejectTask(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorizeRequest(w, r); !ok {
+	user, ok := h.authorizeRequest(w, r)
+	if !ok {
 		return
 	}
-	resp, err := h.usecases.RejectTask.Execute(r.Context(), chi.URLParam(r, "id"))
+	resp, err := h.usecases.RejectTask.Execute(r.Context(), user, chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -156,10 +165,11 @@ func (h Handler) RejectTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorizeRequest(w, r); !ok {
+	user, ok := h.authorizeRequest(w, r)
+	if !ok {
 		return
 	}
-	resp, err := h.usecases.CancelTask.Execute(r.Context(), chi.URLParam(r, "id"))
+	resp, err := h.usecases.CancelTask.Execute(r.Context(), user, chi.URLParam(r, "id"))
 	if err != nil {
 		errs.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -248,6 +258,9 @@ func (h Handler) broadcastTaskStatus(taskID, status string) {
 }
 
 func (h Handler) authorizeRequest(w http.ResponseWriter, r *http.Request) (types.CurrentUser, bool) {
+	if !h.ensureSecureTransport(w, r) {
+		return types.CurrentUser{}, false
+	}
 	if h.auth == nil {
 		errs.WriteError(w, http.StatusUnauthorized, "authentication is not configured")
 		return types.CurrentUser{}, false
@@ -260,4 +273,18 @@ func (h Handler) authorizeRequest(w http.ResponseWriter, r *http.Request) (types
 	}
 
 	return user, true
+}
+
+func (h Handler) ensureSecureTransport(w http.ResponseWriter, r *http.Request) bool {
+	if !h.requireSecureTransport {
+		return true
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if h.trustProxyTLS && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return true
+	}
+	errs.WriteError(w, http.StatusUpgradeRequired, "https is required")
+	return false
 }

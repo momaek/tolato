@@ -20,4 +20,7 @@ type Repository interface {
 
 type SessionStore interface {
 	Upsert(ctx context.Context, session NodeSession) error
+	Get(ctx context.Context, sessionID string) (*NodeSession, error)
+	ListByNodeID(ctx context.Context, nodeID string) ([]NodeSession, error)
+	MarkDisconnected(ctx context.Context, sessionID string, at time.Time) error
 }

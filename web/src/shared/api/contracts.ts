@@ -27,6 +27,7 @@ export const consoleModeSchema = z.enum(["ai_agent", "direct_shell"])
 export const sessionSchema = z.object({
   id: z.string(),
   name: z.string(),
+  username: z.string().optional(),
   role: z.string(),
 })
 
@@ -105,11 +106,15 @@ export const taskDetailSchema = z.object({
   updatedAt: z.string().optional(),
   status: taskStatusSchema,
   approvalStatus: approvalStatusSchema,
+  requiredApprovalRole: z.string().optional(),
   riskLevel: riskLevelSchema.optional(),
   statusReason: z.string().optional(),
   plan: taskPlanSchema,
   aggregate: taskAggregateSchema,
   summary: z.string(),
+  resultSummary: z.string().optional(),
+  failureNodeIds: z.array(z.string()).optional(),
+  summarySource: z.string().optional(),
   executions: z.array(taskExecutionSchema),
 })
 
