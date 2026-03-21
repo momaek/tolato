@@ -329,8 +329,219 @@ type UiWsEvent =
 - 前端 `TaskPlanStep` 依赖 `id`，并假设 `args` 是 `Record<string, string>`；后端 `PlanStep` 当前没有 `id`，且 `args` 是 `map[string]any`
 - 前端 `TaskExecution` 把 `startedAt` / `finishedAt` 视为可选、`exitCode` 视为可空；后端当前是固定字段且 `exit_code` 为 `int`
 - 前端期望 `ws/ui` 推送 `connection.ready`、`connection.synced`、`node.updated`、`task.status`；后端当前只发送 `welcome` 占位消息
+- PRD 新模型要求“先进入会话，再由 AI 解析并确认目标机器”，当前 contract 没有目标解析、目标确认和目标上下文事件
 
 ## 联调基线建议
 
 - 如果以后端为准，前端适配器需要先处理包装层、字段命名和枚举差异
 - 如果以前端为准，需要补 `/api/v1/session`、`GET /api/v1/tasks`，并补齐节点指标和 UI WebSocket 事件
+
+## 面向 PRD 新模型的增量 Contract（建议）
+
+以下内容不是当前代码已实现的事实，而是为了支持 `docs/prd.md` 中“先进入会话，再解析 / 确认目标机器”的目标态所需增量。
+
+### 目标上下文
+
+```ts
+type TargetCandidate = {
+  nodeId: string
+  hostname: string
+  region: string
+  matchedBy: "hostname" | "region" | "tag" | "history" | "all_online"
+  reason: string
+}
+
+type ActiveTargetContext = {
+  status: "unset" | "pending_confirmation" | "confirmed"
+  scope: "single" | "multi" | "all_online"
+  nodeIds: string[]
+  displayLabel: string
+  source: "user_explicit" | "assistant_resolved" | "context_inherited"
+  confidence: number
+  candidates?: TargetCandidate[]
+  sourceMessageId?: string
+  confirmedAt?: string
+}
+```
+
+前端展示规则建议：
+- 顶部状态栏显示当前 `ActiveTargetContext`
+- 当 `status = "pending_confirmation"` 时，显示待确认 badge，而不是直接进入执行
+- 每条 plan / approval / execution row 都带一份只读目标标记，说明本次操作到底针对哪台机器或哪几台机器
+
+### Row 展示模型建议
+
+```ts
+type TimelineRow =
+  | { id: string; kind: "user_message"; createdAt: string; text: string }
+  | { id: string; kind: "assistant_text"; createdAt: string; text: string }
+  | { id: string; kind: "target_confirmation"; createdAt: string; targetContext: ActiveTargetContext }
+  | { id: string; kind: "tool_call_meta"; createdAt: string; toolName: string; argsPreview?: string; source: "agent_loop" }
+  | { id: string; kind: "tool_result_meta"; createdAt: string; toolName: string; status: "succeeded" | "failed"; text: string; source: "agent_loop" | "user_action" }
+  | { id: string; kind: "plan"; createdAt: string; taskId: string }
+  | { id: string; kind: "approval"; createdAt: string; taskId: string }
+  | { id: string; kind: "execution"; createdAt: string; taskId: string }
+  | { id: string; kind: "summary"; createdAt: string; taskId: string }
+```
+
+前端行为建议：
+- 每次关键动作都追加新 row，不回写旧 row 的主要语义
+- 按钮点击触发的确认 / 审批默认不生成 `user_message`
+- 普通 tool 调用默认展示 `tool_call_meta` + `tool_result_meta`
+- 按钮点击结果只展示 `tool_result_meta`，例如 `target_confirmation succeeded · 1 target confirmed`
+
+### `SessionInfo` 目标态增量
+
+```ts
+{
+  id: string
+  name: string
+  role: string
+  activeTargetContext: ActiveTargetContext
+}
+```
+
+### `TaskDetail` 目标态增量
+
+```ts
+{
+  id: string
+  mode: "ai_agent" | "direct_shell"
+  inputText: string
+  target: string[]
+  targetContext: ActiveTargetContext
+  targetConfirmed: boolean
+  createdAt: string
+  status: "planned" | "waiting_approval" | "approved" | "queued" | "dispatched" | "running" | "success" | "failed" | "partial_failed" | "timeout" | "cancelled"
+  ...
+}
+```
+
+约束建议：
+- `targetConfirmed = false` 时，不允许进入 `queued`、`dispatched` 或 `running`
+- 低风险只读任务也必须先有确认后的目标，再允许自动执行
+- 若本轮沿用了历史上下文，`targetContext.source` 必须标记为 `context_inherited`
+
+### 建议新增 HTTP 接口
+
+### `POST /api/v1/targets/resolve`
+
+请求：
+
+```json
+{
+  "thread_id": "string",
+  "message_id": "string",
+  "input_text": "重启东京节点的 nginx"
+}
+```
+
+响应：
+
+```json
+{
+  "target_context": {
+    "status": "pending_confirmation",
+    "scope": "single",
+    "node_ids": ["node_tokyo_01"],
+    "display_label": "jp-tokyo-01",
+    "source": "assistant_resolved",
+    "confidence": 0.94,
+    "candidates": [
+      {
+        "node_id": "node_tokyo_01",
+        "hostname": "jp-tokyo-01",
+        "region": "Tokyo",
+        "matched_by": "region",
+        "reason": "命中了“东京节点”"
+      }
+    ]
+  }
+}
+```
+
+### `POST /api/v1/threads/{id}/target-context/confirm`
+
+请求：
+
+```json
+{
+  "message_id": "string",
+  "node_ids": ["node_tokyo_01"],
+  "scope": "single"
+}
+```
+
+响应：
+
+```json
+{
+  "target_context": {
+    "status": "confirmed",
+    "scope": "single",
+    "node_ids": ["node_tokyo_01"],
+    "display_label": "jp-tokyo-01",
+    "source": "assistant_resolved",
+    "confidence": 0.94,
+    "confirmed_at": "2026-03-21T12:00:00Z"
+  }
+}
+```
+
+### `DELETE /api/v1/threads/{id}/target-context`
+
+用途：
+- 用户主动清除当前会话已确认目标
+- 避免后续消息错误继承旧目标
+
+### WebSocket 增量事件建议
+
+```ts
+type UiWsEvent =
+  | { type: "thread.target.pending"; threadId: string; targetContext: ActiveTargetContext; timestamp: string }
+  | { type: "thread.target.confirmed"; threadId: string; targetContext: ActiveTargetContext; timestamp: string }
+  | { type: "thread.target.cleared"; threadId: string; timestamp: string }
+  | { type: "timeline.row.appended"; threadId: string; row: TimelineRow; timestamp: string }
+```
+
+用途：
+- 驱动顶部目标 badge、消息流中的确认 row 和 plan row 目标标签同步刷新
+- 明确区分“候选目标待确认”与“已确认、可执行”的两种状态
+- 驱动 row-based 时间线持续追加，其中：
+  - `tool_call_meta` 用于展示普通工具调用，如 `list_nodes`
+  - `tool_result_meta` 用于展示工具结果，以及按钮型确认 / 审批的结果
+
+示例：
+
+```json
+{
+  "type": "timeline.row.appended",
+  "threadId": "thread_123",
+  "timestamp": "2026-03-21T12:00:00Z",
+  "row": {
+    "id": "row_001",
+    "kind": "tool_call_meta",
+    "createdAt": "2026-03-21T12:00:00Z",
+    "toolName": "list_nodes",
+    "argsPreview": "status=online,stale",
+    "source": "agent_loop"
+  }
+}
+```
+
+```json
+{
+  "type": "timeline.row.appended",
+  "threadId": "thread_123",
+  "timestamp": "2026-03-21T12:00:01Z",
+  "row": {
+    "id": "row_002",
+    "kind": "tool_result_meta",
+    "createdAt": "2026-03-21T12:00:01Z",
+    "toolName": "target_confirmation",
+    "status": "succeeded",
+    "text": "jp-tokyo-01 confirmed",
+    "source": "user_action"
+  }
+}
+```

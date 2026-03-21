@@ -8,11 +8,11 @@ ToLaTo
 
 一个面向多台 VPS / 服务器节点的聊天式 AI 运维控制台。
 
-用户通过 Web UI 进入一个持续会话，选择默认目标节点范围，并用自然语言和 Agent 对话。Agent 可以：
+用户通过 Web UI 进入一个持续会话，无需预先选择目标节点范围，直接用自然语言和 Agent 对话。Agent 可以：
 
 - 连续理解上下文
 - 给出解释、建议和下一步动作
-- 以结构化卡片形式展示计划、审批和执行结果
+- 以结构化 row 形式展示计划、审批和执行结果，并显式展示 tool call / tool result 元信息
 - 在用户批准后调用节点执行工具
 - 聚合多节点执行结果并输出总结
 
@@ -22,7 +22,7 @@ ToLaTo
 
 - Control Server 是主 Agent
 - NodeAgent 是 `exec_on_nodes` 的远端执行器，不是独立 Agent
-- `plan` 是聊天流中的结构化卡片，不是产品阶段
+- `plan` 是聊天流中的结构化 row，不是产品阶段
 - `approval` 是工具结果，不是单独业务入口
 
 ⸻
@@ -71,10 +71,10 @@ ToLaTo
 - 支持节点在线管理
 - 支持 WebSocket 长连接
 - 支持聊天式 Agent 会话
-- 支持结构化 plan / approval / execution / summary 卡片
+- 支持结构化 plan / approval / execution / summary row
 - 支持人工 approve 后执行
 - 支持单节点 / 多节点 / 全部节点执行
-- 支持线程级默认目标范围
+- 支持会话内目标节点语义解析与用户确认
 - 支持实时日志回传
 - 支持执行结果聚合
 - 支持基础审计记录
@@ -109,7 +109,7 @@ MVP 暂不做：
 - 有多台服务器管理需求
 - 希望降低重复运维操作成本
 - 接受 AI 参与分析，但希望保留人工审批权
-- 希望在同一个会话里连续追问、调整节点范围和继续执行
+- 希望在同一个会话里连续追问、调整目标机器和继续执行
 
 ⸻
 
@@ -117,17 +117,20 @@ MVP 暂不做：
 
 场景 1：查看某台机器状态
 
-用户选择 `sg-prod-01` 作为当前会话默认目标，输入：
+用户进入会话后直接输入：
 
 帮我看看这台机器 CPU、内存、磁盘和 Docker 状态
 
 系统：
 
-1. assistant 回复将要检查的内容
-2. 生成只读 plan 卡片
-3. 自动执行到目标节点
-4. 在消息流中持续显示执行结果
-5. 输出总结卡片
+1. assistant 结合会话上下文和节点元信息解析目标机器
+2. 消息流先追加 `tool_call_meta(list_nodes)` 与 `tool_result_meta`
+3. assistant 通过 `target_confirmation row` 请求用户确认是否为 `sg-prod-01`
+4. 用户点击确认后，消息流追加一条 `tool_result_meta`
+5. 生成只读 `plan row`
+6. 自动执行到目标节点
+7. 在消息流中持续显示执行结果
+8. 输出 `summary row`
 
 场景 2：诊断网站 502
 
@@ -137,27 +140,33 @@ MVP 暂不做：
 
 系统：
 
-1. assistant 解释会检查 nginx、应用和错误日志
-2. 生成只读 plan 卡片
-3. 执行只读检查
-4. 汇总原因
-5. 给出建议，如“建议重启 myapp”
-6. 若用户继续要求重启，则生成 approval 卡片
-7. 用户 approve 后再执行
+1. assistant 解析出目标为 `sg-prod-01`
+2. 消息流追加 `tool_call_meta(resolve_target_nodes)` 与 `tool_result_meta`
+3. 通过 `target_confirmation row` 向用户确认该节点
+4. 用户点击确认后，消息流追加一条 `tool_result_meta`
+5. 生成只读 `plan row`
+6. 执行只读检查
+7. 汇总原因
+8. 给出建议，如“建议重启 myapp”
+9. 若用户继续要求重启，则生成 `approval row`
+10. 用户点击 approve 后，再追加一条 `tool_result_meta` 并执行
 
 场景 3：批量巡检
 
-用户选择 `All nodes`，输入：
+用户输入：
 
 检查所有在线节点的系统负载和磁盘占用
 
 系统：
 
-1. assistant 确认将对所有在线节点执行
-2. 生成广播型 plan 卡片
-3. 对所有在线节点执行
-4. 聚合异常节点
-5. 输出批量执行总结
+1. assistant 解析出目标是“所有在线节点”
+2. 消息流追加 `tool_call_meta(list_nodes)` 与 `tool_result_meta`
+3. 通过 `target_confirmation row` 提示将对 `All online nodes` 执行
+4. 用户点击确认后，消息流追加一条 `tool_result_meta`，标记本次为多节点操作
+5. 生成广播型 `plan row`
+6. 对所有在线节点执行
+7. 聚合异常节点
+8. 输出批量执行总结
 
 场景 4：受控服务重启
 
@@ -167,24 +176,28 @@ MVP 暂不做：
 
 系统：
 
-1. assistant 解释风险和影响
-2. 生成 plan 卡片
-3. 生成 approval 卡片
-4. 用户 approve
-5. Agent 调用节点执行工具
-6. 返回执行结果和总结
+1. assistant 解析 `东京节点` 为 `jp-tokyo-01`
+2. 消息流追加 `tool_call_meta(resolve_target_nodes)` 与 `tool_result_meta`
+3. 通过 `target_confirmation row` 请求用户确认
+4. 用户点击确认后，消息流追加一条 `tool_result_meta`
+5. assistant 解释风险和影响
+6. 生成 `plan row`
+7. 生成 `approval row`
+8. 用户点击 approve 后，消息流追加一条 `tool_result_meta`
+9. Agent 调用节点执行工具
+10. 返回执行结果和总结
 
-场景 5：会话中缩小执行范围
+场景 5：会话中沿用已确认目标
 
-用户先在当前会话里选择 `All nodes`，然后输入：
+用户上一轮已经确认目标为东京和新加坡节点，然后输入：
 
-先只对东京和新加坡节点执行看看
+先重启 nginx 试试看
 
 系统：
 
-1. 更新当前会话默认目标范围
-2. 后续消息默认只作用于东京和新加坡节点
-3. 用户无需每次重复指定节点
+1. assistant 明确说明将沿用上一轮已确认的东京和新加坡节点
+2. 若用户未否认，则把本轮操作绑定到这两个节点
+3. 消息流追加一条 `tool_result_meta`，显示 `2 nodes confirmed`
 
 ⸻
 
@@ -234,31 +247,34 @@ Web 控制台
 
 - 左侧 thread 列表 / 节点列表
 - 主操作区
-- 当前线程默认目标范围
+- 当前会话目标上下文 / 待确认目标提示
 - 聊天式输入框
-- 消息流展示
-- 执行日志流展示
+- Row-based 消息流展示
+- 内联执行日志展示
 - 快捷操作入口
 
 聊天式 Agent
 
 - 连续上下文对话
 - 自然语言解析
+- 目标节点语义解析
+- 目标节点确认
 - assistant 文本回复
-- 结构化 plan 卡片
-- 结构化 approval 卡片
-- execution / summary 卡片
+- 结构化 plan / approval / execution / summary row
+- `tool_call_meta` / `tool_result_meta` 元信息展示
 
 工具化执行
 
+- `resolve_target_nodes`
+- `request_target_confirmation`
 - `propose_plan`
 - `request_approval`
 - `exec_on_nodes`
-- 线程目标范围更新
+- 会话目标上下文更新
 
 审批流
 
-- approval 卡片
+- approval row
 - Approve / Reject / Cancel
 - 审批状态记录
 
@@ -277,7 +293,7 @@ Web 控制台
 - 发起人
 - 目标节点范围
 - 原始输入
-- 计划卡片
+- row 类型
 - 审批动作
 - 执行时间线
 - 执行结果摘要
@@ -341,35 +357,43 @@ Web 控制台
 - 支持中文输入
 - 支持多轮上下文
 - 支持线程历史显示
-- 支持线程级默认目标范围
+- 支持从自然语言中解析目标节点
+- 支持目标节点确认与二次确认
+- 支持会话内显示最近一次已确认目标
 - 支持单节点、多节点、全部节点
 
 验收标准
 
 - 用户可在同一个会话里连续提问与执行
 - 常见运维类中文输入可被正确识别
+- 当输入中包含机器语义时，系统能先给出候选目标并请求确认
 - 线程历史可恢复当前上下文
 
 ⸻
 
-9.3 Agent 回复与结构化卡片
+9.3 Agent 回复与结构化 Row
 
 描述
 
 Agent 不要求每轮都直接执行，也不要求每轮都生成 plan。
-Agent 可以输出普通文本回复，也可以输出结构化卡片。
+Agent 可以输出普通文本回复，也可以输出结构化 row。
 
-卡片类型
+Row 类型
 
-- plan 卡片
-- approval 卡片
-- execution 卡片
-- summary 卡片
+- assistant text row
+- target confirmation row
+- tool_call_meta row
+- tool_result_meta row
+- plan row
+- approval row
+- execution row
+- summary row
 
 输入
 
 - 用户消息
-- 当前线程默认目标范围
+- 当前会话已确认目标上下文
+- 当前轮目标解析结果
 - 节点元信息
 - 可用工具定义
 - 风险策略
@@ -378,14 +402,18 @@ Agent 可以输出普通文本回复，也可以输出结构化卡片。
 需求点
 
 - 支持 assistant 纯文本回复
-- 支持结构化 plan 卡片
+- 支持结构化 plan row
 - 支持结构化说明文本
+- 支持 `tool_call_meta` / `tool_result_meta` 小字元信息
+- 按钮触发的确认、审批默认不新增 user row
 - 支持无法执行时给出原因和建议
 
 验收标准
 
 - assistant 可只回复文本，不强制产出执行计划
-- plan 卡片能展示 target / steps / risk / impact
+- plan row 能展示 target / steps / risk / impact
+- 普通 tool 调用默认展示 `tool_call_meta` 与 `tool_result_meta`
+- 用户点击确认或 Approve 后，消息流中只追加 `tool_result_meta`，而不是新增 user row
 - 无法执行时可回退为“无法完成此操作”的解释性回复
 
 ⸻
@@ -394,7 +422,7 @@ Agent 可以输出普通文本回复，也可以输出结构化卡片。
 
 描述
 
-高风险或写操作必须在执行前展示 approval 卡片并等待用户批准。
+高风险或写操作必须在执行前展示 approval row 并等待用户批准。
 
 审批对象是一次 `request_approval` 工具调用。
 
@@ -405,11 +433,12 @@ Agent 可以输出普通文本回复，也可以输出结构化卡片。
 
 需求点
 
-- 显示 approval 卡片
+- 显示 approval row
 - 显示 target / action / args / risk / impact
 - 支持 Approve / Reject / Cancel
 - 审批前不得进入执行状态
 - 审批动作进入审计日志
+- 审批按钮点击后，消息流中只追加一条弱化的 `tool_result_meta`
 
 验收标准
 
@@ -423,7 +452,7 @@ Agent 可以输出普通文本回复，也可以输出结构化卡片。
 
 描述
 
-审批通过或无需审批后，Control Server 通过 `exec_on_nodes` 工具将执行意图拆分并下发到目标节点。
+审批通过或无需审批后，Control Server 仅在目标节点已确认的前提下，通过 `exec_on_nodes` 工具将执行意图拆分并下发到目标节点。
 
 NodeAgent 只负责执行受控动作，不负责规划、审批或聊天。
 
@@ -432,8 +461,9 @@ NodeAgent 只负责执行受控动作，不负责规划、审批或聊天。
 - 支持单节点执行
 - 支持多节点执行
 - 支持全部节点执行
-- 支持线程默认目标范围
-- 支持单次工具调用覆盖线程默认范围
+- 支持由目标确认结果驱动执行
+- 支持单次工具调用覆盖当前会话已确认目标
+- 目标未确认时不得进入执行
 - 支持节点级 fan-out 下发
 - 支持执行状态流展示
 
@@ -543,7 +573,7 @@ NodeAgent 接收受控动作后执行。
 
 描述
 
-记录每一次会话、计划卡片、审批与执行事件。
+记录每一次会话、plan / approval / execution row、tool call 与 tool result 事件。
 
 审计字段
 
@@ -551,7 +581,9 @@ NodeAgent 接收受控动作后执行。
 - execution_id
 - user_id
 - input_text
-- target_scope
+- target_resolution
+- target_confirmation
+- confirmed_targets
 - tool_call
 - tool_result
 - approval_status
@@ -635,20 +667,23 @@ forbidden
 - thread 列表
 - 节点列表
 - online / offline 状态
-- All nodes 入口
+- All online nodes 候选入口
 
 顶部
 
-- 当前 thread 默认目标范围
+- 当前会话目标上下文
 - thread 标题 / 状态
 
 中间主区
 
 - system / assistant / user 消息
-- plan 卡片
-- approval 卡片
-- execution 卡片
-- 结果摘要卡片
+- target confirmation row
+- tool_call_meta row
+- tool_result_meta row
+- plan row
+- approval row
+- execution row
+- summary row
 
 底部输入区
 
@@ -662,10 +697,13 @@ forbidden
 
 - user message
 - assistant text
-- plan card
-- approval card
-- execution card
-- summary card
+- target confirmation row
+- tool_call_meta row
+- tool_result_meta row
+- plan row
+- approval row
+- execution row
+- summary row
 
 审批操作
 
@@ -690,10 +728,10 @@ forbidden
 
 节点范围交互
 
-- 单节点
-- 多节点
-- 全部节点
-- 更新当前 thread 默认目标范围
+- 单节点确认
+- 多节点确认
+- 全节点确认
+- 清除或沿用当前会话目标上下文
 
 ⸻
 
@@ -786,7 +824,7 @@ Thread
 - id
 - mode
 - initiator
-- default_target_scope
+- active_target_context
 - status
 - created_at
 - updated_at
@@ -884,18 +922,18 @@ M3：聊天式 Agent
 - thread 创建
 - 多轮消息
 - assistant 文本回复
-- target scope 管理
+- 目标解析与确认
 
-M4：结构化卡片与审批
+M4：结构化 Row 与审批
 
-- plan 卡片
-- approval 卡片
+- plan row
+- approval row
 - Approve / Reject
 - 审计日志
 
 M5：多节点聚合
 
-- All nodes
+- All online nodes 确认与执行
 - 多节点 fan-out
 - 聚合结果展示
 
@@ -916,7 +954,7 @@ M6：对话式运维闭环
 - 多发行版命令兼容性存在差异
 - 广播执行风险高
 - 节点掉线会影响执行一致性
-- 聊天式上下文若处理不当，可能导致错误继承目标范围
+- 聊天式上下文若处理不当，可能导致错误继承已确认目标
 
 17.2 依赖
 
@@ -934,7 +972,7 @@ M6：对话式运维闭环
 1. 至少 5 台节点可稳定接入
 2. UI 可显示节点在线状态
 3. 支持 thread/chat 形式的多轮会话
-4. assistant 可输出文本、plan 卡片和 approval 卡片
+4. assistant 可输出文本、plan row 和 approval row
 5. 支持审批后执行
 6. 支持 5 个以上受控动作
 7. 支持单节点、多节点与全部节点执行
@@ -945,4 +983,4 @@ M6：对话式运维闭环
 
 19. 一句话版本
 
-ToLaTo 是一个基于 Go + Vue 的 AI 多节点运维聊天工作台，通过持续会话、结构化卡片、审批后执行和多节点结果聚合，完成可控、可审计的运维操作。
+ToLaTo 是一个基于 Go + Vue 的 AI 多节点运维聊天工作台，通过持续会话、结构化 row、审批后执行和多节点结果聚合，完成可控、可审计的运维操作。

@@ -34,7 +34,7 @@ PRD 要求主路径是：
 
 `自然语言 -> 结构化计划 -> 风险识别 -> 必要审批 -> 执行 -> 结果聚合 -> 审计`
 
-因此 UI 必须先展示计划卡片，而不是把 AI 输出直接渲染成“系统开始跑命令”。
+因此 UI 必须先展示时间线中的结构化 row，而不是把 AI 输出直接渲染成“系统开始跑命令”。
 
 #### 纠偏 2：草图缺少审批与风险表达
 
@@ -79,12 +79,13 @@ PRD 要求主路径是：
 
 主控制台只解决 MVP 最关键的闭环：
 
-1. 选择节点
-2. 输入任务
-3. 看到 AI 计划
-4. 审批或拒绝
-5. 看到执行过程
-6. 看到聚合结果和 AI 总结
+1. 进入会话并输入任务
+2. AI 解析目标机器
+3. 用户确认目标
+4. 看到 AI 计划
+5. 审批或拒绝
+6. 看到执行过程
+7. 看到聚合结果和 AI 总结
 
 首版不扩成完整多页面后台，因此：
 
@@ -103,17 +104,16 @@ PRD 要求主路径是：
 
 ```text
 +--------------------------------------------------------------------------------------------------+
-| Top Bar: 品牌 | 全局状态 | 当前 Target | 模式切换(AI Agent / Direct shell) | 时钟/同步状态         |
+| Top Bar: 品牌 | 全局状态 | 当前目标上下文 | 模式切换(AI Agent / Direct shell) | 时钟/同步状态         |
 +------------------------------+-------------------------------------------------------------------+
 | Left Sidebar                 | Main Workspace                                                    |
-| 节点总览 / All nodes         | 系统消息                                                          |
-| 节点列表                     | 计划预览卡                                                        |
-| 状态筛选                     | 审批卡                                                            |
-| 风险提示                     | 执行日志流                                                        |
-|                              | 聚合结果卡                                                        |
-|                              | AI 总结卡                                                         |
+| 节点总览 / 候选节点提示      | user / assistant rows                                             |
+| 节点列表                     | target_confirmation row                                           |
+| 最近匹配节点                 | tool_call_meta / tool_result_meta                                 |
+| 状态筛选                     | plan / approval / execution / summary rows                        |
+| 风险提示                     | row-based timeline                                                |
 +------------------------------+-------------------------------------------------------------------+
-| Bottom Composer: 自然语言输入框 | 生成计划按钮 | 快捷操作 chips | 说明文案                           |
+| Bottom Composer: 自然语言输入框 | 发送按钮 | 快捷操作 chips | 说明文案                               |
 +--------------------------------------------------------------------------------------------------+
 ```
 
@@ -127,7 +127,7 @@ PRD 要求主路径是：
 
 - 产品名：`ToLaTo`
 - 全局节点状态摘要：`4 online · 1 offline`
-- 当前 Target：`sg-prod-01` 或 `All nodes`
+- 当前目标上下文：`未确认`、`待确认 jp-tokyo-01` 或 `已确认 2 nodes`
 - 模式切换：
   - `AI Agent`
   - `Direct shell`
@@ -139,17 +139,19 @@ PRD 要求主路径是：
 
 - `AI Agent` 默认激活
 - `Direct shell` 可点击但进入说明态，不进入执行态
-- 当 Target 为 `All nodes` 时，顶部应出现只读广播提醒
+- 当目标上下文为多节点时，顶部应出现只读广播提醒
+- 当目标上下文为 `pending_confirmation` 时，顶部显示待确认 badge，禁止直接进入执行
 
 #### 左侧节点栏
 
-目标：让用户快速决定操作范围，并清楚知道节点当前状态。
+目标：让用户快速理解可操作节点、看到 AI 匹配出的候选目标，并清楚知道节点当前状态。
 
 结构：
 
-1. `All nodes` 卡片
-2. 风险提醒条
-3. 节点列表
+1. 节点总览卡
+2. 最近匹配节点 / 候选节点区
+3. 风险提醒条
+4. 节点列表
 
 节点项显示字段：
 
@@ -170,41 +172,52 @@ PRD 要求主路径是：
 
 交互规则：
 
-- 点击节点项切换当前 Target
-- 点击 `All nodes` 进入广播视图
-- 广播态下左栏顶部显示提示：
+- 点击节点项打开节点详情，或把该节点作为“确认候选”带入主区
+- 点击 `All online nodes` 只生成候选目标，不直接进入广播执行
+- 广播候选态下左栏顶部显示提示：
   - `仅允许只读任务自动执行`
   - `广播写操作需要更高审批或直接阻止`
 
 #### 中央主工作区
 
-目标：用时间流的方式串起“输入 -> 计划 -> 审批 -> 执行 -> 结果”。
+目标：用时间线 row 的方式串起“输入 -> 目标确认 -> 计划 -> 审批 -> 执行 -> 结果”。
 
-主工作区不是空白终端，而是任务流卡片区。
+主工作区不是空白终端，也不是一张卡不断长高，而是按时间顺序追加新 row 的消息流。
 
-卡片顺序如下：
+典型 Row 顺序如下：
 
-1. 系统消息卡
-2. 计划预览卡
-3. 审批卡
-4. 执行日志卡
-5. 聚合结果卡
-6. AI 总结卡
+1. `user row`
+2. `assistant target confirmation row`
+3. `tool_call_meta row`
+4. `tool_result_meta row`
+5. `assistant plan row`
+6. `assistant approval row`
+7. `tool_result_meta row`
+8. `assistant execution row`
+9. `assistant summary row`
+
+规则：
+
+- 每一次关键动作都应追加一个新的 row，而不是回头改写旧 row 的主要语义
+- 按钮触发的确认 / 审批不新增 `user row`
+- 普通 tool 调用默认展示 `tool_call_meta row` 与 `tool_result_meta row`
+- 按钮触发后的结果只展示为弱化的 `tool_result_meta row`
+- 只有用户手动在输入框中输入“确认”“批准”等文本时，才算新的 `user row`
 
 #### 底部输入区
 
-目标：明确告诉用户系统会“先生成计划”，而不是“直接执行”。
+目标：明确告诉用户系统会“先识别目标并请求确认，再决定是否生成计划或进入审批”，而不是“直接执行”。
 
 组成：
 
 - 主输入框
-- 主按钮：`生成计划`
+- 主按钮：`发送`
 - 快捷操作 chips
 - 辅助说明文案
 
 占位文案建议：
 
-`描述你的任务，AI 会先生成执行计划，高风险操作不会直接执行`
+`发送任务请求，AI 会先决定是否查询节点、确认目标、生成计划或进入审批`
 
 快捷 chips 建议：
 
@@ -216,33 +229,60 @@ PRD 要求主路径是：
 
 ---
 
-## 5. 关键卡片设计
+## 5. 关键 Row 设计
 
-### 5.1 系统消息卡
+### 5.1 系统消息 Row
 
-用于承接系统级反馈，不与任务卡混淆。
+用于承接系统级反馈，不与任务 row 混淆。
 
 典型内容：
 
 - `Control server ready. 4 agents connected.`
-- `Current target: All nodes`
+- `Current target context: unset`
 - `Broadcast mode only auto-runs low-risk read plans`
 - `Direct shell is not available in MVP`
 
 视觉要求：
 
-- 弱化于任务卡
+- 弱化于任务 row
 - 使用浅底和单色文本
 - 时间戳可选显示在右上角
 
-### 5.2 计划预览卡
+在系统消息 row 之后，若本轮输入中包含节点语义且系统已匹配到候选目标，必须先出现目标确认 row。
 
-这是主流程的第一个核心卡片。
+在目标确认 row 之前，若 Agent Loop 调用了普通工具，如 `list_nodes`、`get_node_details`、`resolve_target_nodes`，时间线中应先追加：
+
+- `tool_call_meta row`
+- `tool_result_meta row`
+
+目标确认 row 必须展示：
+
+- 用户原始输入中的目标表达，如 `东京节点`
+- AI 匹配到的候选节点
+- 匹配依据，如 `region = Tokyo`
+- 当前是单节点、多节点还是 `All online nodes`
+- 明确操作：
+  - `确认目标`
+  - `重新选择`
+  - `清除上下文`
+
+规则：
+
+- 目标未确认时，不允许进入执行和审批
+- 若本轮沿用了上一轮已确认目标，row 中必须提示 `沿用上一轮已确认目标`
+- 目标确认后，顶部状态栏和后续任务 row 都要同步显示目标标签
+- 用户点击 `确认目标` 后，不新增 `user row`
+- 紧接着追加一条弱化的 `tool_result_meta row`，例如 `target_confirmation succeeded · 1 target confirmed`
+
+### 5.2 计划预览 Row
+
+这是目标确认完成后的第一个核心 row。
 
 必须展示：
 
 - 用户原始输入
 - 目标节点
+- 目标来源，如 `assistant_resolved` / `context_inherited`
 - 计划摘要
 - steps 列表
 - 每个 step 的 action / args
@@ -256,6 +296,7 @@ PRD 要求主路径是：
 [Plan Preview]
 Input: 看看东京节点为什么 502
 Target: jp-tokyo-01
+Target Source: assistant_resolved
 Summary: 检查 nginx、应用进程和错误日志
 Risk: low
 Impact: 只读诊断，不修改服务
@@ -270,16 +311,16 @@ Steps:
 - `查看完整计划`
 - 若是低风险只读任务，底部提示 `低风险计划将自动进入执行`
 
-### 5.3 审批卡
+### 5.3 审批 Row
 
-当 `requiresApproval = true` 时，计划卡下方必须出现审批卡。
+当 `requiresApproval = true` 时，计划 row 之后必须追加一条审批 row。
 
-卡片内容：
+Row 内容：
 
 - 审批原因
 - 风险等级
 - 影响说明
-- 目标范围
+- 已确认目标
 - 主要动作
 
 按钮：
@@ -291,10 +332,45 @@ Steps:
 规则：
 
 - 未审批前，任务不能进入 `queued` 或 `running`
-- 审批后应在卡片中留下审计痕迹，如：
-  - `Approved by Alex at 14:32`
+- 用户点击 `Approve` / `Reject` 后，不新增 `user row`
+- 审批结果以弱化的 `tool_result_meta row` 追加到时间线中，如：
+  - `approval recorded · Approved by Alex at 14:32`
 
-### 5.4 执行日志卡
+### 5.4 Tool Call Meta Row
+
+`tool_call_meta row` 用于承接 Agent Loop 发起的普通工具调用，不与正常聊天消息混淆。
+
+典型内容：
+
+- `calling list_nodes(status=online,stale)`
+- `calling resolve_target_nodes("东京节点")`
+
+视觉要求：
+
+- 比 assistant row 更弱
+- 使用更小字号和更浅颜色
+- 不占用大卡片容器
+- 更接近一条时间线事件或审计脚注
+
+### 5.5 Tool Result Meta Row
+
+`tool_result_meta row` 用于承接普通工具结果，以及按钮触发后的用户动作结果。
+
+典型内容：
+
+- `list_nodes returned 4 online nodes`
+- `target_confirmation succeeded · jp-tokyo-01 confirmed`
+- `approval recorded · execution unlocked`
+- `target_context cleared`
+
+视觉要求：
+
+- 比 assistant row 更弱
+- 使用更小字号和更浅颜色
+- 不占用大卡片容器
+- 更接近一条时间线事件或审计脚注
+
+### 5.6 执行日志 Row
 
 目标是“看得清执行过程，但不退化成终端”。
 
@@ -321,7 +397,7 @@ jp-tokyo-01  failed
 - 正常节点默认折叠
 - 支持点击“查看节点详情”
 
-### 5.5 聚合结果卡
+### 5.7 聚合结果 Row
 
 用于替代“用户自己扫日志判断结果”。
 
@@ -349,7 +425,7 @@ Final status: partial_failed
 - `查看失败节点`
 - `查看全部结果`
 
-### 5.6 AI 总结卡
+### 5.8 AI 总结 Row
 
 这是任务闭环的收口卡。
 
@@ -398,7 +474,7 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 用途：
 
 - 承接长计划和多步骤展示
-- 避免主卡片过长
+- 避免主 row 内容体过长
 
 ### 6.2 审批确认弹层
 
@@ -462,11 +538,14 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 流程：
 
 1. 用户输入自然语言
-2. 生成计划
-3. 展示计划预览
-4. 按风险决定是否审批
-5. 执行
-6. 聚合总结
+2. Agent Loop 自主调用工具
+3. AI 解析目标
+4. 用户确认目标
+5. 决定是否生成计划
+6. 展示计划预览
+7. 按风险决定是否审批
+8. 执行
+9. 聚合总结
 
 模式说明文案建议：
 
@@ -516,11 +595,11 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 
 ### 8.2 状态对应 UI 行为
 
-- `planned`：显示计划卡
-- `waiting_approval`：显示审批卡并锁定执行
-- `approved`：审批卡显示已批准
-- `queued/dispatched/running`：日志卡高亮，状态线推进
-- `success/failed/timeout`：显示聚合结果卡与 AI 总结卡
+- `planned`：追加 plan row
+- `waiting_approval`：追加 approval row 并锁定执行
+- `approved`：追加 `tool_result_meta row`，记录审批已完成
+- `queued/dispatched/running`：execution row 高亮，状态线推进
+- `success/failed/timeout`：追加聚合结果 row 与 AI 总结 row
 - `cancelled`：流程终止，保留已发生的审计和计划信息
 
 ---
@@ -535,12 +614,16 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 
 页面流程：
 
-1. 系统消息提示当前目标节点
-2. 生成计划卡
-3. 风险为 `low`
-4. 自动进入执行
-5. 显示日志流
-6. 产出聚合结果和 AI 总结
+1. 系统解析 `sg-prod-01` 为候选目标
+2. 追加 `tool_call_meta(list_nodes / resolve_target_nodes)`
+3. 追加 `tool_result_meta`
+4. 追加目标确认 row
+5. 用户点击确认后追加 `tool_result_meta`
+6. 追加 plan row
+7. 风险为 `low`
+8. 自动进入执行
+9. 追加 execution row
+10. 追加 summary row
 
 ### 9.2 单节点写操作
 
@@ -550,11 +633,17 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 
 页面流程：
 
-1. 生成计划卡
-2. 风险为 `medium`
-3. 出现审批卡
-4. 审批通过后进入执行
-5. 返回执行结果和总结
+1. 解析 `东京节点` 为 `jp-tokyo-01`
+2. 追加 `tool_call_meta(list_nodes / resolve_target_nodes)`
+3. 追加 `tool_result_meta`
+4. 追加目标确认 row
+5. 用户点击确认后追加 `tool_result_meta`
+6. 追加 plan row
+7. 风险为 `medium`
+8. 追加 approval row
+9. 用户点击 Approve 后追加 `tool_result_meta`
+10. 进入执行并追加 execution row
+11. 返回 summary row
 
 ### 9.3 广播只读巡检
 
@@ -564,12 +653,16 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 
 页面流程：
 
-1. 当前 Target 为 `All nodes`
-2. 页面顶部与左栏都显示广播提醒
-3. 生成广播计划卡
-4. 风险为 `low`
-5. 自动执行
-6. 聚合结果卡显示 success / failed / offline skipped
+1. 系统解析出目标为 `All online nodes`
+2. 追加 `tool_call_meta(list_nodes)`
+3. 追加 `tool_result_meta`
+4. 追加多节点目标确认 row
+5. 页面顶部与左栏都显示广播提醒
+6. 用户确认后追加 `tool_result_meta`
+7. 追加广播 plan row
+8. 风险为 `low`
+9. 自动执行
+10. 聚合结果 row 显示 success / failed / offline skipped
 
 ### 9.4 广播写操作
 
@@ -579,10 +672,15 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 
 页面流程：
 
-1. 生成计划卡
-2. 风险为 `high`
-3. 审批弹层提示广播写操作受限
-4. 若策略不允许，直接阻断并保留拦截说明
+1. 系统解析出目标为 `All online nodes`
+2. 追加 `tool_call_meta(list_nodes / resolve_target_nodes)`
+3. 追加 `tool_result_meta`
+4. 追加多节点目标确认 row
+5. 用户确认后追加 `tool_result_meta`
+6. 追加 plan row
+7. 风险为 `high`
+8. 追加 approval row 或阻断说明 row
+9. 若策略不允许，直接阻断并保留拦截说明
 
 ---
 
@@ -590,7 +688,7 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 
 ### 10.1 按钮文案
 
-- 主按钮：`生成计划`
+- 主按钮：`发送`
 - 次按钮：`查看完整计划`
 - 审批：`Approve`
 - 拒绝：`Reject`
@@ -616,7 +714,7 @@ sg-prod-01 的根分区达到 87%，Nginx 正常但日志目录过大。
 本设计稿与 PRD 对齐的核心项如下：
 
 - 对齐 `11.1 页面结构`：左侧节点列表、中间主区、底部输入区、顶部模式与 Target
-- 对齐 `11.2 关键交互`：计划预览、审批操作、执行态展示、多节点摘要
+- 对齐 `11.2 关键交互`：目标确认 row、plan row、审批操作、tool_call_meta / tool_result_meta row、执行态展示、多节点摘要
 - 对齐 `9.3 AI 计划生成`：展示结构化计划而非自由命令
 - 对齐 `9.4 审批流`：审批前不得进入执行
 - 对齐 `9.8 执行结果聚合`：统一展示 success / failed / offline skipped
