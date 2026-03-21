@@ -1,9 +1,0 @@
-FROM golang:1.24 AS build
-WORKDIR /src
-COPY . .
-RUN go build -o /out/tolato-agent ./cmd/tolato-agent
-
-FROM debian:bookworm-slim
-WORKDIR /app
-COPY --from=build /out/tolato-agent /usr/local/bin/tolato-agent
-CMD ["tolato-agent", "--config", "configs/agent.example.yaml"]

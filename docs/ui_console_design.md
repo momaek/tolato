@@ -11,6 +11,8 @@
 
 本稿是线框级设计文档，不是高保真视觉稿，也不是前端代码说明。
 
+当前 Pencil 逐屏状态稿说明另见 [`docs/ui_state_description.md`](./ui_state_description.md)，用于补充 Empty / Plan / Approval / Execution 四个状态页的落地描述。
+
 ---
 
 ## 2. 设计基准

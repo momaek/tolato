@@ -1,6 +1,0 @@
-DROP TABLE IF EXISTS outbox_events;
-DROP TABLE IF EXISTS audit_events;
-DROP TABLE IF EXISTS task_executions;
-DROP TABLE IF EXISTS tasks;
-DROP TABLE IF EXISTS node_sessions;
-DROP TABLE IF EXISTS nodes;

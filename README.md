@@ -19,6 +19,8 @@ make infra-up
 make db-migrate
 ```
 
+If you already started Postgres before pulling schema changes, run `make db-migrate` again to apply them to the existing local database.
+
 3. Install Go dependencies:
 
 ```bash
