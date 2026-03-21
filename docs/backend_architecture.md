@@ -1,5 +1,23 @@
 # ToLaTo MVP 后端核心架构设计
 
+> 说明
+> 
+> 本文档主要保留为早期后端核心运行模型讨论稿。
+> 
+> 对于最新可实现基线，请优先以以下文档为准：
+> 
+> - [docs/backend_architecture_manual_loop.md](/Users/wentx/momaek/src/tolato/docs/backend_architecture_manual_loop.md)
+> - [docs/session_interaction.md](/Users/wentx/momaek/src/tolato/docs/session_interaction.md)
+> - [docs/api_contract.md](/Users/wentx/momaek/src/tolato/docs/api_contract.md)
+> 
+> 特别是：
+> 
+> - `Console` 之外的 `Nodes / History / Settings` 页面后端面
+> - `ws/ui` 只服务 `Console` 的传输边界
+> - 自研 Agent Loop + HTTP 查询配置面的最终收口方案
+> 
+> 均以后续专题文档为准。
+
 ## 1. 文档定位
 
 本文档用于定义 ToLaTo MVP 后端的核心运行模型，重点回答以下问题：
@@ -11,6 +29,8 @@
 - Control Server、Node Agent、数据库与 WebSocket 分别承担什么职责
 
 本文档以 [docs/prd.md](/Users/wentx/momaek/src/tolato/docs/prd.md) 和 [docs/api_contract.md](/Users/wentx/momaek/src/tolato/docs/api_contract.md) 为产品与接口基线。
+
+其中 session 切换、多 session 订阅、snapshot 恢复和 WebSocket request/response 模型的专项定义，见 [docs/session_interaction.md](/Users/wentx/momaek/src/tolato/docs/session_interaction.md)。
 
 本文档不展开：
 

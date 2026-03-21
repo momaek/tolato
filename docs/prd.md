@@ -89,6 +89,10 @@ MVP 暂不做：
 - 文件上传分发
 - 自动回滚编排
 - 复杂工作流引擎
+- 独立 admin 后台
+- 多租户与成员管理
+- 独立 session 列表页
+- 独立审计中心
 - 多租户企业权限体系
 - 开放式第三方工具生态
 
@@ -245,13 +249,17 @@ Agent 可以连续回复、追问、建议和等待审批，再继续执行。
 
 Web 控制台
 
-- 左侧 thread 列表 / 节点列表
+- `Console / Nodes / History / Settings` 四个一级页面
+- 左侧 session 列表（仅存在于 `Console`）
 - 主操作区
 - 当前会话目标上下文 / 待确认目标提示
 - 聊天式输入框
 - Row-based 消息流展示
 - 内联执行日志展示
 - 快捷操作入口
+- 节点列表页与独立节点详情页
+- 任务历史查看
+- 模型配置、账户安全与偏好设置
 
 聊天式 Agent
 
@@ -306,6 +314,10 @@ Web 控制台
 - 自动回滚
 - 编排式部署流水线
 - 节点分组权限体系
+- 独立 admin 后台
+- 多租户协作空间
+- 独立 session 列表页
+- 独立审计中心
 - 插件生态
 
 ⸻
@@ -623,7 +635,7 @@ medium
 
 high
 
-需管理员 approve：
+需更高等级确认，MVP 中默认阻断或保留为策略位：
 
 - 修改配置
 - 执行脚本
@@ -660,19 +672,53 @@ forbidden
 
 11. 前端需求
 
-11.1 页面结构
+11.1 产品信息架构
 
-左侧
+MVP 只包含以下 4 个一级页面：
 
-- thread 列表
-- 节点列表
-- online / offline 状态
-- All online nodes 候选入口
+- `/console`
+  - 主控制台
+  - 承载 session 列表、聊天时间线、目标确认、计划、审批、执行与总结
+- `/nodes`
+  - 全量节点列表页
+  - 承载搜索、筛选、状态浏览和跳转入口
+- `/nodes/:id`
+  - 节点详情页
+  - 承载完整节点信息、最近心跳、资源摘要与最近任务
+- `/history`
+  - 任务历史页
+  - 承载 task 级历史、审批记录、执行聚合与关联审计信息
+- `/settings`
+  - 统一设置页
+  - 承载模型配置、账户安全与偏好设置
+
+边界约束：
+
+- 不做多租户
+- 不做 admin 后台
+- 不做独立 session 列表页
+- 不做独立审计中心
+- `Direct shell` 仍不是可执行入口，只保留受限模式占位说明
+
+11.2 Console 页面结构
 
 顶部
 
 - 当前会话目标上下文
-- thread 标题 / 状态
+- session 标题 / 状态
+- 全局连接状态
+- 模式切换：`AI Agent / Direct shell`
+
+左侧
+
+- session 列表
+  - 支持滚动
+  - 支持未读、运行中、需关注状态
+- 当前会话节点上下文区
+  - 候选节点
+  - 已确认目标
+  - 节点健康摘要
+  - `All online nodes` 候选入口
 
 中间主区
 
@@ -691,7 +737,134 @@ forbidden
 - 发送按钮
 - 快捷操作 chips
 
-11.2 关键交互
+约束：
+
+- `session` 列表只存在于 `Console`
+- 节点视图在控制台中只承担当前上下文镜像，不承担全量资产管理
+- `Direct shell` 不提供真实执行输入框
+
+11.3 Nodes 页面
+
+页面目标：
+
+- 浏览全部节点资产
+- 快速搜索与筛选
+- 进入节点详情页
+- 从节点结果回到控制台执行或追问
+
+核心模块：
+
+- 搜索框
+- 状态筛选：online / offline / busy / idle
+- region / tag 过滤
+- 节点统计摘要卡
+- 节点列表
+
+列表字段：
+
+- hostname
+- region
+- os
+- tags
+- status
+- last_seen
+- busy / idle
+- 最近资源摘要
+
+关键交互：
+
+- 点击节点进入 `/nodes/:id`
+- 次级操作支持“在控制台中打开该节点”
+
+11.4 Node Detail 页面
+
+页面目标：
+
+- 提供单节点完整上下文
+- 让用户在不进入时间线的情况下快速判断节点状态
+
+核心模块：
+
+- 基础信息：hostname / region / os / tags / version
+- 当前状态：online / offline / busy / idle
+- 最近心跳：CPU / 内存 / 磁盘摘要
+- 最近任务：最近 3-10 条
+- 风险提示与快捷入口
+
+关键交互：
+
+- 返回控制台
+- 以当前节点作为控制台目标继续操作
+
+11.5 History 页面
+
+页面目标：
+
+- 查看 task 级历史
+- 追溯 plan、approval、execution 与聚合结果
+- 在单页面内查看关联审计信息
+
+核心模块：
+
+- 任务列表
+- 状态与审批筛选
+- task 详情区
+
+任务列表字段：
+
+- 时间
+- input_text 摘要
+- target 范围
+- status
+- approval_status
+- aggregate 摘要
+
+详情区展示：
+
+- plan
+- approval 记录
+- execution 聚合
+- 节点级结果
+- `tool_call_meta`
+- `tool_result_meta`
+- 审计字段
+
+约束：
+
+- `history` 只做任务历史页
+- 不单独拆审计页
+- 审计信息来自 task 详情或其关联审计数据
+
+11.6 Settings 页面
+
+页面目标：
+
+- 管理模型接入
+- 管理账户安全
+- 管理个人偏好
+
+信息结构：
+
+- `model_config`
+  - provider
+  - model
+  - endpoint
+  - API key
+  - temperature
+  - max tokens
+  - timeout
+  - 连接测试
+- `account_security`
+  - 改密码
+  - 当前登录信息
+  - 登出其他会话
+- `preferences`
+  - 语言
+  - 时间格式
+  - 默认视图
+  - 执行结果展开偏好
+
+11.7 关键交互
 
 消息流
 

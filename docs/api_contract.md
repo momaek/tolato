@@ -330,6 +330,8 @@ type UiWsEvent =
 - 前端 `TaskExecution` 把 `startedAt` / `finishedAt` 视为可选、`exitCode` 视为可空；后端当前是固定字段且 `exit_code` 为 `int`
 - 前端期望 `ws/ui` 推送 `connection.ready`、`connection.synced`、`node.updated`、`task.status`；后端当前只发送 `welcome` 占位消息
 - PRD 新模型要求“先进入会话，再由 AI 解析并确认目标机器”，当前 contract 没有目标解析、目标确认和目标上下文事件
+- 最新 PRD 进一步要求 `Nodes / History / Settings` 三个页面具备独立后端数据面，当前 contract 尚未定义对应 HTTP 接口
+- 最新后端架构要求 `ws/ui` 只服务 `Console`，而不是承担 `Nodes / History / Settings` 页面查询
 
 ## 联调基线建议
 
@@ -339,6 +341,20 @@ type UiWsEvent =
 ## 面向 PRD 新模型的增量 Contract（建议）
 
 以下内容不是当前代码已实现的事实，而是为了支持 `docs/prd.md` 中“先进入会话，再解析 / 确认目标机器”的目标态所需增量。
+
+其中 session 列表、session snapshot、切换 session 的恢复逻辑，以及“一个 WebSocket 连接同时订阅多个 session”的交互模型，以 [docs/session_interaction.md](/Users/wentx/momaek/src/tolato/docs/session_interaction.md) 为专项定义。
+
+根据最新 PRD 与后端架构，目标态后端需要明确分成两个面：
+
+- `Console`
+  - 继续通过 `ws/ui` 承载 session 请求 / 响应和增量事件
+- `Nodes / History / Settings`
+  - 通过 HTTP 提供查询与配置接口
+
+因此：
+
+- `ws/ui` 不承载 `Nodes / History / Settings` 页面查询
+- `Direct shell` 仅作为模式占位，不提供真实执行接口
 
 ### 目标上下文
 
@@ -421,6 +437,271 @@ type TimelineRow =
 - `targetConfirmed = false` 时，不允许进入 `queued`、`dispatched` 或 `running`
 - 低风险只读任务也必须先有确认后的目标，再允许自动执行
 - 若本轮沿用了历史上下文，`targetContext.source` 必须标记为 `context_inherited`
+
+### 页面查询面的新增 HTTP Contract（建议）
+
+以下内容用于支撑最新 PRD 中的 `/nodes`、`/nodes/:id`、`/history`、`/settings`。
+
+### `GET /api/v1/nodes`
+
+用途：
+
+- 支撑 `Nodes` 页面
+- 返回节点列表页投影，而不是 runtime 原始实体
+
+请求 query 建议：
+
+- `q`
+- `status`
+- `busy`
+- `region`
+- `tag`
+- `page`
+- `page_size`
+
+响应：
+
+```json
+{
+  "items": [
+    {
+      "id": "string",
+      "hostname": "string",
+      "region": "string",
+      "os": "string",
+      "version": "string",
+      "tags": ["string"],
+      "status": "online | stale | offline",
+      "busy": true,
+      "last_seen": "2026-03-22T12:00:00Z",
+      "metrics": {
+        "cpu": 0.32,
+        "memory": 0.61,
+        "disk": 0.48
+      }
+    }
+  ],
+  "page": 1,
+  "page_size": 20,
+  "total": 100
+}
+```
+
+### `GET /api/v1/nodes/{id}`
+
+用途：
+
+- 支撑 `Node Detail` 页面
+
+响应：
+
+```json
+{
+  "id": "string",
+  "hostname": "string",
+  "region": "string",
+  "os": "string",
+  "version": "string",
+  "tags": ["string"],
+  "status": "online | stale | offline",
+  "busy": true,
+  "last_seen": "2026-03-22T12:00:00Z",
+  "metrics": {
+    "cpu": 0.32,
+    "memory": 0.61,
+    "disk": 0.48
+  },
+  "recent_tasks": [
+    {
+      "task_id": "string",
+      "input_text": "string",
+      "status": "running | success | failed | timeout",
+      "created_at": "2026-03-22T12:00:00Z"
+    }
+  ]
+}
+```
+
+### `GET /api/v1/history/tasks`
+
+用途：
+
+- 支撑 `History` 页面任务列表
+
+请求 query 建议：
+
+- `status`
+- `approval_status`
+- `page`
+- `page_size`
+
+响应：
+
+```json
+{
+  "items": [
+    {
+      "id": "string",
+      "input_text": "string",
+      "target_summary": "jp-tokyo-01",
+      "status": "planned | waiting_approval | approved | queued | dispatched | running | success | failed | partial_failed | timeout | cancelled",
+      "approval_status": "not_required | pending | approved | rejected | cancelled",
+      "aggregate": {
+        "total": 1,
+        "success": 1,
+        "failed": 0,
+        "offline_skipped": 0,
+        "running": 0
+      },
+      "created_at": "2026-03-22T12:00:00Z"
+    }
+  ],
+  "page": 1,
+  "page_size": 20,
+  "total": 100
+}
+```
+
+### `GET /api/v1/history/tasks/{id}`
+
+用途：
+
+- 支撑 `History` 页面详情区
+
+响应：
+
+```json
+{
+  "task": {
+    "id": "string",
+    "input_text": "string",
+    "target_summary": "jp-tokyo-01",
+    "status": "success",
+    "approval_status": "approved",
+    "plan": {},
+    "aggregate": {
+      "total": 1,
+      "success": 1,
+      "failed": 0,
+      "offline_skipped": 0,
+      "running": 0
+    },
+    "executions": [],
+    "tool_meta_rows": [],
+    "audits": []
+  }
+}
+```
+
+约束：
+
+- `History` 不单独拆审计页
+- 审计信息作为 task detail 的关联内容返回
+
+### `GET /api/v1/settings/model-config`
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-5",
+  "endpoint": "https://api.openai.com/v1",
+  "temperature": 0.2,
+  "max_tokens": 2048,
+  "timeout_sec": 60
+}
+```
+
+### `PUT /api/v1/settings/model-config`
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-5",
+  "endpoint": "https://api.openai.com/v1",
+  "api_key": "string",
+  "temperature": 0.2,
+  "max_tokens": 2048,
+  "timeout_sec": 60
+}
+```
+
+### `POST /api/v1/settings/model-config/test`
+
+```json
+{
+  "ok": true,
+  "message": "connection test succeeded"
+}
+```
+
+### `POST /api/v1/settings/password/change`
+
+请求：
+
+```json
+{
+  "current_password": "string",
+  "new_password": "string"
+}
+```
+
+响应：
+
+```json
+{
+  "message": "password changed"
+}
+```
+
+### `POST /api/v1/settings/sessions/revoke-others`
+
+响应：
+
+```json
+{
+  "message": "other sessions revoked"
+}
+```
+
+### `GET /api/v1/settings/preferences`
+
+```json
+{
+  "language": "zh-CN",
+  "time_format": "24h",
+  "default_view": "console",
+  "execution_expand_mode": "auto"
+}
+```
+
+### `PUT /api/v1/settings/preferences`
+
+```json
+{
+  "language": "zh-CN",
+  "time_format": "24h",
+  "default_view": "console",
+  "execution_expand_mode": "auto"
+}
+```
+
+### 风险策略 Contract 说明
+
+后端目标态风险策略应明确为：
+
+- `low`
+  - 可自动执行
+- `medium`
+  - 必须 approval
+- `high`
+  - 当前后端实现基线仍允许 approval
+- `forbidden`
+  - 直接阻断
+
+说明：
+
+- 这与最新 PRD 中“`high` 默认阻断或保留为策略位”的文案存在差异
+- 在产品语义统一前，API 合同以后端架构文档为准
 
 ### 建议新增 HTTP 接口
 
