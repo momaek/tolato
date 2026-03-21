@@ -1,0 +1,15 @@
+server:
+  address: ":8080"
+  tls_cert: ""
+  tls_key: ""
+
+postgres:
+  dsn: "postgres://tolato:tolato@localhost:5432/tolato?sslmode=disable"
+
+redis:
+  addr: "localhost:6379"
+  db: 0
+
+auth:
+  admin_username: "admin"
+  admin_password: "admin"

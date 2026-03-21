@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +41,12 @@ func NewCollector(busy busySource) *Collector {
 func (c *Collector) Snapshot() (Snapshot, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if runtime.GOOS != "linux" {
+		return Snapshot{
+			Busy: c.busySource != nil && c.busySource.IsBusy(),
+		}, nil
+	}
 
 	cpuUsage, err := c.cpuUsage()
 	if err != nil {

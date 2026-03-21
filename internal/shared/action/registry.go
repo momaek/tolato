@@ -1,6 +1,11 @@
 package action
 
-import "github.com/momaek/tolato/internal/shared/types"
+import (
+	"slices"
+	"strings"
+
+	"github.com/momaek/tolato/internal/shared/types"
+)
 
 var registry = []types.ActionSpec{
 	{Name: "system_status", RiskLevel: "low", ApprovalRequired: false, BroadcastAllowed: true, TimeoutSec: 10},
@@ -13,6 +18,20 @@ var registry = []types.ActionSpec{
 	{Name: "reload_service", RiskLevel: "medium", ApprovalRequired: true, BroadcastAllowed: false, TimeoutSec: 30},
 	{Name: "network_check", RiskLevel: "low", ApprovalRequired: false, BroadcastAllowed: true, TimeoutSec: 15},
 }
+
+var allowedServices = []string{
+	"caddy",
+	"docker",
+	"mariadb",
+	"myapp",
+	"mysql",
+	"nginx",
+	"php-fpm",
+	"postgresql",
+	"redis",
+}
+
+const LogPathPrefix = "/var/log/"
 
 func List() []types.ActionSpec {
 	items := make([]types.ActionSpec, len(registry))
@@ -27,4 +46,21 @@ func Get(name string) (types.ActionSpec, bool) {
 		}
 	}
 	return types.ActionSpec{}, false
+}
+
+func AllowedServices() []string {
+	items := make([]string, len(allowedServices))
+	copy(items, allowedServices)
+	slices.Sort(items)
+	return items
+}
+
+func IsAllowedService(name string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(name))
+	for _, item := range allowedServices {
+		if normalized == item {
+			return true
+		}
+	}
+	return false
 }

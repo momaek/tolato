@@ -10,31 +10,44 @@ ToLaTo is an AI-assisted multi-node VPS operations console. This repository curr
 1. Start local dependencies:
 
 ```bash
-docker-compose up -d
+make infra-up
 ```
 
-2. Install Go dependencies:
+2. Initialize the database schema:
+
+```bash
+make db-migrate
+```
+
+3. Install Go dependencies:
 
 ```bash
 make tidy
 ```
 
-3. Build binaries:
+4. Build binaries:
 
 ```bash
 make build
 ```
 
-4. Run the server:
+5. Run the server:
 
 ```bash
-make run-server
+make run-server-local
 ```
 
-5. Run the agent:
+6. Run the agent:
 
 ```bash
-make run-agent
+make run-agent-local
+```
+
+7. Run the web app:
+
+```bash
+make web-install
+make run-web
 ```
 
 ## Repository Layout
@@ -47,3 +60,12 @@ make run-agent
 - `db/migrations/`: initial database migrations
 - `deployments/`: Dockerfiles and systemd units
 - `docs/`: product and architecture documents
+
+## Local Development Defaults
+
+- Server config: `configs/server.local.yaml`
+- Agent config: `configs/agent.local.yaml`
+- Web env: `web/.env.local`
+- Backend API: `http://localhost:8080`
+- Web dev server: `http://localhost:5173`
+- Admin credentials: `admin` / `admin`
