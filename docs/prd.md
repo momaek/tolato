@@ -743,6 +743,19 @@ MVP 只包含以下 4 个一级页面：
 - 节点视图在控制台中只承担当前上下文镜像，不承担全量资产管理
 - `Direct shell` 不提供真实执行输入框
 
+实时交互规则：
+
+- `Console` 通过一条 `ws/ui` 连接承载 session 列表、session snapshot、消息提交和增量事件
+- 连接建立后，前端先等待 `connection.ready`
+- 前端进入或切换 session 时，必须请求 `session.snapshot`
+- 前端需显式发送 `subscriptions.update` 指定当前 active session 与 watch sessions
+- active session 接收完整 timeline 级事件，watch session 只接收 summary 级事件
+- 历史更早 rows 通过 `session.rows.request` 分页获取，不依赖全量事件回放
+- 断线重连后，前端应重新请求 `sessions.list`、当前 `session.snapshot` 和 `subscriptions.update`
+- 模型原始 `thinking` 和 `content` 都属于前端可见交互面
+- 后端需把 OpenAI 原始 SSE 事件透传给前端，前端按流式事件实时展示 reasoning 与 content
+- 最终 `assistant_text / plan / approval / execution / summary` row 继续保留，用于稳定展示、审计与恢复
+
 11.3 Nodes 页面
 
 页面目标：

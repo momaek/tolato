@@ -28,6 +28,7 @@
 
 - 主工作区是时间线，不是会不断长高的单卡
 - `plan / approval / execution / summary` 是全宽结构化 row
+- 当前 assistant 生成时，允许在主时间线中实时展示原始 `thinking` 与 `content` stream
 - 普通工具调用默认展示 `tool_call_meta` 和 `tool_result_meta`
 - 用户点击确认 / Approve / Reject 后，只追加 `tool_result_meta`
 - 只有用户手动输入确认文本时，才新增 `user_message`

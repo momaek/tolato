@@ -217,18 +217,20 @@ session 项显示字段：
 典型 Row 顺序如下：
 
 1. `user row`
-2. `assistant target confirmation row`
-3. `tool_call_meta row`
-4. `tool_result_meta row`
-5. `assistant plan row`
-6. `assistant approval row`
-7. `tool_result_meta row`
-8. `assistant execution row`
-9. `assistant summary row`
+2. `tool_call_meta row`
+3. `tool_result_meta row`
+4. `assistant target confirmation row`
+5. `tool_result_meta row`
+6. `assistant plan row`
+7. `assistant approval row`
+8. `tool_result_meta row`
+9. `assistant execution row`
+10. `assistant summary row`
 
 规则：
 
 - 每一次关键动作都应追加一个新的 row，而不是回头改写旧 row 的主要语义
+- 当前 assistant 正在生成时，主时间线中允许出现一个流式中的 assistant 容器，实时展示原始 `thinking` 与 `content`
 - 按钮触发的确认 / 审批不新增 `user row`
 - 普通 tool 调用默认展示 `tool_call_meta row` 与 `tool_result_meta row`
 - 按钮触发后的结果只展示为弱化的 `tool_result_meta row`
@@ -257,6 +259,35 @@ session 项显示字段：
 - `系统负载`
 - `网络检查`
 
+#### Console 数据来源与恢复规则
+
+`Console` 的数据面固定分成两类：
+
+- `ws/ui`：
+  - `connection.ready`
+  - `sessions.list.response`
+  - `session.snapshot.response`
+  - `session.rows.response`
+  - `llm.sse.event`
+  - `timeline.row.appended`
+  - `thread.target.pending / confirmed / cleared`
+  - `execution.chunk / execution.finished`
+  - `session.summary.updated / session.requires_attention / session.unread.updated / session.finished`
+- HTTP：
+  - 不承担 `Console` 主链路取数
+  - 仅保留登录、鉴权、静态资源和极轻量 bootstrap
+
+固定规则：
+
+- 页面初始化后，先建立 `ws/ui` 并等待 `connection.ready`
+- 当前打开的 session 通过 `session.snapshot.response` 恢复整页，不靠增量事件回放
+- 更早历史 rows 通过 `session.rows.request` 分页追加
+- 当前轮 assistant 生成中的原始 `thinking` 与 `content` 通过 `llm.sse.event` 实时渲染
+- 当前 active session 接收完整 timeline 级事件
+- watch sessions 只更新左侧列表摘要、未读和 attention，不更新主时间线
+- WebSocket 断线重连后，前端必须重新请求 `sessions.list`、当前 `session.snapshot` 和 `subscriptions.update`
+- `TimelineRow` 用于展示稳定结果；`llm.sse.event` 用于展示本轮仍在生成中的原始 reasoning / content stream
+
 ---
 
 ## 5. 关键 Row 设计
@@ -278,7 +309,7 @@ session 项显示字段：
 - 使用浅底和单色文本
 - 时间戳可选显示在右上角
 
-在系统消息 row 之后，若本轮输入中包含节点语义且系统已匹配到候选目标，必须先出现目标确认 row。
+在系统消息 row 之后，若本轮输入中包含节点语义且系统已匹配到候选目标，时间线必须先展示目标解析阶段的普通工具调用，再进入目标确认 row。
 
 在目标确认 row 之前，若 Agent Loop 调用了普通工具，如 `list_nodes`、`get_node_details`、`resolve_target_nodes`，时间线中应先追加：
 

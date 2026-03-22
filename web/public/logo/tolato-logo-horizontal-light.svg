@@ -1,0 +1,20 @@
+<svg width="920" height="220" viewBox="0 0 920 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="920" height="220" rx="28" fill="#FAFAF9"/>
+  <g transform="translate(44 44)">
+    <rect width="132" height="132" rx="30" fill="#1C1917"/>
+    <g transform="translate(24 32)">
+      <rect width="84" height="68" rx="24" fill="#FAFAF9"/>
+      <circle cx="22" cy="18" r="4" fill="#1C1917"/>
+      <circle cx="34" cy="18" r="4" fill="#1C1917"/>
+      <circle cx="46" cy="18" r="4" fill="#1C1917"/>
+      <circle cx="24" cy="38" r="5" fill="#FCD34D"/>
+      <rect x="37" y="36" width="24" height="4" rx="2" fill="#1C1917"/>
+      <circle cx="24" cy="50" r="5" fill="#1C1917"/>
+      <rect x="37" y="48" width="24" height="4" rx="2" fill="#1C1917"/>
+      <circle cx="24" cy="62" r="5" fill="#1C1917"/>
+      <rect x="37" y="60" width="24" height="4" rx="2" fill="#1C1917"/>
+    </g>
+  </g>
+  <text x="210" y="103" fill="#1C1917" font-family="Inter, 'Noto Sans SC', sans-serif" font-size="60" font-weight="700">ToLaTo</text>
+  <text x="210" y="142" fill="#78716C" font-family="Inter, 'Noto Sans SC', sans-serif" font-size="24" font-weight="600">Chat-to-VPS control plane</text>
+</svg>

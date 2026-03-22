@@ -1,73 +1,71 @@
 # ToLaTo
 
-ToLaTo is an AI-assisted multi-node VPS operations console. This repository currently contains the MVP backend skeleton for:
-
-- `tolato-server`: control plane with HTTP and WebSocket endpoints
-- `tolato-agent`: node-side agent runtime skeleton
+ToLaTo is an AI-assisted multi-node VPS operations console. This repository currently contains the in-progress control-plane backend, frontend mock app, and supporting product/architecture docs.
 
 ## Quick Start
 
-1. Start local dependencies:
+1. Install Go dependencies:
 
 ```bash
-make infra-up
+go mod tidy
 ```
 
-2. Initialize the database schema:
+2. Run the backend server:
 
 ```bash
-make db-migrate
+go run ./cmd/tolato-server -config configs/server.local.yaml
 ```
 
-If you already started Postgres before pulling schema changes, run `make db-migrate` again to apply them to the existing local database.
-
-3. Install Go dependencies:
+3. Verify the server is up:
 
 ```bash
-make tidy
+curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/api/v1/nodes
+curl http://127.0.0.1:8080/api/v1/history/tasks
+curl http://127.0.0.1:8080/api/v1/settings/preferences
 ```
 
-4. Build binaries:
+4. Run the web app:
 
 ```bash
-make build
+cd web
+pnpm install
+pnpm dev
 ```
 
-5. Run the server:
+## Current Scope
 
-```bash
-make run-server-local
-```
-
-6. Run the agent:
-
-```bash
-make run-agent-local
-```
-
-7. Run the web app:
-
-```bash
-make web-install
-make run-web
-```
+- `tolato-server` now provides a minimal runnable HTTP service with:
+  - `GET /healthz`
+  - `GET /api/v1/nodes`
+  - `GET /api/v1/nodes/:id`
+  - `GET /api/v1/history/tasks`
+  - `GET /api/v1/history/tasks/:id`
+  - `GET/PUT /api/v1/settings/model-config`
+  - `GET/PUT /api/v1/settings/account-security`
+  - `POST /api/v1/settings/model-config/test`
+  - `POST /api/v1/settings/password/change`
+  - `POST /api/v1/settings/sessions/revoke-others`
+  - `GET/PUT /api/v1/settings/preferences`
+- `tolato-server` now also exposes `GET /ws/ui` and `GET /ws/agent`
+- development console flow is wired with a seeded idle session, scripted LLM loop, and fallback local execution when no real agent is connected
+- `Nodes` HTTP currently uses a static development node source
+- `History` HTTP currently uses seeded in-memory facts and still lacks full task detail projection
+- `Settings` HTTP currently uses seeded in-memory settings; password change and revoke-other-sessions are development-mode placeholders
+- frontend now defaults to the real backend routes; set `VITE_USE_MOCK=true` only when you explicitly want the mock app behavior
 
 ## Repository Layout
 
 - `cmd/`: binary entrypoints
+- `configs/`: local config files
 - `internal/server/`: control plane code
-- `internal/agent/`: node agent code
-- `internal/shared/`: shared protocol, config, types, and action metadata
-- `api/`: OpenAPI and JSON schema contracts
 - `db/migrations/`: initial database migrations
-- `deployments/`: Dockerfiles and systemd units
-- `docs/`: product and architecture documents
+- `docs/`: product, UI, and architecture documents
+- `web/`: frontend app and mock adapters
 
 ## Local Development Defaults
 
 - Server config: `configs/server.local.yaml`
-- Agent config: `configs/agent.local.yaml`
-- Web env: `web/.env.local`
 - Backend API: `http://localhost:8080`
 - Web dev server: `http://localhost:5173`
 - Admin credentials: `admin` / `admin`

@@ -13,13 +13,12 @@
 本文档以以下文档为产品与交互基线：
 
 - [docs/prd.md](/Users/wentx/momaek/src/tolato/docs/prd.md)
-- [docs/backend_architecture.md](/Users/wentx/momaek/src/tolato/docs/backend_architecture.md)
 - [docs/session_interaction.md](/Users/wentx/momaek/src/tolato/docs/session_interaction.md)
 - [docs/api_contract.md](/Users/wentx/momaek/src/tolato/docs/api_contract.md)
 
 本文档与旧文档的关系：
 
-- 旧文档继续保留，主要承载产品意图、交互语义和前期讨论结果
+- [docs/backend_architecture.md](/Users/wentx/momaek/src/tolato/docs/backend_architecture.md) 已降级为归档入口，不再承载实现基线
 - 本文档给出最终的后端技术架构与实现边界
 - 传输模型以 `Gin + ws/ui request/response + event push` 为准
 - `Console` 之外的 `Nodes / History / Settings` 页面以后端 HTTP 查询与配置接口为准
@@ -30,6 +29,8 @@
 - 具体 OpenAI API 原语选型
 - 前端视觉设计
 - 部署、CI/CD、IaC
+
+具体到“按模块如何开发、先做什么、每个模块的完成标准是什么”，见 [docs/backend_implementation_plan.md](/Users/wentx/momaek/src/tolato/docs/backend_implementation_plan.md)。
 
 ---
 
@@ -340,6 +341,7 @@ type UiWsResponse =
   | { type: "connection.ready"; timestamp: string }
   | { type: "sessions.list.response"; requestId: string; items: SessionListItem[] }
   | { type: "session.snapshot.response"; requestId: string; snapshot: SessionSnapshot }
+  | { type: "session.rows.response"; requestId: string; sessionId: string; rows: TimelineRow[]; nextBeforeCursor?: string }
   | { type: "session.action.accepted"; requestId: string; sessionId: string; timestamp: string }
   | { type: "error"; requestId?: string; code: string; message: string }
 ```
@@ -350,12 +352,16 @@ type UiWsResponse =
 type UiWsEvent =
   | { type: "session.state.updated"; sessionId: string; status: SessionStatus; revision: number; timestamp: string }
   | { type: "timeline.row.appended"; sessionId: string; row: TimelineRow; revision: number; timestamp: string }
+  | { type: "llm.sse.event"; sessionId: string; responseId?: string; sequenceNumber?: number; upstreamEventType: string; rawEvent: object; timestamp: string }
+  | { type: "llm.response.completed"; sessionId: string; rawResponse: object; timestamp: string }
   | { type: "thread.target.pending"; sessionId: string; targetContext: ActiveTargetContext; revision: number; timestamp: string }
   | { type: "thread.target.confirmed"; sessionId: string; targetContext: ActiveTargetContext; revision: number; timestamp: string }
   | { type: "thread.target.cleared"; sessionId: string; revision: number; timestamp: string }
   | { type: "execution.chunk"; sessionId: string; taskId: string; executionId: string; nodeId: string; chunk: ExecutionChunk; timestamp: string }
   | { type: "execution.finished"; sessionId: string; taskId: string; executionId: string; nodeId: string; status: string; timestamp: string }
   | { type: "session.summary.updated"; sessionId: string; summary: SessionSummary; timestamp: string }
+  | { type: "session.requires_attention"; sessionId: string; reason: string; timestamp: string }
+  | { type: "session.unread.updated"; sessionId: string; unread: number; timestamp: string }
   | { type: "session.finished"; sessionId: string; summary: SessionSummary; timestamp: string }
 ```
 
@@ -662,6 +668,34 @@ type TimelineRow =
   | { id: string; sessionId: string; kind: "execution"; createdAt: string; taskId: string }
   | { id: string; sessionId: string; kind: "summary"; createdAt: string; taskId: string }
 ```
+
+### 7.3.1 模型输出到前端展示的映射
+
+为了避免把“模型原始输出”和“前端可见数据面”混在一起，后端应固定按以下规则处理：
+
+| 模型 / Runtime 内部产物 | 后端持久化 | 前端是否可见 | 前端呈现方式 |
+| --- | --- | --- | --- |
+| 用户输入文本 | `ThreadMessage(user_message)` | 是 | `TimelineRow(user_message)` |
+| assistant 可展示正文 | `ThreadMessage(assistant_text)` | 是 | `TimelineRow(assistant_text)` |
+| OpenAI 原始 content stream | 可选流缓冲 + runtime 上下文 | 是 | `llm.sse.event` 流式透传，前端按原始 SSE 增量渲染 |
+| OpenAI 原始 thinking / reasoning stream | 可选流缓冲 + provider continuation state | 是 | `llm.sse.event` 流式透传，前端按原始 SSE 增量渲染 |
+| OpenAI 非 stream content / thinking 响应 | 可选原始响应缓冲 | 是 | `llm.response.completed(rawResponse)` 原样透传，前端按原始 JSON 解析 |
+| 普通 tool call | `ToolCall` | 是 | `TimelineRow(tool_call_meta)` |
+| 普通 tool result | `ToolResult` | 是 | `TimelineRow(tool_result_meta)` |
+| target confirmation 结果 | 审计 + session 状态变更 | 是 | `TimelineRow(target_confirmation)` 或 `TimelineRow(tool_result_meta)` |
+| approval / reject / cancel 按钮结果 | 审计 + task/session 状态变更 | 是 | `TimelineRow(tool_result_meta)` |
+| plan 结构化结果 | `Task` + 关联事实 | 是 | `TimelineRow(plan)` |
+| execution 聚合状态 | `Task` / `Execution` | 是 | `TimelineRow(execution)` + `execution.chunk` / `execution.finished` |
+| summary 结构化结果 | `Task.summary` | 是 | `TimelineRow(summary)` |
+
+约束：
+
+- `ThreadMessage.Content` 继续保存用户文本和 assistant 可展示正文
+- OpenAI 原始 SSE 事件通过 `llm.sse.event` 透传给前端，前端可直接消费 `response.output_text.delta`、`response.output_text.done`、`response.reasoning_text.delta`、`response.reasoning_text.done` 等原始事件
+- 对模型 `content` / `thinking`，后端优先透传原始 JSON：stream 走 `rawEvent`，非 stream 走 `rawResponse`；不再为这两类数据额外拆专用前端字段
+- provider continuation state 既用于后端恢复 loop，也可对应前端当前轮的 reasoning / content stream 展示
+- `tool_call`、`tool_result`、`pending_action`、`task/execution` 状态推进必须由后端拼装成结构化事实，前端不允许从模型原始返回自行推断状态机
+- `TimelineRow` 仍然是持久化后的 UI 事实层；原始 SSE stream 用于实时展示，不替代最终 row
 
 ### 7.4 `Task` 与 `Execution`
 
@@ -1266,6 +1300,17 @@ type SessionSnapshot = {
     }
     summary?: string
   }
+  llmStreamState?: {
+    responseId?: string
+    status: "streaming" | "completed"
+    contentText?: string
+    reasoningText?: string
+    events?: Array<{
+      sequenceNumber?: number
+      upstreamEventType: string
+      rawEvent: object
+    }>
+  }
 }
 ```
 
@@ -1276,6 +1321,7 @@ snapshot 不是一张大表原样返回，而是聚合视图：
 - session 运行态来自 `sessions`
 - 对话与 timeline 来自 `thread_messages`、`timeline_rows`
 - 执行摘要来自 `tasks`、`executions`
+- 当前轮未完成的 reasoning / content stream 来自 runtime 流缓冲或 provider continuation state
 
 ### 12.3 Revision 规则
 
@@ -1584,7 +1630,7 @@ HTTP 查询面不做：
 
 为了避免实现和文档分叉，必须明确：
 
-- 以后端架构文档和契约为当前实现基线
+- 以后端最终架构文档、session 专项文档和契约为当前实现基线
 - 若产品最终决定 `high` 默认阻断，应在后续统一回写 PRD、API 合同和 policy 实现
 - 在此之前，`high` 走 approval，不走 direct block
 

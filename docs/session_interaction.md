@@ -11,7 +11,7 @@
 - 一个 WebSocket 是否可以同时订阅多个 session
 - 当前活跃 session 和后台 session 的事件粒度如何区分
 
-本文档是 [docs/prd.md](/Users/wentx/momaek/src/tolato/docs/prd.md)、[docs/backend_architecture.md](/Users/wentx/momaek/src/tolato/docs/backend_architecture.md) 与 [docs/api_contract.md](/Users/wentx/momaek/src/tolato/docs/api_contract.md) 的 session 专项补充。
+本文档是 [docs/prd.md](/Users/wentx/momaek/src/tolato/docs/prd.md)、[docs/backend_architecture_manual_loop.md](/Users/wentx/momaek/src/tolato/docs/backend_architecture_manual_loop.md) 与 [docs/api_contract.md](/Users/wentx/momaek/src/tolato/docs/api_contract.md) 的 session 专项补充。
 
 ---
 
@@ -352,6 +352,17 @@ type SessionSnapshot = {
     }
     summary?: string
   }
+  llmStreamState?: {
+    responseId?: string
+    status: "streaming" | "completed"
+    contentText?: string
+    reasoningText?: string
+    events?: Array<{
+      sequenceNumber?: number
+      upstreamEventType: string
+      rawEvent: object
+    }>
+  }
 }
 ```
 
@@ -361,6 +372,7 @@ type SessionSnapshot = {
 - `rows` 默认返回“最近一屏”，而不是全量历史
 - `timeline.rows` 是渲染视图，不意味着这些 rows 物理内嵌在 session 对象中
 - `executionState` 是执行摘要，用于恢复页面，不替代 `Task` / `Execution` 事实表
+- `llmStreamState` 用于恢复当前未完成的原始 `thinking` / `content` stream，不要求前端只靠增量事件重建
 
 ---
 
@@ -480,6 +492,46 @@ type EventScope = "timeline" | "summary"
 
 ### 10.1 活跃 session 的完整事件
 
+活跃 session 除了接收结构化 timeline 事件外，还应接收当前轮模型生成中的原始 SSE 事件：
+
+```json
+{
+  "type": "llm.sse.event",
+  "eventScope": "timeline",
+  "sessionId": "sess_A",
+  "timestamp": "2026-03-21T14:32:41Z",
+  "responseId": "resp_001",
+  "sequenceNumber": 12,
+  "upstreamEventType": "response.reasoning_text.delta",
+  "rawEvent": {
+    "type": "response.reasoning_text.delta",
+    "delta": "先检查 nginx 配置和 upstream 健康状态"
+  }
+}
+```
+
+如果当前轮不是 stream，而是一次性返回完整模型原始响应，则后端直接透传：
+
+```json
+{
+  "type": "llm.response.completed",
+  "eventScope": "timeline",
+  "sessionId": "sess_A",
+  "timestamp": "2026-03-21T14:32:41Z",
+  "rawResponse": {
+    "id": "resp_001",
+    "output": [
+      {
+        "type": "message",
+        "content": [
+          { "type": "output_text", "text": "已确认东京节点，准备继续。" }
+        ]
+      }
+    ]
+  }
+}
+```
+
 ```json
 {
   "type": "timeline.row.appended",
@@ -497,6 +549,14 @@ type EventScope = "timeline" | "summary"
   }
 }
 ```
+
+规则：
+
+- `llm.sse.event` 只对当前 active session 下发，不对 watch session 广播
+- 前端直接消费 `rawEvent` 做原始 `thinking` / `content` stream 展示
+- 对非 stream 的模型返回，前端直接消费 `rawResponse` 做原始 `content` / `thinking` 解析，后端不再拆专用字段
+- 只有模型原始 `content` / `thinking` 允许走这种“单对象透传”方式；工具调用、工具结果、审批、执行、总结仍由后端拼成结构化事件
+- 当前轮流式生成完成后，后续仍由 `assistant_text` 或结构化 row 收口为稳定展示事实
 
 ### 10.2 后台 session 的摘要事件
 
