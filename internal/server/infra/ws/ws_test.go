@@ -78,7 +78,9 @@ func TestSessionRegistryPublishesActiveAndSummarySessions(t *testing.T) {
 		t.Fatalf("non-active watcher should not receive timeline event: %#v", got)
 	}
 
-	registry.PublishSummary("sess-1", []byte("summary"))
+	for _, clientID := range registry.SummaryRecipients("sess-1") {
+		registry.PublishToClient(clientID, []byte("summary"))
+	}
 	if got := drainMessages(activeClient.Messages()); len(got) != 1 || string(got[0]) != "summary" {
 		t.Fatalf("active client did not receive summary event: %#v", got)
 	}
@@ -87,6 +89,34 @@ func TestSessionRegistryPublishesActiveAndSummarySessions(t *testing.T) {
 	}
 	if got := drainMessages(mixedClient.Messages()); len(got) != 1 || string(got[0]) != "summary" {
 		t.Fatalf("mixed client should receive summary event once: %#v", got)
+	}
+}
+
+func TestSessionRegistryTracksUnreadForBackgroundWatchers(t *testing.T) {
+	hub := NewMemoryHub()
+	activeClient := NewMemoryClient("client-active", ClientKindUI, 4)
+	watchClient := NewMemoryClient("client-watch", ClientKindUI, 4)
+	hub.Register(activeClient)
+	hub.Register(watchClient)
+
+	registry := NewMemorySessionRegistry(hub)
+	registry.SetActive("client-active", "sess-1")
+	registry.SetWatchSessions("client-watch", []string{"sess-1"})
+
+	updates := registry.IncrementUnread("sess-1")
+	if len(updates) != 1 {
+		t.Fatalf("updates = %#v, want one background watcher", updates)
+	}
+	if updates[0].ClientID != "client-watch" || updates[0].Unread != 1 {
+		t.Fatalf("update = %#v, want client-watch unread=1", updates[0])
+	}
+	if got := registry.UnreadCount("client-watch", "sess-1"); got != 1 {
+		t.Fatalf("UnreadCount() = %d, want 1", got)
+	}
+
+	registry.SetActive("client-watch", "sess-1")
+	if got := registry.UnreadCount("client-watch", "sess-1"); got != 0 {
+		t.Fatalf("UnreadCount() after SetActive = %d, want 0", got)
 	}
 }
 
@@ -143,7 +173,7 @@ func TestAgentRegistryDispatchesToBoundClient(t *testing.T) {
 	hub.Register(client)
 
 	registry := NewMemoryAgentRegistry(hub)
-	registry.BindNode("node-1", "agent-1")
+	registry.BindNode("node-1", "agent-1", AgentNodeMetadata{Hostname: "node-1"})
 
 	if err := registry.PublishDispatch("node-1", []byte("dispatch")); err != nil {
 		t.Fatalf("unexpected dispatch error: %v", err)
@@ -158,21 +188,61 @@ func TestAgentRegistryDispatchesToBoundClient(t *testing.T) {
 	}
 }
 
+func TestAgentRegistryForgetClientPreservesHeartbeat(t *testing.T) {
+	hub := NewMemoryHub()
+	client := NewMemoryClient("agent-9", ClientKindAgent, 2)
+	hub.Register(client)
+
+	registry := NewMemoryAgentRegistry(hub)
+	registry.BindNode("node-9", "agent-9", AgentNodeMetadata{Hostname: "node-9"})
+	at := time.Date(2026, 3, 22, 20, 30, 0, 0, time.UTC)
+	if err := registry.Heartbeat("node-9", "agent-9", AgentNodeRuntime{}, at); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+
+	registry.ForgetClient("agent-9")
+
+	if err := registry.PublishDispatch("node-9", []byte("dispatch")); err != ErrNodeNotBound {
+		t.Fatalf("PublishDispatch() error = %v, want ErrNodeNotBound", err)
+	}
+	got, ok := registry.LastHeartbeat("node-9")
+	if !ok || !got.Equal(at) {
+		t.Fatalf("LastHeartbeat() = %v, %v want %v, true", got, ok, at)
+	}
+}
+
 func TestAgentRegistryRecordsHeartbeat(t *testing.T) {
 	hub := NewMemoryHub()
 	client := NewMemoryClient("agent-2", ClientKindAgent, 2)
 	hub.Register(client)
 
 	registry := NewMemoryAgentRegistry(hub)
-	registry.BindNode("node-2", "agent-2")
+	registry.BindNode("node-2", "agent-2", AgentNodeMetadata{
+		Hostname: "node-2",
+		Region:   "Tokyo",
+		OS:       "linux",
+		Version:  "1.0.0",
+		Tags:     []string{"prod"},
+	})
 
 	at := time.Date(2026, 3, 22, 20, 0, 0, 0, time.UTC)
-	if err := registry.Heartbeat("node-2", "agent-2", at); err != nil {
+	if err := registry.Heartbeat("node-2", "agent-2", AgentNodeRuntime{
+		Busy: true,
+		Metrics: AgentNodeMetrics{
+			CPU:    0.2,
+			Memory: 0.3,
+			Disk:   0.4,
+		},
+	}, at); err != nil {
 		t.Fatalf("Heartbeat() error = %v", err)
 	}
 	got, ok := registry.LastHeartbeat("node-2")
 	if !ok || !got.Equal(at) {
 		t.Fatalf("LastHeartbeat() = %v, %v want %v, true", got, ok, at)
+	}
+	snapshots := registry.Snapshots()
+	if len(snapshots) != 1 || snapshots[0].Region != "Tokyo" || !snapshots[0].Busy || snapshots[0].Metrics.Disk != 0.4 {
+		t.Fatalf("Snapshots() = %#v, want metadata and metrics", snapshots)
 	}
 }
 

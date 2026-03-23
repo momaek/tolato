@@ -162,6 +162,10 @@ func cloneSettingRecord(in domain.SettingRecord) domain.SettingRecord {
 	return out
 }
 
+func cloneAuthSession(in domain.AuthSession) domain.AuthSession {
+	return in
+}
+
 func cloneToolCall(in domain.ToolCall) domain.ToolCall {
 	out := in
 	out.Arguments = cloneBytes(in.Arguments)

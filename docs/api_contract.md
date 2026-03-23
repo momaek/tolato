@@ -457,8 +457,8 @@ type UiWsEvent =
 - 前端 `Nodes / History / Settings` adapter 已能在非 mock 模式下直连对应 HTTP 接口，但 `History` 详情与 `Settings` 安全能力仍受后端当前简化事实模型限制
 - 前端真实 `ws/ui` adapter 已处理 `requestId + payload` envelope；mock client 仍保留原前端动作模型
 - 前端把审批操作建模为单一 `session.approval.action`，后端当前拆成 `session.approval.approve`、`session.approval.reject`、`session.operation.cancel`
-- 前端 target confirmation 仍保留 `confirm | reselect | clear` 动作模型；其中真实后端当前已支持 `confirm`、`clear`，`reselect` 仍仅由 mock client 支持
-- 前端仍期望 `connection.synced`、`timeline.row.updated`、`session.requires_attention`、`session.unread.updated`、`llm.sse.event`、`llm.response.completed` 等事件；其中当前后端已实现 `llm.sse.event`、`llm.response.completed`、`session.requires_attention`，但 `timeline.row.updated` 与 `session.unread.updated` 仍未落地
+- 前端 target confirmation 仍保留 `confirm | reselect | clear` 动作模型；真实后端当前已支持 `confirm`、`reselect`、`clear`
+- 前端仍期望 `connection.synced`、`timeline.row.updated`、`session.requires_attention`、`session.unread.updated`、`llm.sse.event`、`llm.response.completed` 等事件；其中当前后端已实现 `llm.sse.event`、`llm.response.completed`、`session.requires_attention`、`session.unread.updated`，但 `timeline.row.updated` 仍未落地
 - 前端 `session.summary.updated` 当前载荷是 `{ session: SessionListItem }`；后端当前载荷是 `{ summary: SessionSummary }`
 - 前端 `execution.chunk` / `execution.finished` 当前期望的是带 `row + revision` 的 UI 视图；后端当前发送的是执行事实事件 `{ taskId, executionId, nodeId, chunk/status, timestamp }`
 - 前端 `SessionSnapshot`、`TimelineRow`、`TargetContext`、`ExecutionRow`、`SummaryRow` 比后端当前 snapshot/view 更富 UI 语义，仍需要一层 adapter 映射

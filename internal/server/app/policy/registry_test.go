@@ -175,6 +175,7 @@ func TestExecOnNodesTool(t *testing.T) {
 	result, err := registry.Call(context.Background(), "exec_on_nodes", mustJSON(t, ExecOnNodesInput{
 		SessionID: "sess-1",
 		InputText: "run diagnostics",
+		Command:   "uptime",
 		TargetContext: domain.ActiveTargetContext{
 			Status:       domain.TargetStatusConfirmed,
 			Scope:        domain.TargetScopeMulti,
@@ -192,6 +193,9 @@ func TestExecOnNodesTool(t *testing.T) {
 	}
 	if starter.input.SessionID != "sess-1" || len(starter.input.TargetContext.NodeIDs) != 2 {
 		t.Fatalf("starter input = %#v", starter.input)
+	}
+	if starter.input.Command != "uptime" || len(starter.input.CommandArgs) != 0 {
+		t.Fatalf("starter command = %#v, want explicit command propagated", starter.input)
 	}
 }
 

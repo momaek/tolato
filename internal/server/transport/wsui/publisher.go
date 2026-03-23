@@ -49,24 +49,22 @@ func (p *Publisher) SessionStateUpdated(ctx context.Context, session domain.Sess
 	}
 	p.Registry.PublishToSession(session.ID, timelineRaw)
 
-	summaryRaw, err := json.Marshal(p.summaryEvent(session))
-	if err != nil {
+	if err := p.publishSummaryEvent(session); err != nil {
 		return err
 	}
-	p.Registry.PublishSummary(session.ID, summaryRaw)
 
 	if reason, ok := attentionReason(session.Status); ok {
-		attentionRaw, err := json.Marshal(SessionRequiresAttentionEvent{
-			Type:       "session.requires_attention",
-			EventScope: EventScopeSummary,
-			SessionID:  session.ID,
-			Timestamp:  p.now().UTC().Format(time.RFC3339),
-			Reason:     reason,
-		})
-		if err != nil {
+		if err := p.publishSummaryToRecipients(session.ID, func(string) (any, error) {
+			return SessionRequiresAttentionEvent{
+				Type:       "session.requires_attention",
+				EventScope: EventScopeSummary,
+				SessionID:  session.ID,
+				Timestamp:  p.now().UTC().Format(time.RFC3339),
+				Reason:     reason,
+			}, nil
+		}); err != nil {
 			return err
 		}
-		p.Registry.PublishSummary(session.ID, attentionRaw)
 	}
 	return nil
 }
@@ -88,6 +86,9 @@ func (p *Publisher) TimelineRowAppended(ctx context.Context, session domain.Sess
 		return err
 	}
 	p.Registry.PublishToSession(session.ID, raw)
+	if err := p.publishUnreadUpdates(session.ID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -244,8 +245,8 @@ func (p *Publisher) now() time.Time {
 	return time.Now()
 }
 
-func (p *Publisher) summaryEvent(session domain.Session) any {
-	summary := newSessionSummary(session)
+func (p *Publisher) summaryEvent(session domain.Session, unread int) any {
+	summary := newSessionSummary(session, unread)
 	timestamp := p.now().UTC().Format(time.RFC3339)
 
 	switch session.Status {
@@ -266,6 +267,44 @@ func (p *Publisher) summaryEvent(session domain.Session) any {
 			Summary:    summary,
 		}
 	}
+}
+
+func (p *Publisher) publishSummaryEvent(session domain.Session) error {
+	return p.publishSummaryToRecipients(session.ID, func(clientID string) (any, error) {
+		return p.summaryEvent(session, p.Registry.UnreadCount(clientID, session.ID)), nil
+	})
+}
+
+func (p *Publisher) publishSummaryToRecipients(sessionID string, build func(clientID string) (any, error)) error {
+	for _, clientID := range p.Registry.SummaryRecipients(sessionID) {
+		payload, err := build(clientID)
+		if err != nil {
+			return err
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		p.Registry.PublishToClient(clientID, raw)
+	}
+	return nil
+}
+
+func (p *Publisher) publishUnreadUpdates(sessionID string) error {
+	for _, update := range p.Registry.IncrementUnread(sessionID) {
+		raw, err := json.Marshal(SessionUnreadUpdatedEvent{
+			Type:       "session.unread.updated",
+			EventScope: EventScopeSummary,
+			SessionID:  update.SessionID,
+			Timestamp:  p.now().UTC().Format(time.RFC3339),
+			Unread:     update.Unread,
+		})
+		if err != nil {
+			return err
+		}
+		p.Registry.PublishToClient(update.ClientID, raw)
+	}
+	return nil
 }
 
 func attentionReason(status domain.SessionStatus) (string, bool) {

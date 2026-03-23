@@ -30,13 +30,23 @@ func TestHandlerConnectRegistersAgentClient(t *testing.T) {
 func TestHandlerDisconnectClosesClient(t *testing.T) {
 	hub := infraws.NewMemoryHub()
 	client := infraws.NewMemoryClient("agent-4", infraws.ClientKindAgent, 2)
-	handler := Handler{Hub: hub}
+	registry := infraws.NewMemoryAgentRegistry(hub)
+	registry.BindNode("node-4", "agent-4", infraws.AgentNodeMetadata{Hostname: "node-4"})
+	handler := Handler{
+		Hub: hub,
+		Dispatcher: Dispatcher{
+			Agents: registry,
+		},
+	}
 	if err := handler.Connect(context.Background(), client); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
 	handler.Disconnect(client.ID())
 	if !client.Closed() {
 		t.Fatal("client should be closed after disconnect")
+	}
+	if err := registry.PublishDispatch("node-4", []byte("dispatch")); err != infraws.ErrNodeNotBound {
+		t.Fatalf("PublishDispatch() error = %v, want ErrNodeNotBound", err)
 	}
 }
 

@@ -33,6 +33,17 @@ INSERT INTO sessions (
 	return err
 }
 
+func (r *sessionRepository) Delete(ctx context.Context, sessionID string) error {
+	result, err := r.q.ExecContext(ctx, `
+DELETE FROM sessions
+WHERE id = $1
+`, sessionID)
+	if err != nil {
+		return err
+	}
+	return requireRowsAffected(result, domain.ErrNotFound)
+}
+
 func (r *sessionRepository) Get(ctx context.Context, sessionID string) (domain.Session, error) {
 	rows, err := r.q.QueryContext(ctx, `
 SELECT id, title, status, active_target_context, pending_action_type, pending_action_payload,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/momaek/tolato/internal/server/domain"
@@ -22,6 +23,8 @@ type Service interface {
 type StartDispatchInput struct {
 	SessionID     string
 	InputText     string
+	Command       string
+	CommandArgs   []string
 	TargetContext domain.ActiveTargetContext
 	RiskLevel     domain.RiskLevel
 }
@@ -62,6 +65,11 @@ type DispatchCommand struct {
 	Timestamp   string           `json:"timestamp"`
 }
 
+type RunCommandArgs struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+}
+
 type Repositories struct {
 	Sessions    domain.SessionRepository
 	Tasks       domain.TaskRepository
@@ -94,6 +102,7 @@ type service struct {
 	events     EventPublisher
 	dispatcher AgentDispatchPublisher
 	completion CompletionHandler
+	logger     domain.Logger
 }
 
 type Option func(*service)
@@ -122,6 +131,12 @@ func WithLockManager(locks domain.LockManager) Option {
 	}
 }
 
+func WithLogger(logger domain.Logger) Option {
+	return func(s *service) {
+		s.logger = logger
+	}
+}
+
 func NewService(repos Repositories, clock domain.Clock, ids domain.IDGenerator, options ...Option) Service {
 	svc := &service{
 		repos: repos,
@@ -140,7 +155,7 @@ func (s *service) StartDispatch(ctx context.Context, input StartDispatchInput) (
 	if err := s.validateReady(); err != nil {
 		return StartDispatchResult{}, err
 	}
-	if input.SessionID == "" || len(input.TargetContext.NodeIDs) == 0 {
+	if input.SessionID == "" || len(input.TargetContext.NodeIDs) == 0 || strings.TrimSpace(input.Command) == "" {
 		return StartDispatchResult{}, domain.ErrInvalidArgument
 	}
 
@@ -169,6 +184,14 @@ func (s *service) StartDispatch(ctx context.Context, input StartDispatchInput) (
 	if err := s.repos.Tasks.Create(ctx, task); err != nil {
 		return StartDispatchResult{}, err
 	}
+	s.logInfo(ctx, "execution task created",
+		"session_id", input.SessionID,
+		"task_id", taskID,
+		"command", strings.TrimSpace(input.Command),
+		"args_count", len(input.CommandArgs),
+		"target_count", len(input.TargetContext.NodeIDs),
+		"risk_level", input.RiskLevel,
+	)
 
 	executions := make([]domain.Execution, 0, len(input.TargetContext.NodeIDs))
 	executionIDs := make([]string, 0, len(input.TargetContext.NodeIDs))
@@ -199,6 +222,13 @@ func (s *service) StartDispatch(ctx context.Context, input StartDispatchInput) (
 			if err := s.dispatcher.DispatchToNode(ctx, executions[i].NodeID, command); err != nil {
 				return StartDispatchResult{}, err
 			}
+			s.logInfo(ctx, "execution dispatched to node",
+				"session_id", input.SessionID,
+				"task_id", taskID,
+				"execution_id", executions[i].ID,
+				"node_id", executions[i].NodeID,
+				"action", command.Action,
+			)
 			executions[i].Status = domain.ExecutionStatusDispatched
 			executions[i].UpdatedAt = now
 			if err := s.repos.Executions.Update(ctx, executions[i]); err != nil {
@@ -361,6 +391,14 @@ func (s *service) RecordChunk(ctx context.Context, input RecordChunkInput) error
 	if err := s.repos.Executions.Update(ctx, execution); err != nil {
 		return err
 	}
+	s.logInfo(ctx, "execution chunk received",
+		"session_id", execution.SessionID,
+		"task_id", execution.TaskID,
+		"execution_id", execution.ID,
+		"node_id", execution.NodeID,
+		"stream", input.Chunk.Stream,
+		"text_preview", previewText(input.Chunk.Text, 320),
+	)
 
 	task, err := s.repos.Tasks.Get(ctx, execution.TaskID)
 	if err != nil {
@@ -405,6 +443,15 @@ func (s *service) FinishExecution(ctx context.Context, input FinishExecutionInpu
 	if err := s.repos.Executions.Update(ctx, execution); err != nil {
 		return err
 	}
+	s.logInfo(ctx, "execution finished",
+		"session_id", execution.SessionID,
+		"task_id", execution.TaskID,
+		"execution_id", execution.ID,
+		"node_id", execution.NodeID,
+		"status", execution.Status,
+		"exit_code", intValueOrNil(input.ExitCode),
+		"reason", strPtrValue(input.StatusReason),
+	)
 
 	aggregate, err := s.repos.Executions.AggregateByTask(ctx, execution.TaskID)
 	if err != nil {
@@ -419,6 +466,16 @@ func (s *service) FinishExecution(ctx context.Context, input FinishExecutionInpu
 	if err := s.repos.Tasks.Update(ctx, task); err != nil {
 		return err
 	}
+	s.logInfo(ctx, "execution task aggregate updated",
+		"session_id", execution.SessionID,
+		"task_id", task.ID,
+		"task_status", task.Status,
+		"aggregate_total", aggregate.Total,
+		"aggregate_success", aggregate.Success,
+		"aggregate_failed", aggregate.Failed,
+		"aggregate_timeout", aggregate.Timeout,
+		"aggregate_cancelled", aggregate.Cancelled,
+	)
 
 	if err := s.publishExecutionFinished(ctx, execution.SessionID, execution.TaskID, execution); err != nil {
 		return err
@@ -552,9 +609,11 @@ func approvalStatusForDispatch(risk domain.RiskLevel) domain.ApprovalStatus {
 }
 
 func buildDispatchCommand(task domain.Task, execution domain.Execution, input StartDispatchInput, now time.Time) (DispatchCommand, error) {
-	args, err := json.Marshal(map[string]any{
-		"inputText": input.InputText,
-	})
+	runArgs := RunCommandArgs{
+		Command: strings.TrimSpace(input.Command),
+		Args:    append([]string(nil), input.CommandArgs...),
+	}
+	args, err := json.Marshal(runArgs)
 	if err != nil {
 		return DispatchCommand{}, err
 	}
@@ -564,7 +623,7 @@ func buildDispatchCommand(task domain.Task, execution domain.Execution, input St
 		TaskID:      task.ID,
 		ExecutionID: execution.ID,
 		NodeID:      execution.NodeID,
-		Action:      "execute_task",
+		Action:      "run_command",
 		Args:        args,
 		RiskLevel:   input.RiskLevel,
 		Timestamp:   now.UTC().Format(time.RFC3339),
@@ -633,6 +692,40 @@ func mustMarshalJSON(value any) json.RawMessage {
 		panic(err)
 	}
 	return raw
+}
+
+func (s *service) logInfo(ctx context.Context, msg string, args ...any) {
+	if s.logger != nil {
+		s.logger.InfoContext(ctx, msg, args...)
+	}
+}
+
+func previewText(text string, max int) string {
+	text = strings.TrimSpace(text)
+	text = strings.ReplaceAll(text, "\n", "\\n")
+	text = strings.ReplaceAll(text, "\r", "\\r")
+	if max <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[:max]) + "..."
+}
+
+func strPtrValue(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
+func intValueOrNil(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func cloneRaw(in []byte) json.RawMessage {

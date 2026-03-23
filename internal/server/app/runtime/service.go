@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/momaek/tolato/internal/server/domain"
@@ -48,6 +49,7 @@ type Runtime struct {
 	ids    domain.IDGenerator
 	locks  domain.LockManager
 	events EventPublisher
+	logger domain.Logger
 }
 
 type EventPublisher interface {
@@ -71,6 +73,12 @@ func WithEventPublisher(events EventPublisher) Option {
 func WithLockManager(locks domain.LockManager) Option {
 	return func(r *Runtime) {
 		r.locks = locks
+	}
+}
+
+func WithLogger(logger domain.Logger) Option {
+	return func(r *Runtime) {
+		r.logger = logger
 	}
 }
 
@@ -118,6 +126,7 @@ type ModelTurnOutput struct {
 	ToolCall      *ToolInvocation
 	Done          bool
 	ProviderState []byte
+	Streamed      bool
 }
 
 type ToolInvocation struct {
@@ -181,6 +190,10 @@ func (r *Runtime) HandleUserMessage(ctx context.Context, sessionID string, text 
 			return err
 		}
 		if duplicated {
+			r.logInfo(ctx, "runtime duplicate client message ignored",
+				"session_id", sessionID,
+				"client_message_id", clientMessageID,
+			)
 			return nil
 		}
 
@@ -227,6 +240,11 @@ func (r *Runtime) HandleUserMessage(ctx context.Context, sessionID string, text 
 		if err := r.publishSessionState(ctx, session); err != nil {
 			return err
 		}
+		r.logInfo(ctx, "runtime accepted user message",
+			"session_id", sessionID,
+			"client_message_id", clientMessageID,
+			"text_preview", previewText(text, 240),
+		)
 
 		conversation, err := r.rebuildConversation(ctx, sessionID)
 		if err != nil {
@@ -297,6 +315,11 @@ func (r *Runtime) ResumeAfterTargetConfirmation(ctx context.Context, sessionID s
 		if err := r.publishSessionState(ctx, session); err != nil {
 			return err
 		}
+		r.logInfo(ctx, "runtime target confirmation recorded",
+			"session_id", sessionID,
+			"target_count", len(targetCtx.NodeIDs),
+			"scope", targetCtx.Scope,
+		)
 
 		conversation, err := r.rebuildConversation(ctx, sessionID)
 		if err != nil {
@@ -364,6 +387,7 @@ func (r *Runtime) ClearTargetContext(ctx context.Context, sessionID string, idem
 		if err := r.publishTargetCleared(ctx, session); err != nil {
 			return err
 		}
+		r.logInfo(ctx, "runtime target context cleared", "session_id", sessionID)
 		return r.publishSessionState(ctx, session)
 	})
 }
@@ -443,6 +467,11 @@ func (r *Runtime) ResumeAfterApproval(ctx context.Context, sessionID string, act
 			if err := r.publishSessionState(ctx, session); err != nil {
 				return err
 			}
+			r.logInfo(ctx, "runtime approval recorded",
+				"session_id", sessionID,
+				"task_id", taskID,
+				"approved", true,
+			)
 			conversation, err := r.rebuildConversation(ctx, sessionID)
 			if err != nil {
 				return err
@@ -471,6 +500,12 @@ func (r *Runtime) ResumeAfterApproval(ctx context.Context, sessionID string, act
 		if err := r.publishTimelineRow(ctx, session, resultRow); err != nil {
 			return err
 		}
+		r.logInfo(ctx, "runtime approval recorded",
+			"session_id", sessionID,
+			"task_id", taskID,
+			"approved", false,
+			"reason", strPtrValue(action.Reason),
+		)
 		return r.publishSessionState(ctx, session)
 	})
 }
@@ -506,6 +541,16 @@ func (r *Runtime) HandleExecutionFinished(ctx context.Context, sessionID string,
 		if !allExecutionsTerminal(aggregate) {
 			return fmt.Errorf("task %s still has running executions", taskID)
 		}
+		r.logInfo(ctx, "runtime resuming after execution finished",
+			"session_id", sessionID,
+			"task_id", taskID,
+			"task_status", task.Status,
+			"aggregate_total", aggregate.Total,
+			"aggregate_success", aggregate.Success,
+			"aggregate_failed", aggregate.Failed,
+			"aggregate_timeout", aggregate.Timeout,
+			"aggregate_cancelled", aggregate.Cancelled,
+		)
 
 		session.Status = domain.SessionStatusRunning
 		if err := r.bumpSession(ctx, &session); err != nil {
@@ -530,6 +575,12 @@ func (r *Runtime) HandleExecutionFinished(ctx context.Context, sessionID string,
 
 func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, conversation []ConversationItem) error {
 	for {
+		r.logInfo(ctx, "runtime llm turn started",
+			"session_id", session.ID,
+			"conversation_items", len(conversation),
+			"pending_action", pendingActionType(session.PendingAction),
+			"current_task_id", strPtrValue(session.CurrentTaskID),
+		)
 		output, err := r.llm.RunTurn(ctx, ModelTurnInput{
 			SessionID:           session.ID,
 			Conversation:        conversation,
@@ -539,6 +590,10 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			CurrentTask:         r.currentExecutionContext(ctx, session),
 		}, r.tools.Definitions())
 		if err != nil {
+			r.logError(ctx, "runtime llm turn failed",
+				"session_id", session.ID,
+				"error", err,
+			)
 			session.Status = domain.SessionStatusFailed
 			if saveErr := r.bumpSession(ctx, session); saveErr != nil {
 				return errors.Join(err, saveErr)
@@ -552,8 +607,15 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 		session.ProviderStateBlob = cloneRaw(output.ProviderState)
 		switch {
 		case output.AssistantText != nil:
-			if err := r.publishAssistantStream(ctx, session.ID, *output.AssistantText); err != nil {
-				return err
+			r.logInfo(ctx, "runtime llm returned assistant text",
+				"session_id", session.ID,
+				"done", output.Done,
+				"text_preview", previewText(*output.AssistantText, 240),
+			)
+			if !output.Streamed {
+				if err := r.publishAssistantStream(ctx, session.ID, *output.AssistantText); err != nil {
+					return err
+				}
 			}
 			row, err := r.appendAssistant(ctx, session.ID, *output.AssistantText)
 			if err != nil {
@@ -587,6 +649,11 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			return nil
 
 		case output.ToolCall != nil:
+			r.logInfo(ctx, "runtime llm requested tool call",
+				"session_id", session.ID,
+				"tool_name", output.ToolCall.Name,
+				"tool_args_preview", previewText(string(output.ToolCall.Args), 320),
+			)
 			call, callRow, err := r.appendToolCall(ctx, session.ID, output.ToolCall)
 			if err != nil {
 				return err
@@ -602,6 +669,11 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 				Args:                output.ToolCall.Args,
 			})
 			if err != nil {
+				r.logError(ctx, "runtime tool call failed",
+					"session_id", session.ID,
+					"tool_name", output.ToolCall.Name,
+					"error", err,
+				)
 				resultRow, appendErr := r.appendToolResult(ctx, session.ID, call.ID, output.ToolCall.Name, domain.ToolResultStatusFailed, err.Error(), nil)
 				if appendErr != nil {
 					return errors.Join(err, appendErr)
@@ -626,6 +698,14 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			if err := r.publishTimelineRow(ctx, *session, resultRow); err != nil {
 				return err
 			}
+			r.logInfo(ctx, "runtime tool call completed",
+				"session_id", session.ID,
+				"tool_name", output.ToolCall.Name,
+				"wait_for_user", result.WaitForUser,
+				"async_execution_started", result.AsyncExecutionStarted,
+				"task_id", result.TaskID,
+				"meta_preview", previewText(result.MetaText, 240),
+			)
 			if err := r.consumeToolResult(ctx, session, result); err != nil {
 				return err
 			}
@@ -644,6 +724,9 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			continue
 
 		default:
+			r.logError(ctx, "runtime llm returned empty output",
+				"session_id", session.ID,
+			)
 			session.Status = domain.SessionStatusFailed
 			if err := r.bumpSession(ctx, session); err != nil {
 				return errors.Join(ErrEmptyModelOutput, err)
@@ -899,6 +982,11 @@ func (r *Runtime) consumeToolResult(ctx context.Context, session *domain.Session
 	}
 
 	if result.WaitForUser {
+		r.logInfo(ctx, "runtime waiting for user action",
+			"session_id", session.ID,
+			"pending_action", result.PendingActionType,
+			"task_id", result.TaskID,
+		)
 		session.PendingAction = &domain.PendingAction{
 			Type:    result.PendingActionType,
 			Payload: cloneRaw(result.PendingActionPayload),
@@ -942,6 +1030,11 @@ func (r *Runtime) consumeToolResult(ctx context.Context, session *domain.Session
 		return r.publishSessionState(ctx, *session)
 	}
 	if result.AsyncExecutionStarted {
+		r.logInfo(ctx, "runtime switched to async execution wait",
+			"session_id", session.ID,
+			"task_id", result.TaskID,
+			"execution_group_id", result.ExecutionGroupID,
+		)
 		session.PendingAction = nil
 		session.Status = domain.SessionStatusWaitingAsyncExecution
 		if err := r.bumpSession(ctx, session); err != nil {
@@ -977,6 +1070,46 @@ func canAcceptMessage(status domain.SessionStatus) bool {
 
 func allExecutionsTerminal(aggregate domain.ExecutionAggregate) bool {
 	return aggregate.Total > 0 && aggregate.Queued == 0 && aggregate.Dispatched == 0 && aggregate.Running == 0
+}
+
+func (r *Runtime) logInfo(ctx context.Context, msg string, args ...any) {
+	if r.logger != nil {
+		r.logger.InfoContext(ctx, msg, args...)
+	}
+}
+
+func (r *Runtime) logError(ctx context.Context, msg string, args ...any) {
+	if r.logger != nil {
+		r.logger.ErrorContext(ctx, msg, args...)
+	}
+}
+
+func previewText(text string, max int) string {
+	text = strings.TrimSpace(text)
+	text = strings.ReplaceAll(text, "\n", "\\n")
+	text = strings.ReplaceAll(text, "\r", "\\r")
+	if max <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[:max]) + "..."
+}
+
+func pendingActionType(action *domain.PendingAction) string {
+	if action == nil {
+		return ""
+	}
+	return string(action.Type)
+}
+
+func strPtrValue(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }
 
 func (r *Runtime) currentExecutionContext(ctx context.Context, session *domain.Session) *ExecutionContext {

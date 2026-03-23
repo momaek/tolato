@@ -53,6 +53,29 @@ func (r *sessionRepository) Get(ctx context.Context, sessionID string) (domain.S
 	return cloneSession(session), nil
 }
 
+func (r *sessionRepository) Delete(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.items[sessionID]; !exists {
+		return domain.ErrNotFound
+	}
+
+	delete(r.items, sessionID)
+	for index, id := range r.order {
+		if id != sessionID {
+			continue
+		}
+		r.order = append(r.order[:index], r.order[index+1:]...)
+		break
+	}
+	return nil
+}
+
 func (r *sessionRepository) List(ctx context.Context, filter domain.SessionFilter) ([]domain.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

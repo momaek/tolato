@@ -46,8 +46,56 @@ func TestPublisherTimelineEventOnlyReachesActiveClients(t *testing.T) {
 	if event.Type != "timeline.row.appended" || event.EventScope != EventScopeTimeline || event.SessionID != "sess-1" || event.Revision != 7 {
 		t.Fatalf("event = %#v, want timeline event", event)
 	}
-	if got := drainQueue(watchClient.Messages()); len(got) != 0 {
-		t.Fatalf("watch client should not receive timeline event: %#v", got)
+	watchMsg := mustDrainOne(t, watchClient.Messages())
+	var unread SessionUnreadUpdatedEvent
+	if err := json.Unmarshal(watchMsg, &unread); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if unread.Type != "session.unread.updated" || unread.Unread != 1 {
+		t.Fatalf("watch event = %#v, want unread update", unread)
+	}
+}
+
+func TestPublisherTimelineRowAppendedPublishesUnreadUpdatedToWatchers(t *testing.T) {
+	hub := infraws.NewMemoryHub()
+	activeClient := infraws.NewMemoryClient("client-active", infraws.ClientKindUI, 4)
+	watchClient := infraws.NewMemoryClient("client-watch", infraws.ClientKindUI, 4)
+	hub.Register(activeClient)
+	hub.Register(watchClient)
+
+	registry := infraws.NewMemorySessionRegistry(hub)
+	registry.SetActive("client-active", "sess-unread")
+	registry.SetWatchSessions("client-watch", []string{"sess-unread"})
+
+	publisher := &Publisher{
+		Registry: registry,
+		Now:      func() time.Time { return time.Date(2026, 3, 22, 18, 5, 0, 0, time.UTC) },
+	}
+	session := domain.Session{ID: "sess-unread", Revision: 8}
+	row := domain.TimelineRow{
+		ID:        "row-2",
+		SessionID: "sess-unread",
+		Kind:      domain.TimelineRowKindAssistantText,
+		Text:      "new",
+		CreatedAt: time.Date(2026, 3, 22, 18, 5, 0, 0, time.UTC),
+	}
+
+	if err := publisher.TimelineRowAppended(context.Background(), session, row); err != nil {
+		t.Fatalf("TimelineRowAppended() error = %v", err)
+	}
+
+	activeMsgs := drainQueue(activeClient.Messages())
+	if len(activeMsgs) != 1 {
+		t.Fatalf("active messages = %#v, want one timeline event", activeMsgs)
+	}
+
+	watchMsg := mustDrainOne(t, watchClient.Messages())
+	var unread SessionUnreadUpdatedEvent
+	if err := json.Unmarshal(watchMsg, &unread); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if unread.Type != "session.unread.updated" || unread.EventScope != EventScopeSummary || unread.Unread != 1 {
+		t.Fatalf("unread event = %#v, want unread=1 summary event", unread)
 	}
 }
 

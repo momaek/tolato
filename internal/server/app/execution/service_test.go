@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -148,6 +149,7 @@ func TestStartDispatchCreatesTaskExecutionsAndDispatches(t *testing.T) {
 	result, err := svc.StartDispatch(context.Background(), StartDispatchInput{
 		SessionID: "sess-0",
 		InputText: "run diagnostics",
+		Command:   "uptime",
 		TargetContext: domain.ActiveTargetContext{
 			Status:       domain.TargetStatusConfirmed,
 			Scope:        domain.TargetScopeMulti,
@@ -181,6 +183,43 @@ func TestStartDispatchCreatesTaskExecutionsAndDispatches(t *testing.T) {
 	}
 	if len(dispatcher.commands) != 2 || dispatcher.commands[0].Type != "task.dispatch" {
 		t.Fatalf("commands = %#v, want dispatch commands", dispatcher.commands)
+	}
+	if dispatcher.commands[0].Action != "run_command" {
+		t.Fatalf("command action = %q, want run_command", dispatcher.commands[0].Action)
+	}
+	var args RunCommandArgs
+	if err := json.Unmarshal(dispatcher.commands[0].Args, &args); err != nil {
+		t.Fatalf("json.Unmarshal(args) error = %v", err)
+	}
+	if args.Command != "uptime" || len(args.Args) != 0 {
+		t.Fatalf("dispatch args = %#v, want explicit command", args)
+	}
+}
+
+func TestStartDispatchRejectsMissingCommand(t *testing.T) {
+	store := memory.NewStore()
+	clock := infra.FixedClock{Time: time.Date(2026, 3, 22, 14, 55, 0, 0, time.UTC)}
+	idgen := stubIDGen{}
+
+	svc := NewService(Repositories{
+		Sessions:    store.Sessions,
+		Tasks:       store.Tasks,
+		Executions:  store.Executions,
+		Timelines:   store.Timelines,
+		ToolResults: store.ToolResults,
+		Audits:      store.Audits,
+	}, clock, &idgen)
+
+	_, err := svc.StartDispatch(context.Background(), StartDispatchInput{
+		SessionID: "sess-0",
+		TargetContext: domain.ActiveTargetContext{
+			Status:  domain.TargetStatusConfirmed,
+			NodeIDs: []string{"node-1"},
+		},
+		RiskLevel: domain.RiskLevelLow,
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("StartDispatch() error = %v, want ErrInvalidArgument", err)
 	}
 }
 

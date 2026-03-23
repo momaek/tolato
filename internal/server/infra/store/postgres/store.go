@@ -11,6 +11,7 @@ type Store struct {
 	Tasks               domain.TaskRepository
 	Executions          domain.ExecutionRepository
 	Audits              domain.AuditRepository
+	AuthSessions        domain.AuthSessionRepository
 	AgentProviderStates domain.AgentProviderStateRepository
 	Settings            domain.SettingsRepository
 }
@@ -25,6 +26,7 @@ func NewStore(q Queryer) *Store {
 		Tasks:               NewTaskRepository(q),
 		Executions:          NewExecutionRepository(q),
 		Audits:              NewAuditRepository(q),
+		AuthSessions:        NewAuthSessionRepository(q),
 		AgentProviderStates: NewAgentProviderStateRepository(q),
 		Settings:            NewSettingsRepository(q),
 	}

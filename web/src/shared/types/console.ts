@@ -141,6 +141,8 @@ export interface LlmStreamState {
   status: 'streaming' | 'completed'
   contentText?: string
   reasoningText?: string
+  pendingToolName?: string
+  pendingToolArguments?: string
   events: LlmStreamEvent[]
 }
 

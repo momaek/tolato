@@ -24,8 +24,16 @@ func TestHandlerRoutesRegisterAndHeartbeat(t *testing.T) {
 	}
 
 	registerRaw, err := handler.Handle(context.Background(), "agent-9", mustAgentMessage(t, Message{
-		Type:    TypeAgentRegister,
-		Payload: mustAgentPayload(t, RegisterPayload{NodeID: "node-9"}),
+		Type: TypeAgentRegister,
+		Payload: mustAgentPayload(t, RegisterPayload{
+			NodeID: "node-9",
+			Metadata: infraws.AgentNodeMetadata{
+				Hostname: "node-9.example",
+				Region:   "Tokyo",
+				OS:       "linux",
+				Version:  "1.0.0",
+			},
+		}),
 	}))
 	if err != nil {
 		t.Fatalf("Handle(register) error = %v", err)
@@ -39,13 +47,27 @@ func TestHandlerRoutesRegisterAndHeartbeat(t *testing.T) {
 	}
 
 	if _, err := handler.Handle(context.Background(), "agent-9", mustAgentMessage(t, Message{
-		Type:    TypeAgentHeartbeat,
-		Payload: mustAgentPayload(t, HeartbeatPayload{NodeID: "node-9"}),
+		Type: TypeAgentHeartbeat,
+		Payload: mustAgentPayload(t, HeartbeatPayload{
+			NodeID: "node-9",
+			Runtime: infraws.AgentNodeRuntime{
+				Busy: true,
+				Metrics: infraws.AgentNodeMetrics{
+					CPU:    0.4,
+					Memory: 0.5,
+					Disk:   0.6,
+				},
+			},
+		}),
 	})); err != nil {
 		t.Fatalf("Handle(heartbeat) error = %v", err)
 	}
 	if got, ok := registry.LastHeartbeat("node-9"); !ok || got.UTC().Format(time.RFC3339) != "2026-03-22T21:05:00Z" {
 		t.Fatalf("LastHeartbeat() = %v, %v", got, ok)
+	}
+	snapshots := registry.Snapshots()
+	if len(snapshots) != 1 || snapshots[0].Hostname != "node-9.example" || !snapshots[0].Busy {
+		t.Fatalf("Snapshots() = %#v, want metadata/runtime persisted", snapshots)
 	}
 }
 

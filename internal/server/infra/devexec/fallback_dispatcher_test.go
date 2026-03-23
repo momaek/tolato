@@ -25,7 +25,7 @@ func TestFallbackDispatchPublisherSimulatesWhenNodeMissing(t *testing.T) {
 		TaskID:      "task-1",
 		ExecutionID: "exec-1",
 		NodeID:      "jp-tokyo-01",
-		Action:      "execute_task",
+		Action:      "run_command",
 	})
 	if err != nil {
 		t.Fatalf("DispatchToNode() error = %v", err)

@@ -72,6 +72,53 @@ func TestHandleUserMessageAssistantText(t *testing.T) {
 	}
 }
 
+func TestHandleUserMessageAssistantTextSkipsSyntheticStreamWhenAlreadyStreamed(t *testing.T) {
+	store := memory.NewStore()
+	clock := infra.FixedClock{Time: time.Date(2026, 3, 22, 14, 1, 0, 0, time.UTC)}
+	idgen := stubIDGen{values: []string{"msg-1", "row-1", "msg-2", "row-2"}}
+	events := &stubEventPublisher{
+		llmSSEEvents: []stubLLMSSEEvent{{
+			sessionID:         "sess-streamed",
+			responseID:        "resp-1",
+			sequenceNumber:    1,
+			upstreamEventType: "response.output_text.delta",
+			rawEvent:          json.RawMessage(`{"delta":"hello"}`),
+		}},
+		llmCompleted: []json.RawMessage{json.RawMessage(`{"id":"resp-1"}`)},
+	}
+
+	session := domain.Session{
+		ID:        "sess-streamed",
+		Title:     "Session streamed",
+		Status:    domain.SessionStatusIdle,
+		Revision:  1,
+		CreatedAt: clock.Now(),
+		UpdatedAt: clock.Now(),
+	}
+	if err := store.Sessions.Create(context.Background(), session); err != nil {
+		t.Fatalf("Create(session) error = %v", err)
+	}
+
+	llm := &fakeLLM{
+		outputs: []ModelTurnOutput{{AssistantText: strPtr("hello"), Done: true, Streamed: true}},
+	}
+	rt := NewService(Repositories{
+		Sessions:    store.Sessions,
+		Messages:    store.ThreadMessages,
+		Timelines:   store.Timelines,
+		ToolCalls:   store.ToolCalls,
+		ToolResults: store.ToolResults,
+	}, llm, fakeTools{}, clock, &idgen, WithEventPublisher(events))
+
+	if err := rt.HandleUserMessage(context.Background(), "sess-streamed", "ping", "client-streamed"); err != nil {
+		t.Fatalf("HandleUserMessage() error = %v", err)
+	}
+
+	if len(events.llmSSEEvents) != 1 || len(events.llmCompleted) != 1 {
+		t.Fatalf("llm events = %#v completed = %#v, want no extra synthetic stream", events.llmSSEEvents, events.llmCompleted)
+	}
+}
+
 func TestHandleUserMessageToolWaitsForTargetConfirmation(t *testing.T) {
 	store := memory.NewStore()
 	clock := infra.FixedClock{Time: time.Date(2026, 3, 22, 14, 5, 0, 0, time.UTC)}

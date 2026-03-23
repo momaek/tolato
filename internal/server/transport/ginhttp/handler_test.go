@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	appauth "github.com/momaek/tolato/internal/server/app/auth"
 	"github.com/momaek/tolato/internal/server/app/history"
 	"github.com/momaek/tolato/internal/server/app/nodeview"
 	"github.com/momaek/tolato/internal/server/app/settings"
@@ -195,7 +196,7 @@ func TestHandlerSettingsRoundTrip(t *testing.T) {
 	handler := Handler{
 		Settings: &fakeSettingsService{
 			model: settings.ModelConfigView{
-				Provider:     "OpenAI",
+				Provider:     "openai",
 				Model:        "gpt-5.4",
 				Temperature:  0.2,
 				ApprovalMode: "balanced",
@@ -242,6 +243,40 @@ func TestHandlerSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHandlerListModelOptions(t *testing.T) {
+	t.Parallel()
+
+	router := gin.New()
+	handler := Handler{
+		Settings: &fakeSettingsService{
+			models: []settings.ModelOption{
+				{ID: "gpt-5.4", Label: "gpt-5.4"},
+				{ID: "gpt-5.4-mini", Label: "gpt-5.4-mini"},
+			},
+		},
+	}
+	handler.RegisterRoutes(router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/model-config/models", strings.NewReader(`{"provider":"openai","endpoint":"https://api.openai.com/v1","apiKey":"sk-test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var body struct {
+		Models []settings.ModelOption `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(body.Models) != 2 || body.Models[0].ID != "gpt-5.4" {
+		t.Fatalf("body = %#v, want model list", body)
+	}
+}
+
 func TestHandlerSettingsPasswordChange(t *testing.T) {
 	t.Parallel()
 
@@ -258,6 +293,52 @@ func TestHandlerSettingsPasswordChange(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestHandlerLoginAndProtectedRouteRequireBearer(t *testing.T) {
+	router := gin.New()
+	auth := &fakeAuthService{
+		loginResult: appauth.LoginResult{
+			UserID:    "admin",
+			SessionID: "sess-1",
+			Token:     "token-1",
+		},
+		principal: appauth.Principal{
+			UserID:    "admin",
+			SessionID: "sess-1",
+		},
+	}
+	handler := Handler{
+		Auth:     auth,
+		Settings: &fakeSettingsService{},
+	}
+	handler.RegisterRoutes(router)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"secret"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	router.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want 200", loginRec.Code)
+	}
+
+	protectedReq := httptest.NewRequest(http.MethodGet, "/api/v1/settings/preferences", nil)
+	protectedRec := httptest.NewRecorder()
+	router.ServeHTTP(protectedRec, protectedReq)
+	if protectedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("protected status without token = %d, want 401", protectedRec.Code)
+	}
+
+	protectedReq = httptest.NewRequest(http.MethodGet, "/api/v1/settings/preferences", nil)
+	protectedReq.Header.Set("Authorization", "Bearer token-1")
+	protectedRec = httptest.NewRecorder()
+	router.ServeHTTP(protectedRec, protectedReq)
+	if protectedRec.Code != http.StatusOK {
+		t.Fatalf("protected status with token = %d, want 200", protectedRec.Code)
+	}
+	if auth.authenticatedToken != "token-1" {
+		t.Fatalf("authenticated token = %q, want token-1", auth.authenticatedToken)
 	}
 }
 
@@ -311,9 +392,18 @@ type fakeHistoryService struct {
 
 type fakeSettingsService struct {
 	model       settings.ModelConfigView
+	models      []settings.ModelOption
 	account     settings.AccountSecurityView
 	preferences settings.UserPreferencesView
 	err         error
+}
+
+type fakeAuthService struct {
+	loginResult        appauth.LoginResult
+	principal          appauth.Principal
+	loginErr           error
+	authErr            error
+	authenticatedToken string
 }
 
 func (f *fakeHistoryService) ListTasks(ctx context.Context, filter history.ListFilter) ([]history.TaskItem, error) {
@@ -374,6 +464,16 @@ func (f *fakeSettingsService) TestModelConfig(ctx context.Context, userID string
 	return settings.ModelConfigTestResult{OK: true, Message: "connection test succeeded"}, nil
 }
 
+func (f *fakeSettingsService) ListModelOptions(ctx context.Context, userID string, in settings.ListModelOptionsInput) ([]settings.ModelOption, error) {
+	_ = ctx
+	_ = userID
+	_ = in
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]settings.ModelOption(nil), f.models...), nil
+}
+
 func (f *fakeSettingsService) GetAccountSecurity(ctx context.Context, userID string) (settings.AccountSecurityView, error) {
 	return f.account, f.err
 }
@@ -415,4 +515,20 @@ func (f *fakeSettingsService) PutPreferences(ctx context.Context, userID string,
 		StreamMarkdown:  in.StreamMarkdown,
 	}
 	return f.preferences, nil
+}
+
+func (f *fakeAuthService) Login(ctx context.Context, username string, password string) (appauth.LoginResult, error) {
+	_ = ctx
+	_ = username
+	_ = password
+	return f.loginResult, f.loginErr
+}
+
+func (f *fakeAuthService) AuthenticateToken(ctx context.Context, token string) (appauth.Principal, error) {
+	_ = ctx
+	f.authenticatedToken = token
+	if f.authErr != nil {
+		return appauth.Principal{}, f.authErr
+	}
+	return f.principal, nil
 }

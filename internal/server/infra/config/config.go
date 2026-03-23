@@ -27,6 +27,7 @@ type StoreConfig struct {
 type AuthConfig struct {
 	AdminUsername string `yaml:"admin_username"`
 	AdminPassword string `yaml:"admin_password"`
+	AgentToken    string `yaml:"agent_token"`
 }
 
 func Load(path string) (Config, error) {

@@ -23,7 +23,7 @@ func TestServiceDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetModelConfig() error = %v", err)
 	}
-	if model.Provider != "OpenAI" || model.Model != "gpt-5.4" || model.ApprovalMode != "balanced" {
+	if model.Provider != "openai" || model.Model != "gpt-5.4" || model.ApprovalMode != "balanced" {
 		t.Fatalf("model = %#v, want default dev model config", model)
 	}
 
@@ -65,6 +65,9 @@ func TestServicePersistsUpdates(t *testing.T) {
 	}
 	if !model.HasAPIKey || model.Model != "gpt-5.4-mini" {
 		t.Fatalf("model = %#v, want persisted api key and model", model)
+	}
+	if model.Provider != "openai" {
+		t.Fatalf("model.Provider = %q, want openai", model.Provider)
 	}
 
 	preferences, err := svc.PutPreferences(context.Background(), "alice", UpdatePreferencesInput{
@@ -119,4 +122,109 @@ func TestServiceRejectsInvalidInput(t *testing.T) {
 	}); err == nil {
 		t.Fatal("PutPreferences() error = nil, want invalid argument")
 	}
+}
+
+func TestServiceDelegatesSecurityOperations(t *testing.T) {
+	store := memory.NewStore()
+	security := &stubSecurityService{}
+	svc := NewService(Repositories{
+		Settings: store.Settings,
+		Security: security,
+	})
+
+	if err := svc.ChangePassword(context.Background(), "alice", ChangePasswordInput{
+		CurrentPassword: "old",
+		NewPassword:     "new",
+	}); err != nil {
+		t.Fatalf("ChangePassword() error = %v", err)
+	}
+	if security.userID != "alice" || security.currentPassword != "old" || security.newPassword != "new" {
+		t.Fatalf("security = %#v, want delegated password change", security)
+	}
+
+	if err := svc.RevokeOtherSessions(context.Background(), "alice", "sess-1"); err != nil {
+		t.Fatalf("RevokeOtherSessions() error = %v", err)
+	}
+	if security.revokedUserID != "alice" || security.currentSessionID != "sess-1" {
+		t.Fatalf("security revoke = %#v, want delegated revoke", security)
+	}
+}
+
+func TestServiceListsModelOptionsUsingStoredAPIKey(t *testing.T) {
+	t.Parallel()
+
+	store := memory.NewStore()
+	catalog := &stubModelCatalog{
+		models: []ModelOption{
+			{ID: "gpt-5.4", Label: "gpt-5.4"},
+			{ID: "gpt-5.4-mini", Label: "gpt-5.4-mini"},
+		},
+	}
+	svc := NewService(Repositories{
+		Settings: store.Settings,
+		Models:   catalog,
+	})
+
+	if _, err := svc.PutModelConfig(context.Background(), "alice", UpdateModelConfigInput{
+		Provider:     "openai",
+		Model:        "gpt-5.4",
+		Endpoint:     "https://api.openai.com/v1",
+		APIKey:       "sk-stored",
+		Temperature:  0.2,
+		ApprovalMode: "balanced",
+	}); err != nil {
+		t.Fatalf("PutModelConfig() error = %v", err)
+	}
+
+	models, err := svc.ListModelOptions(context.Background(), "alice", ListModelOptionsInput{
+		Provider: "openai",
+		Endpoint: "https://api.openai.com/v1",
+	})
+	if err != nil {
+		t.Fatalf("ListModelOptions() error = %v", err)
+	}
+	if len(models) != 2 || models[0].ID != "gpt-5.4" {
+		t.Fatalf("models = %#v, want catalog output", models)
+	}
+	if catalog.provider != "openai" || catalog.endpoint != "https://api.openai.com/v1" || catalog.apiKey != "sk-stored" {
+		t.Fatalf("catalog = %#v, want stored config forwarded", catalog)
+	}
+}
+
+type stubSecurityService struct {
+	userID           string
+	currentPassword  string
+	newPassword      string
+	revokedUserID    string
+	currentSessionID string
+}
+
+type stubModelCatalog struct {
+	provider string
+	endpoint string
+	apiKey   string
+	models   []ModelOption
+}
+
+func (s *stubSecurityService) ChangePassword(ctx context.Context, userID string, currentPassword string, newPassword string) error {
+	_ = ctx
+	s.userID = userID
+	s.currentPassword = currentPassword
+	s.newPassword = newPassword
+	return nil
+}
+
+func (s *stubSecurityService) RevokeOtherSessions(ctx context.Context, userID string, currentSessionID string) error {
+	_ = ctx
+	s.revokedUserID = userID
+	s.currentSessionID = currentSessionID
+	return nil
+}
+
+func (s *stubModelCatalog) ListModels(ctx context.Context, provider string, endpoint string, apiKey string) ([]ModelOption, error) {
+	_ = ctx
+	s.provider = provider
+	s.endpoint = endpoint
+	s.apiKey = apiKey
+	return append([]ModelOption(nil), s.models...), nil
 }

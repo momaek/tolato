@@ -9,9 +9,12 @@ import (
 	"github.com/momaek/tolato/internal/server/infra/store/memory"
 )
 
-func SeedSettingsStore(ctx context.Context, store *memory.Store, now time.Time) error {
+func SeedSettingsStore(ctx context.Context, store *memory.Store, userID string, now time.Time) error {
 	if store == nil {
 		return domain.ErrInvalidArgument
+	}
+	if userID == "" {
+		userID = "admin"
 	}
 
 	records := []struct {
@@ -34,7 +37,7 @@ func SeedSettingsStore(ctx context.Context, store *memory.Store, now time.Time) 
 		{
 			key: domain.SettingKeyAccountSecurity,
 			value: map[string]any{
-				"username":           "admin",
+				"username":           userID,
 				"lastLoginAt":        now.UTC().Add(-4 * time.Hour).Format(time.RFC3339),
 				"mfaEnabled":         true,
 				"auditRetentionDays": 90,
@@ -58,7 +61,7 @@ func SeedSettingsStore(ctx context.Context, store *memory.Store, now time.Time) 
 			return err
 		}
 		if err := store.Settings.Put(ctx, domain.SettingRecord{
-			UserID:    "local-dev",
+			UserID:    userID,
 			Key:       item.key,
 			Value:     raw,
 			UpdatedAt: now.UTC(),

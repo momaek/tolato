@@ -130,6 +130,14 @@ type SessionRequiresAttentionEvent struct {
 	Reason     string     `json:"reason"`
 }
 
+type SessionUnreadUpdatedEvent struct {
+	Type       string     `json:"type"`
+	EventScope EventScope `json:"eventScope"`
+	SessionID  string     `json:"sessionId"`
+	Timestamp  string     `json:"timestamp"`
+	Unread     int        `json:"unread"`
+}
+
 type SessionFinishedEvent struct {
 	Type       string         `json:"type"`
 	EventScope EventScope     `json:"eventScope"`
@@ -231,12 +239,12 @@ func newExecutionChunkView(chunk domain.ExecutionChunk) ExecutionChunkView {
 	}
 }
 
-func newSessionSummary(session domain.Session) SessionSummary {
+func newSessionSummary(session domain.Session, unread int) SessionSummary {
 	return SessionSummary{
 		Title:               session.Title,
 		Status:              session.Status,
 		UpdatedAt:           session.UpdatedAt.UTC().Format(time.RFC3339),
 		ActiveTargetSummary: session.ActiveTargetContext.DisplayLabel,
-		Unread:              0,
+		Unread:              unread,
 	}
 }

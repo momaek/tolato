@@ -201,6 +201,14 @@ type Session struct {
 	UpdatedAt               time.Time
 }
 
+type AuthSession struct {
+	UserID     string
+	SessionID  string
+	Token      string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+}
+
 type ThreadMessage struct {
 	ID              string
 	SessionID       string
@@ -319,6 +327,7 @@ const (
 	SettingKeyModelConfig     SettingKey = "model_config"
 	SettingKeyAccountSecurity SettingKey = "account_security"
 	SettingKeyPreferences     SettingKey = "preferences"
+	SettingKeyAuthCredentials SettingKey = "auth_credentials"
 )
 
 type SettingRecord struct {

@@ -1,0 +1,13 @@
+server:
+  http_address: ":8080"
+  ui_ws_path: "/ws/ui"
+  agent_ws_path: "/ws/agent"
+
+store:
+  driver: "memory"
+  dsn: ""
+
+auth:
+  admin_username: "admin"
+  admin_password: "admin"
+  agent_token: "agent-dev-token"

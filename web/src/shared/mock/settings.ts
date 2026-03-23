@@ -2,9 +2,12 @@ import type { SettingsState } from '@/shared/types/settings'
 
 export const mockSettings: SettingsState = {
   modelConfig: {
-    provider: 'OpenAI',
+    provider: 'openai',
     model: 'gpt-5.4',
+    endpoint: 'https://api.openai.com/v1',
+    apiKey: '',
     temperature: 0.2,
+    hasApiKey: true,
     approvalMode: 'balanced',
   },
   accountSecurity: {

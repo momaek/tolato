@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type CursorPage struct {
 	BeforeID string
@@ -14,6 +17,7 @@ type SessionFilter struct {
 
 type SessionRepository interface {
 	Create(ctx context.Context, session Session) error
+	Delete(ctx context.Context, sessionID string) error
 	Get(ctx context.Context, sessionID string) (Session, error)
 	List(ctx context.Context, filter SessionFilter) ([]Session, error)
 	Update(ctx context.Context, session Session) error
@@ -58,6 +62,16 @@ type ExecutionRepository interface {
 type AuditRepository interface {
 	Append(ctx context.Context, record AuditRecord) error
 	ListByTask(ctx context.Context, taskID string) ([]AuditRecord, error)
+}
+
+type AuthSessionRepository interface {
+	Put(ctx context.Context, session AuthSession) error
+	GetByToken(ctx context.Context, token string) (AuthSession, error)
+	ListByUser(ctx context.Context, userID string) ([]AuthSession, error)
+	Touch(ctx context.Context, token string, lastSeenAt time.Time) error
+	DeleteByToken(ctx context.Context, token string) error
+	DeleteByUser(ctx context.Context, userID string) error
+	DeleteByUserExceptSession(ctx context.Context, userID string, sessionID string) error
 }
 
 type SettingsRepository interface {

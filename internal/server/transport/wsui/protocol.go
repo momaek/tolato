@@ -9,6 +9,8 @@ import (
 
 const (
 	TypeConnectionReady         = "connection.ready"
+	TypeSessionCreate           = "session.create"
+	TypeSessionDelete           = "session.delete"
 	TypeSessionsListRequest     = "sessions.list.request"
 	TypeSessionsListResponse    = "sessions.list.response"
 	TypeSessionSnapshotRequest  = "session.snapshot.request"
@@ -17,6 +19,7 @@ const (
 	TypeSessionRowsResponse     = "session.rows.response"
 	TypeSessionMessageSubmit    = "session.message.submit"
 	TypeSessionTargetConfirm    = "session.target.confirm"
+	TypeSessionTargetReselect   = "session.target.reselect"
 	TypeSessionTargetClear      = "session.target.clear"
 	TypeSessionApprovalApprove  = "session.approval.approve"
 	TypeSessionApprovalReject   = "session.approval.reject"
@@ -48,6 +51,14 @@ type SessionSnapshotRequest struct {
 	SessionID string `json:"sessionId"`
 }
 
+type SessionCreateRequest struct {
+	Title string `json:"title,omitempty"`
+}
+
+type SessionDeleteRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
 type SessionRowsRequest struct {
 	SessionID string `json:"sessionId"`
 	Before    string `json:"before,omitempty"`
@@ -68,6 +79,11 @@ type SessionTargetConfirmRequest struct {
 }
 
 type SessionTargetClearRequest struct {
+	SessionID      string `json:"sessionId"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+type SessionTargetReselectRequest struct {
 	SessionID      string `json:"sessionId"`
 	IdempotencyKey string `json:"idempotencyKey"`
 }

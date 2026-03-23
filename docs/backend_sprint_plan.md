@@ -135,7 +135,7 @@ Sprint 目标：
 - [x] 发布 `thread.target.cleared`
 - [x] 发布 `llm.sse.event`
 - [x] 发布 watch session 摘要事件：`session.summary.updated`
-- [ ] 发布 watch session 摘要事件：`session.requires_attention`、`session.unread.updated`
+- [x] 发布 watch session 摘要事件：`session.requires_attention`、`session.unread.updated`
 
 前端交互交付：
 

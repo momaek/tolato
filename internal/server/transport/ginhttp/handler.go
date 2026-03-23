@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	appauth "github.com/momaek/tolato/internal/server/app/auth"
 	"github.com/momaek/tolato/internal/server/app/history"
 	"github.com/momaek/tolato/internal/server/app/nodeview"
 	"github.com/momaek/tolato/internal/server/app/settings"
@@ -28,6 +29,7 @@ type SettingsService interface {
 	GetModelConfig(ctx context.Context, userID string) (settings.ModelConfigView, error)
 	PutModelConfig(ctx context.Context, userID string, in settings.UpdateModelConfigInput) (settings.ModelConfigView, error)
 	TestModelConfig(ctx context.Context, userID string, in settings.TestModelConfigInput) (settings.ModelConfigTestResult, error)
+	ListModelOptions(ctx context.Context, userID string, in settings.ListModelOptionsInput) ([]settings.ModelOption, error)
 	GetAccountSecurity(ctx context.Context, userID string) (settings.AccountSecurityView, error)
 	PutAccountSecurity(ctx context.Context, userID string, in settings.UpdateAccountSecurityInput) (settings.AccountSecurityView, error)
 	ChangePassword(ctx context.Context, userID string, in settings.ChangePasswordInput) error
@@ -36,27 +38,86 @@ type SettingsService interface {
 	PutPreferences(ctx context.Context, userID string, in settings.UpdatePreferencesInput) (settings.UserPreferencesView, error)
 }
 
+type AuthService interface {
+	Login(ctx context.Context, username string, password string) (appauth.LoginResult, error)
+	AuthenticateToken(ctx context.Context, token string) (appauth.Principal, error)
+}
+
 type Handler struct {
 	Nodes    NodeViewService
 	History  HistoryService
 	Settings SettingsService
+	Auth     AuthService
 }
 
 func (h Handler) RegisterRoutes(router gin.IRouter) {
 	api := router.Group("/api/v1")
-	api.GET("/nodes", h.listNodes)
-	api.GET("/nodes/:id", h.getNode)
-	api.GET("/history/tasks", h.listHistoryTasks)
-	api.GET("/history/tasks/:id", h.getHistoryTask)
-	api.GET("/settings/model-config", h.getModelConfig)
-	api.PUT("/settings/model-config", h.putModelConfig)
-	api.POST("/settings/model-config/test", h.testModelConfig)
-	api.GET("/settings/account-security", h.getAccountSecurity)
-	api.PUT("/settings/account-security", h.putAccountSecurity)
-	api.POST("/settings/password/change", h.changePassword)
-	api.POST("/settings/sessions/revoke-others", h.revokeOtherSessions)
-	api.GET("/settings/preferences", h.getPreferences)
-	api.PUT("/settings/preferences", h.putPreferences)
+	api.POST("/auth/login", h.login)
+
+	protected := api.Group("")
+	if h.Auth != nil {
+		protected.Use(h.requireAuth())
+	}
+	protected.GET("/nodes", h.listNodes)
+	protected.GET("/nodes/:id", h.getNode)
+	protected.GET("/history/tasks", h.listHistoryTasks)
+	protected.GET("/history/tasks/:id", h.getHistoryTask)
+	protected.GET("/settings/model-config", h.getModelConfig)
+	protected.PUT("/settings/model-config", h.putModelConfig)
+	protected.POST("/settings/model-config/test", h.testModelConfig)
+	protected.POST("/settings/model-config/models", h.listModelOptions)
+	protected.GET("/settings/account-security", h.getAccountSecurity)
+	protected.PUT("/settings/account-security", h.putAccountSecurity)
+	protected.POST("/settings/password/change", h.changePassword)
+	protected.POST("/settings/sessions/revoke-others", h.revokeOtherSessions)
+	protected.GET("/settings/preferences", h.getPreferences)
+	protected.PUT("/settings/preferences", h.putPreferences)
+}
+
+func (h Handler) login(c *gin.Context) {
+	if h.Auth == nil {
+		writeError(c, http.StatusNotImplemented, "auth service is not configured")
+		return
+	}
+
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.Auth.Login(c.Request.Context(), input.Username, input.Password)
+	if err != nil {
+		if errors.Is(err, appauth.ErrUnauthorized) {
+			writeError(c, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
+		writeDomainError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h Handler) requireAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := bearerToken(c.GetHeader("Authorization"))
+		if token == "" {
+			writeError(c, http.StatusUnauthorized, "missing bearer token")
+			c.Abort()
+			return
+		}
+		principal, err := h.Auth.AuthenticateToken(c.Request.Context(), token)
+		if err != nil {
+			writeError(c, http.StatusUnauthorized, "invalid bearer token")
+			c.Abort()
+			return
+		}
+		c.Set("auth.user_id", principal.UserID)
+		c.Set("auth.session_id", principal.SessionID)
+		c.Next()
+	}
 }
 
 func (h Handler) listNodes(c *gin.Context) {
@@ -229,6 +290,26 @@ func (h Handler) testModelConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (h Handler) listModelOptions(c *gin.Context) {
+	if h.Settings == nil {
+		writeError(c, http.StatusNotImplemented, "settings service is not configured")
+		return
+	}
+
+	var input settings.ListModelOptionsInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	items, err := h.Settings.ListModelOptions(c.Request.Context(), requestUserID(c), input)
+	if err != nil {
+		writeDomainError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"models": items})
+}
+
 func (h Handler) getAccountSecurity(c *gin.Context) {
 	if h.Settings == nil {
 		writeError(c, http.StatusNotImplemented, "settings service is not configured")
@@ -383,15 +464,37 @@ func writeError(c *gin.Context, status int, message string) {
 }
 
 func requestUserID(c *gin.Context) string {
+	if value, ok := c.Get("auth.user_id"); ok {
+		if userID, ok := value.(string); ok && strings.TrimSpace(userID) != "" {
+			return strings.TrimSpace(userID)
+		}
+	}
 	if value := strings.TrimSpace(c.GetHeader("X-User-ID")); value != "" {
 		return value
 	}
-	return "local-dev"
+	return ""
 }
 
 func requestSessionID(c *gin.Context) string {
+	if value, ok := c.Get("auth.session_id"); ok {
+		if sessionID, ok := value.(string); ok && strings.TrimSpace(sessionID) != "" {
+			return strings.TrimSpace(sessionID)
+		}
+	}
 	if value := strings.TrimSpace(c.GetHeader("X-Session-ID")); value != "" {
 		return value
 	}
-	return "dev-session"
+	return ""
+}
+
+func bearerToken(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.SplitN(raw, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }

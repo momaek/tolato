@@ -2,14 +2,26 @@ import { defineStore } from 'pinia'
 
 import type { AppLocale } from '@/app/i18n/locale'
 import { getAppLocale, setAppLocale } from '@/app/i18n'
-import { changePassword, getSettings, revokeOtherSessions, saveSettings, testModelConfig } from '@/shared/api/adapters/settings'
+import {
+  changePassword,
+  getSettings,
+  revokeOtherSessions,
+  saveSettings,
+  testModelConfig,
+} from '@/shared/api/adapters/settings'
 import { toErrorMessage } from '@/shared/lib/errors'
-import type { ChangePasswordInput, ModelConfigTestResult, SettingsState } from '@/shared/types/settings'
+import type {
+  ChangePasswordInput,
+  ModelConfigTestResult,
+  SettingsState,
+} from '@/shared/types/settings'
 
 export const useSettingsStore = defineStore('settings', {
   state: () => ({
     value: null as SettingsState | null,
     dirty: false,
+    loading: false,
+    initialized: false,
     saving: false,
     testingModel: false,
     changingPassword: false,
@@ -18,6 +30,7 @@ export const useSettingsStore = defineStore('settings', {
   }),
   actions: {
     async fetch() {
+      this.loading = true
       try {
         const value = await getSettings()
         value.preferences.locale = getAppLocale()
@@ -26,6 +39,9 @@ export const useSettingsStore = defineStore('settings', {
         this.error = null
       } catch (error) {
         this.error = toErrorMessage(error, 'Failed to load settings')
+      } finally {
+        this.loading = false
+        this.initialized = true
       }
     },
     update(nextValue: SettingsState) {

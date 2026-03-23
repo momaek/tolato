@@ -149,7 +149,9 @@ func TestHandlerDisconnectClearsSubscriptionsBeforeReconnect(t *testing.T) {
 	}
 
 	registry.PublishToSession("sess-a", []byte("timeline"))
-	registry.PublishSummary("sess-b", []byte("summary"))
+	for _, clientID := range registry.SummaryRecipients("sess-b") {
+		registry.PublishToClient(clientID, []byte("summary"))
+	}
 	if got := drainQueue(secondClient.Messages()); len(got) != 0 {
 		t.Fatalf("reconnected client should not inherit old subscriptions: %#v", got)
 	}
@@ -166,7 +168,9 @@ func TestHandlerDisconnectClearsSubscriptionsBeforeReconnect(t *testing.T) {
 	}
 
 	registry.PublishToSession("sess-a", []byte("timeline-2"))
-	registry.PublishSummary("sess-b", []byte("summary-2"))
+	for _, clientID := range registry.SummaryRecipients("sess-b") {
+		registry.PublishToClient(clientID, []byte("summary-2"))
+	}
 	got := drainQueue(secondClient.Messages())
 	if len(got) != 2 {
 		t.Fatalf("reconnected client should receive events after resubscribe: %#v", got)

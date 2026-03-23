@@ -16,7 +16,7 @@ func TestDispatchPublisherPublishesTaskDispatch(t *testing.T) {
 	hub.Register(client)
 
 	registry := infraws.NewMemoryAgentRegistry(hub)
-	registry.BindNode("node-pub", "agent-pub")
+	registry.BindNode("node-pub", "agent-pub", infraws.AgentNodeMetadata{Hostname: "node-pub"})
 
 	publisher := NewDispatchPublisher(registry)
 	if err := publisher.DispatchToNode(context.Background(), "node-pub", appexecution.DispatchCommand{
@@ -25,6 +25,7 @@ func TestDispatchPublisherPublishesTaskDispatch(t *testing.T) {
 		TaskID:      "task-pub",
 		ExecutionID: "exec-pub",
 		NodeID:      "node-pub",
+		Action:      "run_command",
 		RiskLevel:   domain.RiskLevelLow,
 	}); err != nil {
 		t.Fatalf("DispatchToNode() error = %v", err)
@@ -35,7 +36,7 @@ func TestDispatchPublisherPublishesTaskDispatch(t *testing.T) {
 	if err := json.Unmarshal(raw, &cmd); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if cmd.Type != TypeTaskDispatch || cmd.ExecutionID != "exec-pub" {
+	if cmd.Type != TypeTaskDispatch || cmd.ExecutionID != "exec-pub" || cmd.Action != "run_command" {
 		t.Fatalf("cmd = %#v", cmd)
 	}
 }

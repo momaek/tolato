@@ -5,9 +5,11 @@ import (
 	"errors"
 	"flag"
 	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
+	appauth "github.com/momaek/tolato/internal/server/app/auth"
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	"github.com/momaek/tolato/internal/server/app/history"
 	"github.com/momaek/tolato/internal/server/app/nodeview"
@@ -19,9 +21,8 @@ import (
 	"github.com/momaek/tolato/internal/server/domain"
 	"github.com/momaek/tolato/internal/server/infra"
 	"github.com/momaek/tolato/internal/server/infra/config"
-	"github.com/momaek/tolato/internal/server/infra/devexec"
 	"github.com/momaek/tolato/internal/server/infra/devseed"
-	devllm "github.com/momaek/tolato/internal/server/infra/llm/devloop"
+	settingsllm "github.com/momaek/tolato/internal/server/infra/llm/settings"
 	"github.com/momaek/tolato/internal/server/infra/lock"
 	devnodes "github.com/momaek/tolato/internal/server/infra/nodes"
 	"github.com/momaek/tolato/internal/server/infra/store/memory"
@@ -53,8 +54,26 @@ func main() {
 	clock := infra.SystemClock{}
 	ids := infra.RandomIDGenerator{}
 	locks := lock.NewMemoryLockManager()
+	logger := infra.NewLogger(nil, slog.LevelInfo)
+	if err := devseed.EnsureConsoleSession(context.Background(), repos.Sessions, time.Now().UTC()); err != nil {
+		log.Fatalf("bootstrap console session: %v", err)
+	}
+	authService := appauth.NewService(appauth.Repositories{
+		Settings:     repos.Settings,
+		AuthSessions: repos.AuthSessions,
+	}, appauth.Config{
+		AdminUsername: cfg.Auth.AdminUsername,
+		AdminPassword: cfg.Auth.AdminPassword,
+		AgentToken:    cfg.Auth.AgentToken,
+	})
+	if err := authService.BootstrapAdmin(context.Background()); err != nil {
+		log.Fatalf("bootstrap auth: %v", err)
+	}
 
-	nodeSource := devnodes.NewStaticSource(time.Now())
+	hub := infraws.NewMemoryHub()
+	sessionRegistry := infraws.NewMemorySessionRegistry(hub)
+	agentRegistry := infraws.NewMemoryAgentRegistry(hub)
+	nodeSource := devnodes.NewObservedSource(nil, agentRegistry)
 	nodeService := nodeview.NewService(nodeSource, nodeview.Repositories{
 		Sessions:   repos.Sessions,
 		Tasks:      repos.Tasks,
@@ -71,11 +90,9 @@ func main() {
 	})
 	settingsService := settings.NewService(settings.Repositories{
 		Settings: repos.Settings,
+		Security: authService,
+		Models:   settingsllm.Catalog{},
 	})
-
-	hub := infraws.NewMemoryHub()
-	sessionRegistry := infraws.NewMemorySessionRegistry(hub)
-	agentRegistry := infraws.NewMemoryAgentRegistry(hub)
 	eventPublisher := wsui.NewPublisher(sessionRegistry)
 	sessionService := appsession.NewService(appsession.Repositories{
 		Sessions:      repos.Sessions,
@@ -83,7 +100,7 @@ func main() {
 		Tasks:         repos.Tasks,
 		Executions:    repos.Executions,
 		Subscriptions: sessionRegistry,
-	})
+	}, appsession.WithClock(clock), appsession.WithIDGenerator(ids))
 
 	execRef := &executionStarterRef{}
 	policyRegistry := policy.NewRegistry(nodeSource, policy.WithExecutionStarter(execRef))
@@ -96,11 +113,14 @@ func main() {
 		Tasks:       repos.Tasks,
 		Executions:  repos.Executions,
 		Audits:      repos.Audits,
-	}, devllm.New(), appruntime.NewPolicyToolRegistry(policyRegistry), clock, ids, appruntime.WithEventPublisher(eventPublisher), appruntime.WithLockManager(locks))
+	}, &settingsllm.Provider{
+		Settings:      repos.Settings,
+		DefaultUserID: cfg.Auth.AdminUsername,
+		Logger:        logger,
+		Events:        eventPublisher,
+	}, appruntime.NewPolicyToolRegistry(policyRegistry), clock, ids, appruntime.WithEventPublisher(eventPublisher), appruntime.WithLockManager(locks), appruntime.WithLogger(logger))
 
-	dispatchPublisher := &devexec.FallbackDispatchPublisher{
-		Primary: wsagent.NewDispatchPublisher(agentRegistry),
-	}
+	dispatchPublisher := wsagent.NewDispatchPublisher(agentRegistry)
 	executionService := appexecution.NewService(appexecution.Repositories{
 		Sessions:    repos.Sessions,
 		Tasks:       repos.Tasks,
@@ -108,11 +128,11 @@ func main() {
 		Timelines:   repos.Timelines,
 		ToolResults: repos.ToolResults,
 		Audits:      repos.Audits,
-	}, clock, ids, appexecution.WithEventPublisher(eventPublisher), appexecution.WithDispatchPublisher(dispatchPublisher), appexecution.WithCompletionHandler(runtimeService), appexecution.WithLockManager(locks))
-	dispatchPublisher.Recorder = executionService
+	}, clock, ids, appexecution.WithEventPublisher(eventPublisher), appexecution.WithDispatchPublisher(dispatchPublisher), appexecution.WithCompletionHandler(runtimeService), appexecution.WithLockManager(locks), appexecution.WithLogger(logger))
 	execRef.service = executionService
 
 	uiHandler := wsui.Handler{
+		Auth:          wsui.TokenAuthenticator{Auth: authService},
 		Hub:           hub,
 		Subscriptions: sessionRegistry,
 		Dispatcher: wsui.Dispatcher{
@@ -122,7 +142,8 @@ func main() {
 		},
 	}
 	agentHandler := wsagent.Handler{
-		Hub: hub,
+		Auth: wsagent.TokenAuthenticator{Auth: authService},
+		Hub:  hub,
 		Dispatcher: wsagent.Dispatcher{
 			Agents:     agentRegistry,
 			Executions: executionService,
@@ -144,6 +165,7 @@ func main() {
 		Nodes:    nodeService,
 		History:  historyService,
 		Settings: settingsService,
+		Auth:     authService,
 	})
 	ginws.RegisterUIRoute(router, cfg.Server.UIWSPath, uiHandler)
 	ginws.RegisterAgentRoute(router, cfg.Server.AgentWSPath, agentHandler)
@@ -168,6 +190,7 @@ type repositoryBundle struct {
 	Tasks          domain.TaskRepository
 	Executions     domain.ExecutionRepository
 	Audits         domain.AuditRepository
+	AuthSessions   domain.AuthSessionRepository
 	Settings       domain.SettingsRepository
 }
 
@@ -182,7 +205,7 @@ func openRepositories(ctx context.Context, cfg config.Config) (repositoryBundle,
 		if err := devseed.SeedHistoryStore(ctx, store, now.Add(-30*time.Minute)); err != nil {
 			return repositoryBundle{}, nil, err
 		}
-		if err := devseed.SeedSettingsStore(ctx, store, now); err != nil {
+		if err := devseed.SeedSettingsStore(ctx, store, cfg.Auth.AdminUsername, now); err != nil {
 			return repositoryBundle{}, nil, err
 		}
 		return repositoryBundle{
@@ -194,6 +217,7 @@ func openRepositories(ctx context.Context, cfg config.Config) (repositoryBundle,
 			Tasks:          store.Tasks,
 			Executions:     store.Executions,
 			Audits:         store.Audits,
+			AuthSessions:   store.AuthSessions,
 			Settings:       store.Settings,
 		}, func() {}, nil
 	case "postgres":
@@ -211,6 +235,7 @@ func openRepositories(ctx context.Context, cfg config.Config) (repositoryBundle,
 				Tasks:          pgStore.Tasks,
 				Executions:     pgStore.Executions,
 				Audits:         pgStore.Audits,
+				AuthSessions:   pgStore.AuthSessions,
 				Settings:       pgStore.Settings,
 			}, func() {
 				_ = db.Close()

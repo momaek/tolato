@@ -13,21 +13,35 @@ export const useNodesStore = defineStore('nodes', {
     tag: 'all',
     busyOnly: false,
     loading: false,
+    initialized: false,
     error: null as string | null,
   }),
   getters: {
+    hasNodes(state) {
+      return state.items.length > 0
+    },
     filteredItems(state) {
-      return state.items.filter(node => {
+      return state.items.filter((node) => {
         const matchesSearch =
           !state.search ||
           node.hostname.toLowerCase().includes(state.search.toLowerCase()) ||
           node.region.toLowerCase().includes(state.search.toLowerCase()) ||
-          node.tags.some(tag => tag.toLowerCase().includes(state.search.toLowerCase()))
-        const matchesStatus = state.status === 'all' || node.status === state.status
-        const matchesRegion = state.region === 'all' || node.region === state.region
+          node.tags.some((tag) =>
+            tag.toLowerCase().includes(state.search.toLowerCase()),
+          )
+        const matchesStatus =
+          state.status === 'all' || node.status === state.status
+        const matchesRegion =
+          state.region === 'all' || node.region === state.region
         const matchesTag = state.tag === 'all' || node.tags.includes(state.tag)
         const matchesBusy = !state.busyOnly || node.busy
-        return matchesSearch && matchesStatus && matchesRegion && matchesTag && matchesBusy
+        return (
+          matchesSearch &&
+          matchesStatus &&
+          matchesRegion &&
+          matchesTag &&
+          matchesBusy
+        )
       })
     },
   },
@@ -37,6 +51,7 @@ export const useNodesStore = defineStore('nodes', {
       try {
         this.items = await listNodes()
         this.error = null
+        this.initialized = true
       } catch (error) {
         this.error = toErrorMessage(error, 'Failed to load nodes')
       } finally {

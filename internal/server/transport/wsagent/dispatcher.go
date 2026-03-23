@@ -49,7 +49,7 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) ([]byte, error) {
 		if payload.NodeID == "" {
 			return nil, errors.New("nodeId is required")
 		}
-		d.Agents.BindNode(payload.NodeID, clientID)
+		d.Agents.BindNode(payload.NodeID, clientID, payload.Metadata)
 		return json.Marshal(Ack{
 			Type:      TypeAgentAck,
 			NodeID:    payload.NodeID,
@@ -71,7 +71,7 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) ([]byte, error) {
 		if nodeID == "" {
 			return nil, errors.New("nodeId is required")
 		}
-		if err := d.Agents.Heartbeat(nodeID, clientID, d.now()); err != nil {
+		if err := d.Agents.Heartbeat(nodeID, clientID, payload.Runtime, d.now()); err != nil {
 			return nil, err
 		}
 		return json.Marshal(Ack{

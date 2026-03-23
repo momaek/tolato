@@ -27,7 +27,7 @@ func TestDispatcherSessionsList(t *testing.T) {
 	}
 
 	raw := mustJSON(t, RequestEnvelope{Type: TypeSessionsListRequest, RequestID: "req-1"})
-	resp, err := dispatcher.Dispatch(context.Background(), raw)
+	resp, err := dispatcher.Dispatch(WithClientID(context.Background(), "client-list"), raw)
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
@@ -37,6 +37,59 @@ func TestDispatcherSessionsList(t *testing.T) {
 	payload, ok := resp.Payload.(SessionsListResponse)
 	if !ok || len(payload.Items) != 1 {
 		t.Fatalf("payload = %#v, want one session item", resp.Payload)
+	}
+	if sessions.listClientID != "client-list" {
+		t.Fatalf("list client id = %q, want client-list", sessions.listClientID)
+	}
+}
+
+func TestDispatcherSessionCreate(t *testing.T) {
+	sessions := &fakeSessionService{
+		createSessionID: "sess-new",
+	}
+	dispatcher := Dispatcher{
+		Sessions: sessions,
+		Now:      func() time.Time { return time.Date(2026, 3, 22, 10, 5, 0, 0, time.UTC) },
+	}
+
+	raw := mustJSON(t, RequestEnvelope{
+		Type:      TypeSessionCreate,
+		RequestID: "req-create",
+		Payload:   mustPayload(t, SessionCreateRequest{Title: "Custom Session"}),
+	})
+	resp, err := dispatcher.Dispatch(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if resp.Type != TypeSessionActionAccepted {
+		t.Fatalf("response type = %q, want %q", resp.Type, TypeSessionActionAccepted)
+	}
+	if sessions.createdSessionTitle != "Custom Session" {
+		t.Fatalf("created session title = %q, want Custom Session", sessions.createdSessionTitle)
+	}
+}
+
+func TestDispatcherSessionDelete(t *testing.T) {
+	sessions := &fakeSessionService{}
+	dispatcher := Dispatcher{
+		Sessions: sessions,
+		Now:      func() time.Time { return time.Date(2026, 3, 22, 10, 6, 0, 0, time.UTC) },
+	}
+
+	raw := mustJSON(t, RequestEnvelope{
+		Type:      TypeSessionDelete,
+		RequestID: "req-delete",
+		Payload:   mustPayload(t, SessionDeleteRequest{SessionID: "sess-delete"}),
+	})
+	resp, err := dispatcher.Dispatch(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if resp.Type != TypeSessionActionAccepted {
+		t.Fatalf("response type = %q, want %q", resp.Type, TypeSessionActionAccepted)
+	}
+	if sessions.deletedSessionID != "sess-delete" {
+		t.Fatalf("deleted session id = %q, want sess-delete", sessions.deletedSessionID)
 	}
 }
 
@@ -60,7 +113,7 @@ func TestDispatcherSessionSnapshot(t *testing.T) {
 		RequestID: "req-2",
 		Payload:   mustPayload(t, SessionSnapshotRequest{SessionID: "sess-1"}),
 	})
-	resp, err := dispatcher.Dispatch(context.Background(), raw)
+	resp, err := dispatcher.Dispatch(WithClientID(context.Background(), "client-snapshot"), raw)
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
@@ -70,6 +123,9 @@ func TestDispatcherSessionSnapshot(t *testing.T) {
 	payload, ok := resp.Payload.(SessionSnapshotResponse)
 	if !ok || payload.Snapshot.Session.ID != "sess-1" {
 		t.Fatalf("payload = %#v, want sess-1 snapshot", resp.Payload)
+	}
+	if sessions.snapshotClientID != "client-snapshot" {
+		t.Fatalf("snapshot client id = %q, want client-snapshot", sessions.snapshotClientID)
 	}
 }
 
@@ -186,10 +242,42 @@ func TestDispatcherSessionTargetClear(t *testing.T) {
 	}
 }
 
+func TestDispatcherSessionTargetReselect(t *testing.T) {
+	rt := &fakeRuntime{}
+	dispatcher := Dispatcher{
+		Runtime: rt,
+		Now:     func() time.Time { return time.Date(2026, 3, 22, 16, 20, 0, 0, time.UTC) },
+	}
+
+	raw := mustJSON(t, RequestEnvelope{
+		Type:      TypeSessionTargetReselect,
+		RequestID: "req-reselect",
+		Payload: mustPayload(t, SessionTargetReselectRequest{
+			SessionID:      "sess-reselect",
+			IdempotencyKey: "idem-reselect",
+		}),
+	})
+	resp, err := dispatcher.Dispatch(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if resp.Type != TypeSessionActionAccepted {
+		t.Fatalf("response type = %q, want %q", resp.Type, TypeSessionActionAccepted)
+	}
+	if rt.clearSessionID != "sess-reselect" || rt.clearKey != "idem-reselect" {
+		t.Fatalf("runtime clear call = %#v, want sess-reselect/idem-reselect", rt)
+	}
+}
+
 type fakeSessionService struct {
 	items                       []appsession.SessionListItem
 	snapshot                    appsession.Snapshot
 	page                        appsession.TimelinePage
+	createSessionID             string
+	createdSessionTitle         string
+	deletedSessionID            string
+	listClientID                string
+	snapshotClientID            string
 	subscriptionClientID        string
 	subscriptionActiveSessionID string
 	subscriptionWatchSessionIDs []string
@@ -233,11 +321,26 @@ func (f *fakeRuntime) ResumeAfterApproval(ctx context.Context, sessionID string,
 	return nil
 }
 
-func (f *fakeSessionService) ListSessions(context.Context) ([]appsession.SessionListItem, error) {
+func (f *fakeSessionService) ListSessions(_ context.Context, clientID string) ([]appsession.SessionListItem, error) {
+	f.listClientID = clientID
 	return f.items, nil
 }
 
-func (f *fakeSessionService) BuildSnapshot(context.Context, string) (appsession.Snapshot, error) {
+func (f *fakeSessionService) CreateSession(_ context.Context, title string) (string, error) {
+	f.createdSessionTitle = title
+	if f.createSessionID != "" {
+		return f.createSessionID, nil
+	}
+	return "sess-created", nil
+}
+
+func (f *fakeSessionService) DeleteSession(_ context.Context, sessionID string) error {
+	f.deletedSessionID = sessionID
+	return nil
+}
+
+func (f *fakeSessionService) BuildSnapshot(_ context.Context, clientID string, _ string) (appsession.Snapshot, error) {
+	f.snapshotClientID = clientID
 	return f.snapshot, nil
 }
 

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,6 +54,78 @@ WHERE id = $1
 	}
 	if got.CurrentTaskID == nil || *got.CurrentTaskID != "task-1" {
 		t.Fatalf("current task = %#v, want task-1", got.CurrentTaskID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSessionRepositoryCreateNilJSONDefaultsToNullLiteral(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 3, 22, 9, 15, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(`
+INSERT INTO sessions (
+    id, title, status, active_target_context, pending_action_type, pending_action_payload,
+    current_operation_id, current_task_id, current_execution_group_id, last_agent_state,
+    provider_state_blob, revision, created_at, updated_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+`)).WithArgs(
+		"sess-console-1",
+		"Console Session",
+		"idle",
+		rawMessage(domain.ActiveTargetContext{}),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		[]byte("null"),
+		[]byte("null"),
+		int64(1),
+		now,
+		now,
+	).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	repo := NewSessionRepository(SQLDB{DB: db})
+	err = repo.Create(context.Background(), domain.Session{
+		ID:                "sess-console-1",
+		Title:             "Console Session",
+		Status:            domain.SessionStatusIdle,
+		LastAgentState:    json.RawMessage(nil),
+		ProviderStateBlob: json.RawMessage(nil),
+		Revision:          1,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSessionRepositoryDelete(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+DELETE FROM sessions
+WHERE id = $1
+`)).WithArgs("sess-delete").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	repo := NewSessionRepository(SQLDB{DB: db})
+	if err := repo.Delete(context.Background(), "sess-delete"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

@@ -5,6 +5,7 @@ import (
 
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	"github.com/momaek/tolato/internal/server/domain"
+	infraws "github.com/momaek/tolato/internal/server/infra/ws"
 )
 
 const (
@@ -25,11 +26,13 @@ type Message struct {
 }
 
 type RegisterPayload struct {
-	NodeID string `json:"nodeId"`
+	NodeID   string                    `json:"nodeId"`
+	Metadata infraws.AgentNodeMetadata `json:"metadata,omitempty"`
 }
 
 type HeartbeatPayload struct {
-	NodeID string `json:"nodeId"`
+	NodeID  string                   `json:"nodeId"`
+	Runtime infraws.AgentNodeRuntime `json:"runtime,omitempty"`
 }
 
 type ChunkPayload struct {

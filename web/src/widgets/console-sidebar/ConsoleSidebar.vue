@@ -9,6 +9,8 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
+  createSession: []
+  deleteSession: [sessionId: string]
   selectSession: [sessionId: string]
 }>()
 </script>
@@ -20,7 +22,13 @@ const emit = defineEmits<{
       body-class="flex-1 min-h-0"
       class="flex h-full min-h-0 flex-col overflow-hidden"
     >
-      <SessionList :sessions="sessions" :active-session-id="activeSessionId" @select="emit('selectSession', $event)" />
+      <SessionList
+        :sessions="sessions"
+        :active-session-id="activeSessionId"
+        @create="emit('createSession')"
+        @delete="emit('deleteSession', $event)"
+        @select="emit('selectSession', $event)"
+      />
     </PanelCard>
   </aside>
 </template>

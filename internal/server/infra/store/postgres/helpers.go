@@ -15,8 +15,14 @@ func rawMessage(in any) json.RawMessage {
 	case nil:
 		return json.RawMessage("null")
 	case json.RawMessage:
+		if v == nil {
+			return json.RawMessage("null")
+		}
 		return cloneBytes(v)
 	case []byte:
+		if v == nil {
+			return json.RawMessage("null")
+		}
 		return cloneBytes(v)
 	case string:
 		return cloneBytes([]byte(v))
@@ -206,6 +212,10 @@ func cloneSettingRecord(in domain.SettingRecord) domain.SettingRecord {
 	out := in
 	out.Value = cloneBytes(in.Value)
 	return out
+}
+
+func cloneAuthSession(in domain.AuthSession) domain.AuthSession {
+	return in
 }
 
 func intPtr(v int) *int {

@@ -314,6 +314,9 @@ func (t execOnNodesTool) Call(ctx context.Context, input json.RawMessage) (ToolR
 	if req.SessionID == "" || len(req.TargetContext.NodeIDs) == 0 {
 		return ToolResult{}, fmt.Errorf("sessionId and targetContext.nodeIds are required")
 	}
+	if strings.TrimSpace(req.Command) == "" {
+		return ToolResult{}, fmt.Errorf("command is required")
+	}
 	if req.RiskLevel == "" {
 		req.RiskLevel = inferRisk(req.InputText)
 	}
@@ -324,6 +327,8 @@ func (t execOnNodesTool) Call(ctx context.Context, input json.RawMessage) (ToolR
 	dispatch, err := t.execution.StartDispatch(ctx, appexecution.StartDispatchInput{
 		SessionID:     req.SessionID,
 		InputText:     req.InputText,
+		Command:       req.Command,
+		CommandArgs:   req.CommandArgs,
 		TargetContext: req.TargetContext,
 		RiskLevel:     req.RiskLevel,
 	})

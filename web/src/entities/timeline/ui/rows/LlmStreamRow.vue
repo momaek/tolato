@@ -35,5 +35,14 @@ const isStreaming = computed(() => props.state.status === 'streaming')
       </summary>
       <p class="mt-2 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{{ state.reasoningText }}</p>
     </details>
+
+    <div v-if="state.pendingToolName || state.pendingToolArguments" class="mt-3 rounded-[0.8rem] border border-border/50 bg-muted/35 px-3 py-2">
+      <p class="text-[11px] font-semibold tracking-[0.14em] text-muted-foreground">tool_call</p>
+      <p v-if="state.pendingToolName" class="mt-2 text-sm font-medium text-foreground">{{ state.pendingToolName }}</p>
+      <pre
+        v-if="state.pendingToolArguments"
+        class="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded-[0.7rem] bg-background/70 px-3 py-2 text-xs leading-5 text-muted-foreground"
+      >{{ state.pendingToolArguments }}</pre>
+    </div>
   </div>
 </template>

@@ -29,6 +29,9 @@ func (h Handler) Connect(ctx context.Context, client infraws.Client) error {
 }
 
 func (h Handler) Disconnect(clientID string) {
+	if h.Dispatcher.Agents != nil {
+		h.Dispatcher.Agents.ForgetClient(clientID)
+	}
 	if h.Hub != nil {
 		h.Hub.Unregister(clientID)
 	}

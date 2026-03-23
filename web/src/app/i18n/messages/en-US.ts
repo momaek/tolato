@@ -14,6 +14,7 @@ const enUS = {
     buttons: {
       reset: 'Reset',
       retry: 'Retry',
+      logout: 'Log out',
       saveSettings: 'Save settings',
       saving: 'Saving...',
       cancel: 'Cancel',
@@ -46,6 +47,14 @@ const enUS = {
       search: 'Search',
       allNodes: 'all nodes',
       language: 'Language',
+      agent: 'Agent',
+    },
+    statuses: {
+      online: 'Online',
+      busy: 'Busy',
+      stale: 'Stale',
+      offline: 'Offline',
+      unknown: 'Unknown',
     },
     states: {
       dirty: 'dirty',
@@ -88,6 +97,63 @@ const enUS = {
     subtitle: 'AI Ops Console',
     languageLabel: 'Language',
   },
+  nodeOnboarding: {
+    toast: {
+      title: 'No nodes are connected yet',
+      description:
+        'Start a `tolato-nodeagent` first, then come back to Console and Nodes.',
+    },
+    actions: {
+      openNodes: 'Open setup guide',
+    },
+    console: {
+      title: 'No nodes available yet',
+      description:
+        'Connect at least one node first. Console needs a live node before target resolution, planning, and execution can continue.',
+    },
+    nodes: {
+      title: 'Add your first node',
+      description:
+        'The control plane has not received any node heartbeat yet. Start the node agent on a target machine and connect it to `/ws/agent`.',
+      hint: 'The default local-dev token is `agent-dev-token`. Replace it if your backend config uses a different token.',
+    },
+  },
+  login: {
+    eyebrow: 'Control Plane Access',
+    title: 'Sign in before opening Console, Nodes, or Settings.',
+    description:
+      'The backend now requires a bearer session. After login, the frontend attaches the token to both HTTP APIs and `ws/ui`, and it returns to login when the session expires.',
+    highlights: {
+      control: {
+        title: 'Unified control plane',
+        description:
+          'Console, History, and Settings now share a real user session instead of relying on local dev headers.',
+      },
+      execution: {
+        title: 'Live execution stream',
+        description:
+          'After sign-in the app connects to `ws/ui` automatically and keeps receiving session summaries, state transitions, and execution output.',
+      },
+      audit: {
+        title: 'Session-aware security',
+        description:
+          'Changing the password or revoking other sessions invalidates old tokens and brings the UI back to the login state.',
+      },
+    },
+    form: {
+      title: 'Sign in',
+      description: 'Use the configured admin account for this control plane.',
+      username: 'Username',
+      usernamePlaceholder: 'Enter your username',
+      password: 'Password',
+      passwordPlaceholder: 'Enter your password',
+      submit: 'Sign in',
+      submitting: 'Signing in...',
+    },
+    validation: {
+      required: 'Enter both username and password',
+    },
+  },
   console: {
     header: {
       agent: 'AI Agent',
@@ -97,21 +163,28 @@ const enUS = {
       directShellTitle: 'Direct shell is not available in MVP',
       directShellDescription:
         'The current interface only supports the AI Agent flow. Direct shell would bypass target confirmation, plan generation, and approval, so MVP keeps it informational only.',
-      plannerHint: 'Natural-language requests first decide whether to inspect nodes, confirm targets, generate a plan, or enter approval.',
+      plannerHint:
+        'Natural-language requests first decide whether to inspect nodes, confirm targets, generate a plan, or enter approval.',
       healthSummary: '{online} online · {offline} offline',
-      broadcastAllOnline: 'The current target covers all online nodes. Write operations are blocked by default; only read-only operations may continue.',
-      broadcastMulti: 'The current target includes multiple nodes. Write operations require elevated approval.',
+      broadcastAllOnline:
+        'The current target covers all online nodes. Write operations are blocked by default; only read-only operations may continue.',
+      broadcastMulti:
+        'The current target includes multiple nodes. Write operations require elevated approval.',
       sessionUnset: 'No session selected',
       waitingInput: 'Waiting for task input',
     },
     sidebar: {
       sessionStack: 'Session Stack',
-      sessionStackDescription: 'The left panel keeps the session list and node context visible.',
+      sessionStackDescription:
+        'The left panel keeps the session list and node context visible.',
       currentTargets: 'Current Targets',
-      currentTargetsDescription: 'Candidate nodes, confirmed targets, and health summary stay in sync here.',
+      currentTargetsDescription:
+        'Candidate nodes, confirmed targets, and health summary stay in sync here.',
       broadcastGuardrail: 'Broadcast Guardrail',
-      allOnlineGuardrail: 'The current target is all online nodes. Write operations are blocked by default; only read-only execution can continue.',
-      multiGuardrail: 'The current target spans multiple nodes. Write operations require elevated approval before continuing.',
+      allOnlineGuardrail:
+        'The current target is all online nodes. Write operations are blocked by default; only read-only execution can continue.',
+      multiGuardrail:
+        'The current target spans multiple nodes. Write operations require elevated approval before continuing.',
       candidates: 'Candidates',
       confirmed: 'Confirmed',
       noCandidates: 'No candidate nodes right now.',
@@ -122,13 +195,16 @@ const enUS = {
     },
     composer: {
       title: 'Composer',
-      description: 'Send a task request. AI will decide whether to inspect nodes, generate a plan, or enter approval.',
-      placeholder: 'Send a task request. AI will first decide whether to inspect nodes, confirm targets, generate a plan, or enter approval.',
+      description:
+        'Send a task request. AI will decide whether to inspect nodes, generate a plan, or enter approval.',
+      placeholder:
+        'Send a task request. AI will first decide whether to inspect nodes, confirm targets, generate a plan, or enter approval.',
       submitFailed: 'Failed to submit',
       quickStarts: 'Quick starts',
       shortcutHint: 'Ctrl / Cmd + Enter to send',
       inputLabel: 'Task Input',
-      orchestrationHint: 'AI will resolve targets, assess risk, and choose the execution path first.',
+      orchestrationHint:
+        'AI will resolve targets, assess risk, and choose the execution path first.',
       readyState: 'ready',
       blockedState: 'awaiting approval',
       routingBadge: 'AI routing',
@@ -143,9 +219,47 @@ const enUS = {
       title: 'Sessions',
       description: 'Current sessions and backend summaries',
       total: '{count} total',
+      newSession: 'New session',
+      deleteSession: 'Delete session',
+      emptyTitle: 'No console session is available',
+      emptyDescription:
+        'The backend has not initialized a console session yet. Refresh the page or restart the server.',
     },
     targetConfirmation: {
-      originalTarget: 'Original Target',
+      originalTarget: 'Original target',
+      eyebrow: 'Target confirmation',
+      pending: 'Pending',
+      titleSingle: 'Confirm the node to operate on',
+      titleMulti: 'Confirm the target node set',
+      description:
+        'I found {count} possible target node(s), but I still need your confirmation before continuing.',
+      pauseReason: 'Why execution paused',
+      pauseReasonFallback:
+        'The system resolved candidate nodes, but the match confidence is still too low to continue automatically.',
+      pauseReasonFallbackCandidate:
+        'The most likely candidate is {label} ({nodeId}), but the match confidence is still too low to continue automatically.',
+      inheritedHint:
+        'This candidate target also references the existing session context. Confirm whether you want to keep using it.',
+      candidateNodeId: 'Node ID',
+      candidateReason: 'Match reason',
+      confirmCandidate: 'Use {label}',
+      clearAndReselect: 'Clear and choose again',
+      scopeSingle: 'Single node',
+      scopeMulti: 'Multiple nodes',
+      scopeAllOnline: 'All online nodes',
+      sourceResolver: 'Model resolved',
+      sourceManual: 'Manual target',
+      sourceSessionContext: 'Session context',
+      sourceNone: 'Unspecified',
+      reasonManualConfirmation:
+        'The system could not confidently match this node automatically, so it paused for manual confirmation.',
+      reasonMatchedNodeId: 'Matched this candidate by node ID.',
+      reasonMatchedHostname: 'Matched this candidate by hostname.',
+      reasonMatchedRegion: 'Matched this candidate by region.',
+      reasonMatchedTag: 'Matched this candidate by tag.',
+      reasonAllOnline: 'This target resolution covers all online nodes.',
+      reasonResolved:
+        'This candidate was resolved by the backend from the current context.',
     },
     plan: {
       ready: 'Plan Ready',
@@ -173,21 +287,25 @@ const enUS = {
       badge: 'History',
       badgeSecondary: 'Task audit and timeline',
       title: 'Review plan, approval, execution, and audit in one place.',
-      description: 'This page keeps the task archive separate from the live console. Use the list to inspect the full lifecycle and jump back to console when you need to continue a session.',
+      description:
+        'This page keeps the task archive separate from the live console. Use the list to inspect the full lifecycle and jump back to console when you need to continue a session.',
     },
     nodes: {
       badge: 'Nodes',
       badgeSecondary: 'HTTP query surface',
       title: 'Browse nodes, inspect health, and open a target in console.',
-      description: 'The node catalog stays separate from the live console flow. Use it to filter by status, identify busy targets, and jump into detailed inspection.',
+      description:
+        'The node catalog stays separate from the live console flow. Use it to filter by status, identify busy targets, and jump into detailed inspection.',
       statusSnapshot: 'Status snapshot',
       consoleShortcut: 'Console shortcut',
-      consoleShortcutDescription: 'Open the live console to continue target confirmation or inspect session history.',
+      consoleShortcutDescription:
+        'Open the live console to continue target confirmation or inspect session history.',
       statBusy: 'Busy',
       statOnline: 'Online',
       statOffline: 'Offline',
       nodeInventory: 'Node inventory',
-      nodeInventoryDescription: '{visible} / {total} nodes match the current filters.',
+      nodeInventoryDescription:
+        '{visible} / {total} nodes match the current filters.',
       mockDataReady: 'Mock data ready',
       searchPlaceholder: 'Search hostname, region, or tag',
       allRegions: 'All regions',
@@ -204,7 +322,8 @@ const enUS = {
       badge: 'Node detail',
       badgeSecondary: 'Independent page',
       title: 'Deep view for a single node.',
-      description: 'This page keeps the full node state outside console flow. It is useful for investigating health, recent tasks, and operational risk signals before jumping back to a session.',
+      description:
+        'This page keeps the full node state outside console flow. It is useful for investigating health, recent tasks, and operational risk signals before jumping back to a session.',
       riskSignals: 'Risk signals',
       recentTasks: 'Recent tasks',
     },
@@ -212,7 +331,9 @@ const enUS = {
       badge: 'Settings',
       badgeSecondary: 'Mock editable state',
       title: 'Tune the model, security, and user preferences.',
-      description: 'Configuration stays off the live session path. These panels are intentionally simple so they can later connect to HTTP persistence without changing the page structure.',
+      description:
+        'Configuration stays off the live session path. These panels are intentionally simple so they can later connect to HTTP persistence without changing the page structure.',
+      emptyState: 'No settings data is loaded yet. Retry the request.',
       saveSuccess: 'Settings saved',
       testFailure: 'Model connection test failed',
       passwordRequired: 'Enter the current and new password',
@@ -243,7 +364,8 @@ const enUS = {
       toolResults: 'Tool results',
       timelineRows: 'Timeline rows',
       audit: 'Audit',
-      selectFromList: 'Select a task from the list to inspect its plan, execution, and audit trail.',
+      selectFromList:
+        'Select a task from the list to inspect its plan, execution, and audit trail.',
     },
   },
   nodeOverview: {
@@ -262,12 +384,32 @@ const enUS = {
       title: 'Model config',
       provider: 'Provider',
       model: 'Model',
+      modelHelp:
+        'Load the available models from the configured endpoint and pick one directly.',
+      refreshModels: 'Refresh models',
+      loadingModels: 'Loading models...',
+      modelsEmpty: 'No models available',
+      modelsPending: 'Click refresh to load model options',
+      modelsUnavailable: 'Fill in the URL and API key first',
+      endpoint: 'Endpoint URL',
+      endpointPlaceholder: 'https://api.openai.com/v1',
+      apiKey: 'API Key',
+      apiKeyPlaceholder: 'Enter a new API key',
+      apiKeyRetained: 'Saved already, leave blank to keep it',
+      apiKeyHelp: 'Used by the backend for model requests after saving.',
+      apiKeyHelpRetained:
+        'An API key is already stored. Leaving this blank will keep it unchanged.',
+      apiKeyConfigured: 'api key configured',
       temperature: 'Temperature',
       approvalMode: 'Approval mode',
       openaiCompatible: 'openai compatible',
       mockReady: 'mock ready',
       testConnection: 'Test connection',
       testing: 'Testing...',
+      providers: {
+        openai: 'OpenAI',
+        devloop: 'Dev Loop',
+      },
     },
     accountSecurity: {
       title: 'Account security',
@@ -294,6 +436,11 @@ const enUS = {
       desktopFirst: 'desktop first',
       mockDriven: 'mock driven',
     },
+  },
+  settingsPageNav: {
+    modelConfig: 'Provider, endpoint URL, and approval behavior.',
+    accountSecurity: 'Account info, password rotation, and session control.',
+    preferences: 'Default region, language, and UI preferences.',
   },
   nodesTable: {
     title: 'Nodes',

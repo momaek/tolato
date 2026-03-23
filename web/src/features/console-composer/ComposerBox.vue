@@ -29,6 +29,10 @@ watch(
 )
 
 function handleSubmit() {
+  if (props.disabled) {
+    return
+  }
+
   const value = text.value.trim()
   if (!value) {
     return
@@ -43,10 +47,16 @@ function usePreset(value: string) {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-    event.preventDefault()
-    handleSubmit()
+  if (event.isComposing || event.key !== 'Enter') {
+    return
   }
+
+  if (event.shiftKey) {
+    return
+  }
+
+  event.preventDefault()
+  handleSubmit()
 }
 
 defineExpose({ usePreset })

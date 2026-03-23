@@ -3,8 +3,16 @@ import type { AppLocale } from '@/app/i18n/locale'
 export interface ModelConfig {
   provider: string
   model: string
+  endpoint: string
+  apiKey: string
   temperature: number
+  hasApiKey: boolean
   approvalMode: 'safe' | 'balanced' | 'strict'
+}
+
+export interface ModelOption {
+  id: string
+  label: string
 }
 
 export interface AccountSecurity {
@@ -31,6 +39,12 @@ export interface SettingsState {
 export interface ModelConfigTestResult {
   ok: boolean
   message: string
+}
+
+export interface ListModelOptionsInput {
+  provider: string
+  endpoint: string
+  apiKey: string
 }
 
 export interface ChangePasswordInput {

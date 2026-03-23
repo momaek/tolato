@@ -19,6 +19,8 @@ import { createEventBus } from '@/shared/ws/event-bus'
 import { RealWSClient } from '@/shared/ws/real-client'
 import { delay } from '@/shared/ws/reconnect'
 import type {
+  SessionCreateRequest,
+  SessionDeleteRequest,
   SessionApprovalRequest,
   SessionMessageSubmitRequest,
   SessionTargetConfirmRequest,
@@ -68,6 +70,8 @@ class MockWSClient implements WSClient {
     this.bus.emit({ type: 'connection.synced', timestamp: nowIso() })
   }
 
+  disconnect() {}
+
   subscribe(handler: (event: WSUIEvent) => void) {
     return this.bus.on(handler)
   }
@@ -76,6 +80,46 @@ class MockWSClient implements WSClient {
     return Array.from(this.sessions.values())
       .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt))
       .map(toSessionListItem)
+  }
+
+  async createSession(request: SessionCreateRequest) {
+    const sessionId = `session-ops-${Math.floor(Math.random() * 900 + 100)}`
+    const title = request.title?.trim() || '新会话'
+    const snapshot: SessionSnapshot = {
+      id: sessionId,
+      title,
+      summary: '等待新的任务输入。',
+      status: 'idle',
+      mode: 'ai_agent',
+      revision: 1,
+      updatedAt: nowIso(),
+      unread: 0,
+      approvalStatus: 'not_required',
+      targetContext: {
+        state: 'unset',
+        scope: 'unset',
+        summary: 'Target context: unset',
+        source: 'none',
+        candidates: [],
+        confirmedNodeIds: [],
+      },
+      rows: [],
+      candidateNodes: [],
+      highlightedNodes: [],
+      nodeHealthSummary: { online: 3, offline: 1, busy: 1 },
+    }
+    this.sessions.set(sessionId, snapshot)
+    return { sessionId }
+  }
+
+  async deleteSession(request: SessionDeleteRequest) {
+    this.sessions.delete(request.sessionId)
+    this.drafts.delete(request.sessionId)
+    if (this.activeSessionId === request.sessionId) {
+      this.activeSessionId = ''
+    }
+    this.watchSessionIds.delete(request.sessionId)
+    return { sessionId: request.sessionId }
   }
 
   async requestSessionSnapshot(sessionId: string) {
@@ -820,6 +864,11 @@ export function getWSClient(): WSClient {
   }
 
   return clientSingleton
+}
+
+export function resetWSClient() {
+  clientSingleton?.disconnect()
+  clientSingleton = null
 }
 
 export function isMockWSClient() {

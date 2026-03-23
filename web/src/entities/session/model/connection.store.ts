@@ -4,7 +4,11 @@ import { getWSClient } from '@/shared/ws/ws-client'
 
 export const useConnectionStore = defineStore('connection', {
   state: () => ({
-    status: 'connecting' as 'connecting' | 'connected' | 'reconnecting' | 'offline',
+    status: 'connecting' as
+      | 'connecting'
+      | 'connected'
+      | 'reconnecting'
+      | 'offline',
     lastSyncedAt: '',
     initialized: false,
   }),
@@ -15,7 +19,7 @@ export const useConnectionStore = defineStore('connection', {
       }
 
       const client = getWSClient()
-      client.subscribe(event => {
+      client.subscribe((event) => {
         if (event.type === 'connection.ready') {
           this.status = 'connected'
           this.lastSyncedAt = event.timestamp
@@ -25,10 +29,23 @@ export const useConnectionStore = defineStore('connection', {
           this.status = 'connected'
           this.lastSyncedAt = event.timestamp
         }
+
+        if (event.type === 'connection.reconnecting') {
+          this.status = 'reconnecting'
+        }
+
+        if (event.type === 'connection.offline') {
+          this.status = 'offline'
+        }
       })
 
-      await client.connect()
-      this.initialized = true
+      try {
+        await client.connect()
+        this.initialized = true
+      } catch (error) {
+        this.status = 'offline'
+        throw error
+      }
     },
   },
 })

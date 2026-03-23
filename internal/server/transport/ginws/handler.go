@@ -38,7 +38,7 @@ func RegisterUIRoute(router gin.IRouter, path string, handler UIHandler) {
 		if err != nil {
 			return
 		}
-		serveUI(c.Request.Context(), conn, handler)
+		serveUI(WithHTTPRequest(c.Request.Context(), c.Request), conn, handler)
 	})
 }
 
@@ -48,7 +48,7 @@ func RegisterAgentRoute(router gin.IRouter, path string, handler AgentHandler) {
 		if err != nil {
 			return
 		}
-		serveAgent(c.Request.Context(), conn, handler)
+		serveAgent(WithHTTPRequest(c.Request.Context(), c.Request), conn, handler)
 	})
 }
 

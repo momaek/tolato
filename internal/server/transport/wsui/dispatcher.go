@@ -12,8 +12,10 @@ import (
 )
 
 type SessionService interface {
-	ListSessions(ctx context.Context) ([]appsession.SessionListItem, error)
-	BuildSnapshot(ctx context.Context, sessionID string) (appsession.Snapshot, error)
+	CreateSession(ctx context.Context, title string) (string, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+	ListSessions(ctx context.Context, clientID string) ([]appsession.SessionListItem, error)
+	BuildSnapshot(ctx context.Context, clientID string, sessionID string) (appsession.Snapshot, error)
 	ListRows(ctx context.Context, sessionID string, page domain.CursorPage) (appsession.TimelinePage, error)
 	UpdateSubscriptions(ctx context.Context, clientID string, activeSessionID string, watchSessionIDs []string) error
 }
@@ -43,9 +45,37 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) (ResponseEnvelope,
 	}
 
 	now := d.now().UTC().Format(time.RFC3339)
+	clientID, _ := ClientIDFromContext(ctx)
 	switch req.Type {
+	case TypeSessionCreate:
+		if d.Sessions == nil {
+			return ResponseEnvelope{}, errors.New("session service is not configured")
+		}
+		payload, err := DecodePayload[SessionCreateRequest](req)
+		if err != nil {
+			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
+		}
+		sessionID, err := d.Sessions.CreateSession(ctx, payload.Title)
+		if err != nil {
+			return ResponseEnvelope{}, err
+		}
+		return accepted(req.RequestID, sessionID, now), nil
+
+	case TypeSessionDelete:
+		if d.Sessions == nil {
+			return ResponseEnvelope{}, errors.New("session service is not configured")
+		}
+		payload, err := DecodePayload[SessionDeleteRequest](req)
+		if err != nil {
+			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
+		}
+		if err := d.Sessions.DeleteSession(ctx, payload.SessionID); err != nil {
+			return ResponseEnvelope{}, err
+		}
+		return accepted(req.RequestID, payload.SessionID, now), nil
+
 	case TypeSessionsListRequest:
-		items, err := d.Sessions.ListSessions(ctx)
+		items, err := d.Sessions.ListSessions(ctx, clientID)
 		if err != nil {
 			return ResponseEnvelope{}, err
 		}
@@ -60,7 +90,7 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) (ResponseEnvelope,
 		if err != nil {
 			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
 		}
-		snapshot, err := d.Sessions.BuildSnapshot(ctx, payload.SessionID)
+		snapshot, err := d.Sessions.BuildSnapshot(ctx, clientID, payload.SessionID)
 		if err != nil {
 			return ResponseEnvelope{}, err
 		}
@@ -128,6 +158,19 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) (ResponseEnvelope,
 		}
 		return accepted(req.RequestID, payload.SessionID, now), nil
 
+	case TypeSessionTargetReselect:
+		if d.Runtime == nil {
+			return ResponseEnvelope{}, errors.New("runtime is not configured")
+		}
+		payload, err := DecodePayload[SessionTargetReselectRequest](req)
+		if err != nil {
+			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
+		}
+		if err := d.Runtime.ClearTargetContext(ctx, payload.SessionID, payload.IdempotencyKey); err != nil {
+			return ResponseEnvelope{}, err
+		}
+		return accepted(req.RequestID, payload.SessionID, now), nil
+
 	case TypeSessionApprovalApprove:
 		if d.Runtime == nil {
 			return ResponseEnvelope{}, errors.New("runtime is not configured")
@@ -184,8 +227,7 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) (ResponseEnvelope,
 		if err != nil {
 			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
 		}
-		clientID, ok := ClientIDFromContext(ctx)
-		if !ok {
+		if clientID == "" {
 			return ResponseEnvelope{}, errors.New("ws/ui client id is missing from context")
 		}
 		if err := d.Sessions.UpdateSubscriptions(ctx, clientID, payload.ActiveSessionID, payload.WatchSessionIDs); err != nil {

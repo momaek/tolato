@@ -2,9 +2,13 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/momaek/tolato/internal/server/domain"
 )
@@ -12,8 +16,10 @@ import (
 const defaultTimelineLimit = 50
 
 type Service interface {
-	ListSessions(ctx context.Context) ([]SessionListItem, error)
-	BuildSnapshot(ctx context.Context, sessionID string) (Snapshot, error)
+	CreateSession(ctx context.Context, title string) (string, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+	ListSessions(ctx context.Context, clientID string) ([]SessionListItem, error)
+	BuildSnapshot(ctx context.Context, clientID string, sessionID string) (Snapshot, error)
 	ListRows(ctx context.Context, sessionID string, page domain.CursorPage) (TimelinePage, error)
 	UpdateSubscriptions(ctx context.Context, clientID string, activeSessionID string, watchSessionIDs []string) error
 }
@@ -29,14 +35,42 @@ type Repositories struct {
 type SubscriptionRegistry interface {
 	SetActive(clientID string, sessionID string)
 	SetWatchSessions(clientID string, sessionIDs []string)
+	ClearUnread(clientID string, sessionID string) (int, bool)
+	UnreadCount(clientID string, sessionID string) int
 }
 
 type service struct {
 	repos Repositories
+	clock domain.Clock
+	ids   domain.IDGenerator
 }
 
-func NewService(repos Repositories) Service {
-	return &service{repos: repos}
+type Option func(*service)
+
+func WithClock(clock domain.Clock) Option {
+	return func(s *service) {
+		s.clock = clock
+	}
+}
+
+func WithIDGenerator(ids domain.IDGenerator) Option {
+	return func(s *service) {
+		s.ids = ids
+	}
+}
+
+func NewService(repos Repositories, options ...Option) Service {
+	svc := &service{
+		repos: repos,
+		clock: systemClock{},
+		ids:   randomIDGenerator{},
+	}
+	for _, option := range options {
+		if option != nil {
+			option(svc)
+		}
+	}
+	return svc
 }
 
 type SessionListItem struct {
@@ -113,7 +147,55 @@ type ExecutionAggregate struct {
 	Failed  int `json:"failed"`
 }
 
-func (s *service) ListSessions(ctx context.Context) ([]SessionListItem, error) {
+func (s *service) CreateSession(ctx context.Context, title string) (string, error) {
+	if s.repos.Sessions == nil {
+		return "", errors.New("session repository is not configured")
+	}
+
+	now := s.clock.Now().UTC()
+	sessions, err := s.repos.Sessions.List(ctx, domain.SessionFilter{})
+	if err != nil {
+		return "", err
+	}
+
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = defaultSessionTitle(len(sessions))
+	}
+
+	session := domain.Session{
+		ID:        s.ids.NewID("sess"),
+		Title:     title,
+		Status:    domain.SessionStatusIdle,
+		Revision:  1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.repos.Sessions.Create(ctx, session); err != nil {
+		return "", err
+	}
+	return session.ID, nil
+}
+
+func (s *service) DeleteSession(ctx context.Context, sessionID string) error {
+	if s.repos.Sessions == nil {
+		return errors.New("session repository is not configured")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return domain.ErrInvalidArgument
+	}
+
+	session, err := s.repos.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session.Status == domain.SessionStatusRunning || session.Status == domain.SessionStatusWaitingAsyncExecution {
+		return domain.ErrSessionBusy
+	}
+	return s.repos.Sessions.Delete(ctx, sessionID)
+}
+
+func (s *service) ListSessions(ctx context.Context, clientID string) ([]SessionListItem, error) {
 	sessions, err := s.repos.Sessions.List(ctx, domain.SessionFilter{})
 	if err != nil {
 		return nil, err
@@ -127,14 +209,18 @@ func (s *service) ListSessions(ctx context.Context) ([]SessionListItem, error) {
 			Status:              item.Status,
 			UpdatedAt:           item.UpdatedAt.UTC().Format(timeLayout),
 			ActiveTargetSummary: activeTargetSummary(item),
-			Unread:              0,
+			Unread:              s.unreadCount(clientID, item.ID),
 		})
 	}
 
 	return items, nil
 }
 
-func (s *service) BuildSnapshot(ctx context.Context, sessionID string) (Snapshot, error) {
+func (s *service) BuildSnapshot(ctx context.Context, clientID string, sessionID string) (Snapshot, error) {
+	if clientID != "" && s.repos.Subscriptions != nil {
+		s.repos.Subscriptions.ClearUnread(clientID, sessionID)
+	}
+
 	session, err := s.repos.Sessions.Get(ctx, sessionID)
 	if err != nil {
 		return Snapshot{}, err
@@ -247,6 +333,13 @@ func (s *service) buildExecutionState(ctx context.Context, taskID string) (*Exec
 	}, nil
 }
 
+func (s *service) unreadCount(clientID string, sessionID string) int {
+	if clientID == "" || s.repos.Subscriptions == nil {
+		return 0
+	}
+	return s.repos.Subscriptions.UnreadCount(clientID, sessionID)
+}
+
 func activeTargetSummary(session domain.Session) string {
 	if session.ActiveTargetContext.DisplayLabel != "" {
 		return session.ActiveTargetContext.DisplayLabel
@@ -292,6 +385,13 @@ func sidebarChips(session domain.Session) []string {
 	return chips
 }
 
+func defaultSessionTitle(existingCount int) string {
+	if existingCount <= 0 {
+		return "Console Session"
+	}
+	return fmt.Sprintf("Console Session %d", existingCount+1)
+}
+
 func pendingActionView(action *domain.PendingAction) *PendingAction {
 	if action == nil {
 		return nil
@@ -306,6 +406,27 @@ func pendingActionView(action *domain.PendingAction) *PendingAction {
 		view.TaskID = payload.TaskID
 	}
 	return view
+}
+
+type systemClock struct{}
+
+func (systemClock) Now() time.Time {
+	return time.Now().UTC()
+}
+
+type randomIDGenerator struct{}
+
+func (randomIDGenerator) NewID(prefix string) string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err)
+	}
+
+	token := hex.EncodeToString(buf)
+	if prefix == "" {
+		return token
+	}
+	return strings.TrimSpace(prefix) + "_" + token
 }
 
 func composerState(status domain.SessionStatus) ComposerState {

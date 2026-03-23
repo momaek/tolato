@@ -113,6 +113,8 @@ type RequestApprovalOutput struct {
 type ExecOnNodesInput struct {
 	SessionID     string                     `json:"sessionId"`
 	InputText     string                     `json:"inputText"`
+	Command       string                     `json:"command,omitempty"`
+	CommandArgs   []string                   `json:"commandArgs,omitempty"`
 	TargetContext domain.ActiveTargetContext `json:"targetContext"`
 	RiskLevel     domain.RiskLevel           `json:"riskLevel,omitempty"`
 }

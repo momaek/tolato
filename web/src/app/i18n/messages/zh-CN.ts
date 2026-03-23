@@ -14,6 +14,7 @@ const zhCN = {
     buttons: {
       reset: '重置',
       retry: '重试',
+      logout: '退出登录',
       saveSettings: '保存设置',
       saving: '保存中...',
       cancel: '取消',
@@ -41,11 +42,19 @@ const zhCN = {
       filtered: 'Filtered',
       updated: 'Updated',
       latestUpdate: 'Latest update',
-      lastSeen: 'Last seen',
+      lastSeen: '最近心跳',
       filterMode: 'Filter mode',
       search: 'Search',
       allNodes: 'all nodes',
       language: '语言',
+      agent: 'Agent',
+    },
+    statuses: {
+      online: '在线',
+      busy: '忙碌',
+      stale: '心跳延迟',
+      offline: '离线',
+      unknown: '未知',
     },
     states: {
       dirty: 'dirty',
@@ -76,17 +85,74 @@ const zhCN = {
       risk: 'risk {value}',
       timeout: 'timeout: {value}s',
       broadcast: 'broadcast: {value}',
-      lastSeen: 'Last seen {value}',
+      lastSeen: '最近心跳 {value}',
       version: 'version {value}',
     },
     values: {
-      yes: 'yes',
-      no: 'no',
+      yes: '是',
+      no: '否',
     },
   },
   appShell: {
     subtitle: 'AI Ops Console',
     languageLabel: '语言',
+  },
+  nodeOnboarding: {
+    toast: {
+      title: '当前还没有已接入的 Node',
+      description:
+        '先启动一个 tolato-nodeagent 接入控制面，再回来使用 Console 和 Nodes。',
+    },
+    actions: {
+      openNodes: '查看接入指引',
+    },
+    console: {
+      title: '还没有可用 Node',
+      description:
+        '先接入至少一个 Node。连接成功后，Console 才能进行目标解析、计划和执行。',
+    },
+    nodes: {
+      title: '先添加第一个 Node',
+      description:
+        '当前控制面还没有收到任何 Node 心跳。你可以先在目标机器上启动 node agent，并连接到 `/ws/agent`。',
+      hint: '本地开发默认 token 是 `agent-dev-token`。如果你修改了后端配置，请同步替换这里的 token。',
+    },
+  },
+  login: {
+    eyebrow: 'Control Plane Access',
+    title: '登录后再进入 Console、Nodes 和 Settings。',
+    description:
+      '后端现在要求 Bearer Session。前端会在登录后自动给 HTTP API 和 ws/ui 带上 token，并在会话失效时回到登录页。',
+    highlights: {
+      control: {
+        title: '统一控制面',
+        description:
+          'Console、History 和 Settings 现在都走同一套用户会话，不再依赖本地 dev header。',
+      },
+      execution: {
+        title: '实时执行链路',
+        description:
+          '登录成功后会自动连接 ws/ui，继续接收 session 摘要、状态变更和执行输出。',
+      },
+      audit: {
+        title: '会话与审计收口',
+        description:
+          '修改密码、撤销其他会话后，旧 token 会失效，前端会回到登录态。',
+      },
+    },
+    form: {
+      title: 'Sign in',
+      description: '使用后端配置的管理员账号登录。',
+      username: '用户名',
+      usernamePlaceholder: '请输入用户名',
+      password: '密码',
+      passwordPlaceholder: '请输入密码',
+      submit: '登录',
+      submitting: '登录中...',
+    },
+    validation: {
+      required: '请输入用户名和密码',
+    },
   },
   console: {
     header: {
@@ -97,9 +163,11 @@ const zhCN = {
       directShellTitle: 'Direct shell 在 MVP 中不可用',
       directShellDescription:
         '当前界面只提供 AI Agent 流程。Direct shell 会绕过目标确认、计划生成和审批链路，因此在 MVP 中只保留说明态。',
-      plannerHint: '自然语言请求会先决定是否查节点、确认目标、生成计划或进入审批。',
+      plannerHint:
+        '自然语言请求会先决定是否查节点、确认目标、生成计划或进入审批。',
       healthSummary: '{online} online · {offline} offline',
-      broadcastAllOnline: '当前目标覆盖全部在线节点，写操作默认阻断，只读操作才可继续。',
+      broadcastAllOnline:
+        '当前目标覆盖全部在线节点，写操作默认阻断，只读操作才可继续。',
       broadcastMulti: '当前目标包含多个节点，写操作需要显式升级审批。',
       sessionUnset: '未选择会话',
       waitingInput: '等待任务输入',
@@ -110,7 +178,8 @@ const zhCN = {
       currentTargets: 'Current Targets',
       currentTargetsDescription: '候选节点、已确认目标和状态摘要同步展示。',
       broadcastGuardrail: 'Broadcast Guardrail',
-      allOnlineGuardrail: '当前目标是全部在线节点，写操作默认阻断，只读执行才会继续。',
+      allOnlineGuardrail:
+        '当前目标是全部在线节点，写操作默认阻断，只读执行才会继续。',
       multiGuardrail: '当前目标覆盖多个节点，写操作需要升级审批后才能继续。',
       candidates: 'Candidates',
       confirmed: 'Confirmed',
@@ -122,8 +191,10 @@ const zhCN = {
     },
     composer: {
       title: 'Composer',
-      description: '发送任务请求，AI 会自行决定是否查节点、生成计划或进入审批。',
-      placeholder: '发送任务请求，AI 会先决定是否查询节点、确认目标、生成计划或进入审批。',
+      description:
+        '发送任务请求，AI 会自行决定是否查节点、生成计划或进入审批。',
+      placeholder:
+        '发送任务请求，AI 会先决定是否查询节点、确认目标、生成计划或进入审批。',
       submitFailed: '发送失败',
       quickStarts: '快捷起步',
       shortcutHint: 'Ctrl / Cmd + Enter 发送',
@@ -143,9 +214,46 @@ const zhCN = {
       title: 'Sessions',
       description: '当前会话与后台摘要',
       total: '{count} total',
+      newSession: '新建会话',
+      deleteSession: '删除会话',
+      emptyTitle: '当前没有可用会话',
+      emptyDescription:
+        '服务端还没有初始化 Console session，刷新页面或重启服务后再试。',
     },
     targetConfirmation: {
-      originalTarget: 'Original Target',
+      originalTarget: '原始目标',
+      eyebrow: '目标确认',
+      pending: '待确认',
+      titleSingle: '请确认要操作的节点',
+      titleMulti: '请确认要操作的节点范围',
+      description:
+        '我找到了 {count} 个可能匹配的节点，但还不能确定就是你要操作的目标。确认后才会继续执行。',
+      pauseReason: '为什么会停在这里',
+      pauseReasonFallback:
+        '系统已经解析出候选节点，但匹配信心还不够高，所以暂停等待你的确认。',
+      pauseReasonFallbackCandidate:
+        '系统已经找到最可能的候选节点：{label}（{nodeId}），但匹配信心还不够高，所以暂停等待你的确认。',
+      inheritedHint:
+        '当前候选目标参考了本会话已有的上下文，请确认是否继续使用。',
+      candidateNodeId: '节点 ID',
+      candidateReason: '匹配说明',
+      confirmCandidate: '确认使用 {label}',
+      clearAndReselect: '清除并重新选择',
+      scopeSingle: '单节点',
+      scopeMulti: '多节点',
+      scopeAllOnline: '全部在线节点',
+      sourceResolver: '模型解析',
+      sourceManual: '手动指定',
+      sourceSessionContext: '会话上下文',
+      sourceNone: '待确认',
+      reasonManualConfirmation:
+        '没有足够把握直接命中该节点，所以暂停下来等待你确认。',
+      reasonMatchedNodeId: '根据节点 ID 匹配到了这个候选节点。',
+      reasonMatchedHostname: '根据主机名匹配到了这个候选节点。',
+      reasonMatchedRegion: '根据地域信息匹配到了这个候选节点。',
+      reasonMatchedTag: '根据标签匹配到了这个候选节点。',
+      reasonAllOnline: '这次目标解析覆盖了当前所有在线节点。',
+      reasonResolved: '这是后端根据当前上下文解析出的候选节点。',
     },
     plan: {
       ready: 'Plan Ready',
@@ -173,21 +281,25 @@ const zhCN = {
       badge: 'History',
       badgeSecondary: 'Task audit and timeline',
       title: 'Review plan, approval, execution, and audit in one place.',
-      description: 'This page keeps the task archive separate from the live console. Use the list to inspect the full lifecycle and jump back to console when you need to continue a session.',
+      description:
+        'This page keeps the task archive separate from the live console. Use the list to inspect the full lifecycle and jump back to console when you need to continue a session.',
     },
     nodes: {
       badge: 'Nodes',
       badgeSecondary: 'HTTP query surface',
       title: 'Browse nodes, inspect health, and open a target in console.',
-      description: 'The node catalog stays separate from the live console flow. Use it to filter by status, identify busy targets, and jump into detailed inspection.',
+      description:
+        'The node catalog stays separate from the live console flow. Use it to filter by status, identify busy targets, and jump into detailed inspection.',
       statusSnapshot: 'Status snapshot',
       consoleShortcut: 'Console shortcut',
-      consoleShortcutDescription: 'Open the live console to continue a target confirmation or inspect session history.',
+      consoleShortcutDescription:
+        'Open the live console to continue a target confirmation or inspect session history.',
       statBusy: 'Busy',
       statOnline: 'Online',
       statOffline: 'Offline',
       nodeInventory: 'Node inventory',
-      nodeInventoryDescription: '{visible} / {total} nodes match the current filters.',
+      nodeInventoryDescription:
+        '{visible} / {total} nodes match the current filters.',
       mockDataReady: 'Mock data ready',
       searchPlaceholder: 'Search hostname, region, or tag',
       allRegions: 'All regions',
@@ -204,7 +316,8 @@ const zhCN = {
       badge: 'Node detail',
       badgeSecondary: 'Independent page',
       title: 'Deep view for a single node.',
-      description: 'This page keeps the full node state outside console flow. It is useful for investigating health, recent tasks, and operational risk signals before jumping back to a session.',
+      description:
+        'This page keeps the full node state outside console flow. It is useful for investigating health, recent tasks, and operational risk signals before jumping back to a session.',
       riskSignals: 'Risk signals',
       recentTasks: 'Recent tasks',
     },
@@ -212,7 +325,9 @@ const zhCN = {
       badge: 'Settings',
       badgeSecondary: 'Mock editable state',
       title: 'Tune the model, security, and user preferences.',
-      description: 'Configuration stays off the live session path. These panels are intentionally simple so they can later connect to HTTP persistence without changing the page structure.',
+      description:
+        'Configuration stays off the live session path. These panels are intentionally simple so they can later connect to HTTP persistence without changing the page structure.',
+      emptyState: '当前没有加载到设置数据，请重试。',
       saveSuccess: '设置已保存',
       testFailure: '模型连通性测试失败',
       passwordRequired: '请填写当前密码和新密码',
@@ -243,18 +358,19 @@ const zhCN = {
       toolResults: 'Tool results',
       timelineRows: 'Timeline rows',
       audit: 'Audit',
-      selectFromList: 'Select a task from the list to inspect its plan, execution, and audit trail.',
+      selectFromList:
+        'Select a task from the list to inspect its plan, execution, and audit trail.',
     },
   },
   nodeOverview: {
-    provider: 'Provider',
-    uptime: 'Uptime',
-    kernel: 'Kernel',
-    resourceUsage: 'Resource usage',
-    agentStatus: 'Agent status',
-    agentVersion: 'Agent version',
-    busy: 'Busy',
-    status: 'Status',
+    provider: '提供方',
+    uptime: '运行时长',
+    kernel: '内核',
+    resourceUsage: '资源使用',
+    agentStatus: 'Agent 状态',
+    agentVersion: 'Agent 版本',
+    busy: '忙碌中',
+    status: '状态',
     ip: 'IP',
   },
   settingsPanel: {
@@ -262,12 +378,30 @@ const zhCN = {
       title: 'Model config',
       provider: 'Provider',
       model: 'Model',
+      modelHelp: '从配置的 Endpoint URL 拉取模型列表后直接选择。',
+      refreshModels: '刷新模型列表',
+      loadingModels: '加载模型中...',
+      modelsEmpty: '没有可选模型',
+      modelsPending: '点击刷新后加载模型列表',
+      modelsUnavailable: '先填写 URL 和 API Key',
+      endpoint: 'Endpoint URL',
+      endpointPlaceholder: 'https://api.openai.com/v1',
+      apiKey: 'API Key',
+      apiKeyPlaceholder: '输入新的 API Key',
+      apiKeyRetained: '已保存，留空则保持不变',
+      apiKeyHelp: '保存后用于后端模型调用。',
+      apiKeyHelpRetained: '当前已保存 API Key。留空保存不会覆盖它。',
+      apiKeyConfigured: 'api key configured',
       temperature: 'Temperature',
       approvalMode: 'Approval mode',
       openaiCompatible: 'openai compatible',
       mockReady: 'mock ready',
       testConnection: '测试连接',
       testing: '测试中...',
+      providers: {
+        openai: 'OpenAI',
+        devloop: 'Dev Loop',
+      },
     },
     accountSecurity: {
       title: 'Account security',
@@ -294,6 +428,11 @@ const zhCN = {
       desktopFirst: 'desktop first',
       mockDriven: 'mock driven',
     },
+  },
+  settingsPageNav: {
+    modelConfig: '模型提供方、接口地址和审批策略。',
+    accountSecurity: '账号信息、密码修改和会话管理。',
+    preferences: '默认区域、语言和交互偏好。',
   },
   nodesTable: {
     title: 'Nodes',

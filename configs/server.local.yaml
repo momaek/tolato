@@ -4,9 +4,10 @@ server:
   agent_ws_path: "/ws/agent"
 
 store:
-  driver: "memory"
-  dsn: ""
+  driver: "postgres"
+  dsn: "postgres://tolato:tolato@127.0.0.1:5432/tolato_control_plane?sslmode=disable"
 
 auth:
   admin_username: "admin"
   admin_password: "admin"
+  agent_token: "agent-dev-token"
