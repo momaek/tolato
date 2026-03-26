@@ -169,6 +169,7 @@ watch(
       <ConsoleSidebar
         :sessions="listStore.sessions"
         :active-session-id="listStore.activeSessionId"
+        :snapshot="snapshot"
         @create-session="handleCreateSession"
         @delete-session="handleDeleteSession"
         @select-session="handleSelectSession"

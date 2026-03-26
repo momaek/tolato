@@ -94,6 +94,21 @@ type CompletionHandler interface {
 	HandleExecutionFinished(ctx context.Context, sessionID string, taskID string) error
 }
 
+// ExecutionWaiterSignaler is an optional interface that, when provided,
+// allows the execution service to signal synchronous waiters (used by
+// the agent-sdk-go provider) instead of calling CompletionHandler.
+type ExecutionWaiterSignaler interface {
+	// Signal notifies the waiter. Returns true if a waiter was found
+	// (sync path), false if none (legacy async path).
+	Signal(taskID string, status TaskStatus, aggregate TaskAggregate) bool
+}
+
+// TaskStatus mirrors domain.TaskStatus for the signaler interface.
+type TaskStatus = domain.TaskStatus
+
+// TaskAggregate mirrors domain.ExecutionAggregate for the signaler interface.
+type TaskAggregate = domain.ExecutionAggregate
+
 type service struct {
 	repos      Repositories
 	clock      domain.Clock
@@ -102,6 +117,7 @@ type service struct {
 	events     EventPublisher
 	dispatcher AgentDispatchPublisher
 	completion CompletionHandler
+	waiter     ExecutionWaiterSignaler
 	logger     domain.Logger
 }
 
@@ -134,6 +150,12 @@ func WithLockManager(locks domain.LockManager) Option {
 func WithLogger(logger domain.Logger) Option {
 	return func(s *service) {
 		s.logger = logger
+	}
+}
+
+func WithWaiterSignaler(waiter ExecutionWaiterSignaler) Option {
+	return func(s *service) {
+		s.waiter = waiter
 	}
 }
 
@@ -480,7 +502,17 @@ func (s *service) FinishExecution(ctx context.Context, input FinishExecutionInpu
 	if err := s.publishExecutionFinished(ctx, execution.SessionID, execution.TaskID, execution); err != nil {
 		return err
 	}
-	if !allExecutionsTerminal(aggregate) || s.completion == nil {
+	if !allExecutionsTerminal(aggregate) {
+		return nil
+	}
+
+	// Try the synchronous waiter path first (agent-sdk-go provider).
+	if s.waiter != nil && s.waiter.Signal(execution.TaskID, task.Status, aggregate) {
+		return nil
+	}
+
+	// Fall back to the legacy async completion handler.
+	if s.completion == nil {
 		return nil
 	}
 	return s.completion.HandleExecutionFinished(ctx, execution.SessionID, execution.TaskID)

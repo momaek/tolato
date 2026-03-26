@@ -17,11 +17,26 @@ const { t } = useI18n()
       <p class="text-sm font-medium leading-6 text-muted-foreground">{{ node.status }} · {{ node.region }}</p>
     </div>
 
-    <div class="rounded-[0.9rem] border border-border/60 bg-muted/20 px-4 py-3">
+    <div v-if="node.stdoutTail" class="rounded-[0.9rem] border border-border/60 bg-muted/20 px-4 py-3">
       <p class="text-[11px] font-semibold tracking-[0.14em] text-muted-foreground">stdout</p>
-      <p class="mt-1 text-sm leading-6 text-muted-foreground">
-        {{ node.stdoutTail || node.stderrTail || t('common.states.waitingForOutput') }}
-      </p>
+      <pre class="mt-1 whitespace-pre-wrap font-mono text-xs leading-5 text-muted-foreground">{{ node.stdoutTail }}</pre>
     </div>
+
+    <div v-if="node.stderrTail" class="rounded-[0.9rem] border border-border/60 border-l-2 border-l-red-400 bg-muted/20 px-4 py-3">
+      <p class="text-[11px] font-semibold tracking-[0.14em] text-red-500">stderr</p>
+      <pre class="mt-1 whitespace-pre-wrap font-mono text-xs leading-5 text-red-600/80">{{ node.stderrTail }}</pre>
+    </div>
+
+    <div v-if="!node.stdoutTail && !node.stderrTail" class="rounded-[0.9rem] border border-border/60 bg-muted/20 px-4 py-3">
+      <p class="text-sm leading-6 text-muted-foreground">{{ t('common.states.waitingForOutput') }}</p>
+    </div>
+
+    <p
+      v-if="node.exitCode != null"
+      class="text-xs font-medium"
+      :class="node.exitCode === 0 ? 'text-muted-foreground' : 'text-red-500'"
+    >
+      exit code: {{ node.exitCode }}
+    </p>
   </div>
 </template>

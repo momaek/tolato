@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/momaek/tolato/internal/server/agentapi"
 	"github.com/momaek/tolato/internal/server/app/runtime"
 	"github.com/momaek/tolato/internal/server/domain"
+	"github.com/momaek/tolato/internal/server/infra/llm/agentsdk"
 	devllm "github.com/momaek/tolato/internal/server/infra/llm/devloop"
-	openai "github.com/momaek/tolato/internal/server/infra/llm/openai"
 )
 
 type Provider struct {
@@ -19,6 +20,7 @@ type Provider struct {
 	DefaultUserID string
 	Logger        domain.Logger
 	Events        runtime.EventPublisher
+	IDGenerator   domain.IDGenerator
 }
 
 type modelConfig struct {
@@ -52,16 +54,16 @@ func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, to
 	switch providerName {
 	case "devloop":
 		out, err = devllm.New().RunTurn(ctx, input, tools)
-	case "openai":
-		client := openai.Provider{
-			Model:       cfg.Model,
-			Endpoint:    cfg.Endpoint,
-			APIKey:      cfg.APIKey,
-			Temperature: cfg.Temperature,
-			MaxTokens:   cfg.MaxTokens,
-			TimeoutSec:  cfg.TimeoutSec,
-			Events:      p.Events,
-		}
+	case "openai", "anthropic", "gemini":
+		client := agentsdk.NewProvider(agentsdk.ProviderConfig{
+			ProviderType:   providerName,
+			Model:          cfg.Model,
+			APIKey:         cfg.APIKey,
+			Endpoint:       cfg.Endpoint,
+			Temperature:    cfg.Temperature,
+			MaxTokens:      cfg.MaxTokens,
+			EnableThinking: true,
+		}, p.Events, p.idGenerator())
 		out, err = client.RunTurn(ctx, input, tools)
 	default:
 		return runtime.ModelTurnOutput{}, fmt.Errorf("unsupported llm provider %q", cfg.Provider)
@@ -105,6 +107,19 @@ func (p *Provider) loadConfig(ctx context.Context) (modelConfig, error) {
 		return modelConfig{}, errors.New("model provider is required")
 	}
 	return cfg, nil
+}
+
+func (p *Provider) idGenerator() domain.IDGenerator {
+	if p.IDGenerator != nil {
+		return p.IDGenerator
+	}
+	return simpleIDGen{}
+}
+
+type simpleIDGen struct{}
+
+func (simpleIDGen) NewID(prefix string) string {
+	return prefix + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
 func (p *Provider) userID() string {

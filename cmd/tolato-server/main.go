@@ -118,6 +118,7 @@ func main() {
 		DefaultUserID: cfg.Auth.AdminUsername,
 		Logger:        logger,
 		Events:        eventPublisher,
+		IDGenerator:   ids,
 	}, appruntime.NewPolicyToolRegistry(policyRegistry), clock, ids, appruntime.WithEventPublisher(eventPublisher), appruntime.WithLockManager(locks), appruntime.WithLogger(logger))
 
 	dispatchPublisher := wsagent.NewDispatchPublisher(agentRegistry)
