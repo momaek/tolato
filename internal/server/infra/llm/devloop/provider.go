@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	"github.com/momaek/tolato/internal/server/app/policy"
 	"github.com/momaek/tolato/internal/server/app/runtime"
 	"github.com/momaek/tolato/internal/server/domain"
@@ -22,7 +23,7 @@ func New() *Provider {
 	return &Provider{}
 }
 
-func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []runtime.ToolDefinition) (runtime.ModelTurnOutput, error) {
+func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []agentapi.ToolSpec) (runtime.ModelTurnOutput, error) {
 	_ = ctx
 	_ = tools
 
@@ -122,31 +123,30 @@ func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, to
 }
 
 func toolOutput(name string, payload any, next state) (runtime.ModelTurnOutput, error) {
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return runtime.ModelTurnOutput{}, err
-	}
 	return runtime.ModelTurnOutput{
-		ToolCall: &runtime.ToolInvocation{
-			Name: name,
-			Args: raw,
-		},
+		Items:         []agentapi.Item{agentapi.FunctionCall(name, payload)},
 		ProviderState: mustState(next),
 	}, nil
 }
 
 func assistantOutput(text string, done bool) runtime.ModelTurnOutput {
 	return runtime.ModelTurnOutput{
-		AssistantText: strPtr(text),
-		Done:          done,
+		Items: []agentapi.Item{{
+			Type:    "message",
+			Role:    "assistant",
+			Content: mustContent(text),
+		}},
+		Done: done,
 	}
 }
 
-func lastUserText(conversation []runtime.ConversationItem) string {
+func lastUserText(conversation []agentapi.Item) string {
 	for i := len(conversation) - 1; i >= 0; i-- {
 		item := conversation[i]
-		if item.Role == string(domain.MessageRoleUser) && item.Content != "" {
-			return item.Content
+		if item.Role == string(domain.MessageRoleUser) {
+			if text := agentapi.MessageText(item); text != "" {
+				return text
+			}
 		}
 	}
 	return ""
@@ -185,14 +185,21 @@ func mustState(st state) []byte {
 	return raw
 }
 
-func lastToolPayload[T any](conversation []runtime.ConversationItem, toolName string) (T, bool) {
+func lastToolPayload[T any](conversation []agentapi.Item, toolName string) (T, bool) {
 	var out T
 	for i := len(conversation) - 1; i >= 0; i-- {
 		item := conversation[i]
-		if item.ToolName != toolName || len(item.ToolInput) == 0 {
+		if item.Type != "function_call_output" || len(item.Content) != 0 {
+			// no-op
+		}
+		if item.Type != "function_call_output" || strings.TrimSpace(item.CallID) == "" {
 			continue
 		}
-		if err := json.Unmarshal(item.ToolInput, &out); err != nil {
+		callName := strings.TrimPrefix(item.CallID, "call_")
+		if callName != toolName || strings.TrimSpace(item.Output) == "" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(item.Output), &out); err != nil {
 			return out, false
 		}
 		return out, true
@@ -206,4 +213,15 @@ func boolPtr(v bool) *bool {
 
 func strPtr(v string) *string {
 	return &v
+}
+
+func mustContent(text string) json.RawMessage {
+	raw, err := json.Marshal([]agentapi.ContentPart{{
+		Type: "output_text",
+		Text: text,
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return raw
 }

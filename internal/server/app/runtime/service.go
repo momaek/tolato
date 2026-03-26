@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	"github.com/momaek/tolato/internal/server/domain"
 )
 
@@ -33,12 +34,12 @@ type Repositories struct {
 }
 
 type LLMClient interface {
-	RunTurn(ctx context.Context, input ModelTurnInput, tools []ToolDefinition) (ModelTurnOutput, error)
+	RunTurn(ctx context.Context, input ModelTurnInput, tools []agentapi.ToolSpec) (ModelTurnOutput, error)
 }
 
 type ToolRegistry interface {
-	Definitions() []ToolDefinition
-	Call(ctx context.Context, input ToolCallInput) (ToolResult, error)
+	Definitions() []agentapi.ToolSpec
+	Call(ctx context.Context, call agentapi.Item) (ToolResult, error)
 }
 
 type Runtime struct {
@@ -100,7 +101,7 @@ func NewService(repos Repositories, llm LLMClient, tools ToolRegistry, clock dom
 
 type ModelTurnInput struct {
 	SessionID           string
-	Conversation        []ConversationItem
+	Conversation        []agentapi.Item
 	ActiveTargetContext domain.ActiveTargetContext
 	PendingAction       *domain.PendingAction
 	ProviderState       json.RawMessage
@@ -113,40 +114,16 @@ type ExecutionContext struct {
 	Aggregate domain.ExecutionAggregate
 }
 
-type ConversationItem struct {
-	Role      string
-	Kind      string
-	Content   string
-	ToolName  string
-	ToolInput json.RawMessage
-}
-
 type ModelTurnOutput struct {
-	AssistantText *string
-	ToolCall      *ToolInvocation
+	ResponseID    string
+	Items         []agentapi.Item
 	Done          bool
 	ProviderState []byte
 	Streamed      bool
 }
 
-type ToolInvocation struct {
-	Name string
-	Args json.RawMessage
-}
-
-type ToolDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-type ToolCallInput struct {
-	SessionID           string
-	ActiveTargetContext domain.ActiveTargetContext
-	Name                string
-	Args                json.RawMessage
-}
-
 type ToolResult struct {
+	OutputItem            agentapi.Item
 	MetaText              string
 	ToolMessage           json.RawMessage
 	WaitForUser           bool
@@ -246,11 +223,15 @@ func (r *Runtime) HandleUserMessage(ctx context.Context, sessionID string, text 
 			"text_preview", previewText(text, 240),
 		)
 
-		conversation, err := r.rebuildConversation(ctx, sessionID)
+		conversation, providerState, err := r.loadConversationState(ctx, session)
 		if err != nil {
 			return err
 		}
-		return r.continueLoop(ctx, &session, conversation)
+		conversation = append(conversation, agentapi.UserMessage(text))
+		if err := r.persistConversationState(ctx, &session, conversation, providerState); err != nil {
+			return err
+		}
+		return r.continueLoop(ctx, &session, conversation, providerState)
 	})
 }
 
@@ -299,7 +280,7 @@ func (r *Runtime) ResumeAfterTargetConfirmation(ctx context.Context, sessionID s
 		if err := r.appendAudit(ctx, session, "target_confirmation.confirmed", payload); err != nil {
 			return err
 		}
-		resultRow, err := r.appendToolResultWithSource(ctx, session.ID, session.CurrentTaskID, nil, "target_confirmation", domain.ToolResultStatusSucceeded, targetConfirmationText(targetCtx), domain.TimelineRowSourceUserAction, payload)
+		resultRow, err := r.appendToolResultWithSource(ctx, session.ID, session.CurrentTaskID, nil, nil, "target_confirmation", domain.ToolResultStatusSucceeded, targetConfirmationText(targetCtx), domain.TimelineRowSourceUserAction, payload)
 		if err != nil {
 			return err
 		}
@@ -321,11 +302,15 @@ func (r *Runtime) ResumeAfterTargetConfirmation(ctx context.Context, sessionID s
 			"scope", targetCtx.Scope,
 		)
 
-		conversation, err := r.rebuildConversation(ctx, sessionID)
+		conversation, providerState, err := r.loadConversationState(ctx, session)
 		if err != nil {
 			return err
 		}
-		return r.continueLoop(ctx, &session, conversation)
+		conversation = append(conversation, agentapi.UserMessage("Target confirmation result: "+string(payload)))
+		if err := r.persistConversationState(ctx, &session, conversation, providerState); err != nil {
+			return err
+		}
+		return r.continueLoop(ctx, &session, conversation, providerState)
 	})
 }
 
@@ -374,7 +359,7 @@ func (r *Runtime) ClearTargetContext(ctx context.Context, sessionID string, idem
 		if err := r.appendAudit(ctx, session, "target_context.cleared", payload); err != nil {
 			return err
 		}
-		resultRow, err := r.appendToolResultWithSource(ctx, session.ID, session.CurrentTaskID, nil, "target_clear", domain.ToolResultStatusSucceeded, "target context cleared", domain.TimelineRowSourceUserAction, payload)
+		resultRow, err := r.appendToolResultWithSource(ctx, session.ID, session.CurrentTaskID, nil, nil, "target_clear", domain.ToolResultStatusSucceeded, "target context cleared", domain.TimelineRowSourceUserAction, payload)
 		if err != nil {
 			return err
 		}
@@ -452,7 +437,7 @@ func (r *Runtime) ResumeAfterApproval(ctx context.Context, sessionID string, act
 			if err := r.appendAudit(ctx, session, "approval.approved", payload); err != nil {
 				return err
 			}
-			resultRow, err := r.appendToolResultWithSource(ctx, session.ID, &taskID, nil, "approval", domain.ToolResultStatusSucceeded, "approval recorded", domain.TimelineRowSourceUserAction, payload)
+			resultRow, err := r.appendToolResultWithSource(ctx, session.ID, &taskID, nil, nil, "approval", domain.ToolResultStatusSucceeded, "approval recorded", domain.TimelineRowSourceUserAction, payload)
 			if err != nil {
 				return err
 			}
@@ -472,11 +457,15 @@ func (r *Runtime) ResumeAfterApproval(ctx context.Context, sessionID string, act
 				"task_id", taskID,
 				"approved", true,
 			)
-			conversation, err := r.rebuildConversation(ctx, sessionID)
+			conversation, providerState, err := r.loadConversationState(ctx, session)
 			if err != nil {
 				return err
 			}
-			return r.continueLoop(ctx, &session, conversation)
+			conversation = append(conversation, agentapi.UserMessage("Approval result: "+string(payload)))
+			if err := r.persistConversationState(ctx, &session, conversation, providerState); err != nil {
+				return err
+			}
+			return r.continueLoop(ctx, &session, conversation, providerState)
 		}
 
 		task.ApprovalStatus = domain.ApprovalStatusRejected
@@ -488,7 +477,7 @@ func (r *Runtime) ResumeAfterApproval(ctx context.Context, sessionID string, act
 		if err := r.appendAudit(ctx, session, "approval.rejected", payload); err != nil {
 			return err
 		}
-		resultRow, err := r.appendToolResultWithSource(ctx, session.ID, &taskID, nil, "approval", domain.ToolResultStatusSucceeded, approvalRejectedText(action.Reason), domain.TimelineRowSourceUserAction, payload)
+		resultRow, err := r.appendToolResultWithSource(ctx, session.ID, &taskID, nil, nil, "approval", domain.ToolResultStatusSucceeded, approvalRejectedText(action.Reason), domain.TimelineRowSourceUserAction, payload)
 		if err != nil {
 			return err
 		}
@@ -560,7 +549,7 @@ func (r *Runtime) HandleExecutionFinished(ctx context.Context, sessionID string,
 			return err
 		}
 
-		conversation, err := r.rebuildConversation(ctx, sessionID)
+		conversation, providerState, err := r.loadConversationState(ctx, session)
 		if err != nil {
 			return err
 		}
@@ -569,11 +558,14 @@ func (r *Runtime) HandleExecutionFinished(ctx context.Context, sessionID string,
 			Status:    task.Status,
 			Aggregate: aggregate,
 		})
-		return r.continueLoop(ctx, &session, conversation)
+		if err := r.persistConversationState(ctx, &session, conversation, providerState); err != nil {
+			return err
+		}
+		return r.continueLoop(ctx, &session, conversation, providerState)
 	})
 }
 
-func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, conversation []ConversationItem) error {
+func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, conversation []agentapi.Item, providerState json.RawMessage) error {
 	for {
 		r.logInfo(ctx, "runtime llm turn started",
 			"session_id", session.ID,
@@ -586,7 +578,7 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			Conversation:        conversation,
 			ActiveTargetContext: session.ActiveTargetContext,
 			PendingAction:       session.PendingAction,
-			ProviderState:       session.ProviderStateBlob,
+			ProviderState:       providerState,
 			CurrentTask:         r.currentExecutionContext(ctx, session),
 		}, r.tools.Definitions())
 		if err != nil {
@@ -604,57 +596,19 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			return err
 		}
 
-		session.ProviderStateBlob = cloneRaw(output.ProviderState)
-		switch {
-		case output.AssistantText != nil:
+		providerState = cloneRaw(output.ProviderState)
+		conversation = append(conversation, agentapi.CloneItems(output.Items)...)
+		if err := r.persistConversationState(ctx, session, conversation, providerState); err != nil {
+			return err
+		}
+
+		if call, ok := firstFunctionCall(output.Items); ok {
 			r.logInfo(ctx, "runtime llm returned assistant text",
 				"session_id", session.ID,
-				"done", output.Done,
-				"text_preview", previewText(*output.AssistantText, 240),
+				"tool_name", call.Name,
+				"tool_args_preview", previewText(call.Arguments, 320),
 			)
-			if !output.Streamed {
-				if err := r.publishAssistantStream(ctx, session.ID, *output.AssistantText); err != nil {
-					return err
-				}
-			}
-			row, err := r.appendAssistant(ctx, session.ID, *output.AssistantText)
-			if err != nil {
-				return err
-			}
-			if output.Done {
-				session.Status = domain.SessionStatusCompleted
-				if err := r.bumpSession(ctx, session); err != nil {
-					return err
-				}
-				if err := r.publishTimelineRow(ctx, *session, row); err != nil {
-					return err
-				}
-				return r.publishSessionState(ctx, *session)
-			}
-			session.Status = domain.SessionStatusIdle
-			if err := r.bumpSession(ctx, session); err != nil {
-				return err
-			}
-			if err := r.publishTimelineRow(ctx, *session, row); err != nil {
-				return err
-			}
-			if err := r.publishSessionState(ctx, *session); err != nil {
-				return err
-			}
-			conversation = append(conversation, ConversationItem{
-				Role:    "assistant",
-				Kind:    string(domain.ThreadMessageKindAssistantText),
-				Content: *output.AssistantText,
-			})
-			return nil
-
-		case output.ToolCall != nil:
-			r.logInfo(ctx, "runtime llm requested tool call",
-				"session_id", session.ID,
-				"tool_name", output.ToolCall.Name,
-				"tool_args_preview", previewText(string(output.ToolCall.Args), 320),
-			)
-			call, callRow, err := r.appendToolCall(ctx, session.ID, output.ToolCall)
+			callRecord, callRow, err := r.appendToolCall(ctx, session.ID, call)
 			if err != nil {
 				return err
 			}
@@ -662,19 +616,14 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 				return err
 			}
 
-			result, err := r.tools.Call(ctx, ToolCallInput{
-				SessionID:           session.ID,
-				ActiveTargetContext: session.ActiveTargetContext,
-				Name:                output.ToolCall.Name,
-				Args:                output.ToolCall.Args,
-			})
+			result, err := r.tools.Call(ctx, call)
 			if err != nil {
 				r.logError(ctx, "runtime tool call failed",
 					"session_id", session.ID,
-					"tool_name", output.ToolCall.Name,
+					"tool_name", call.Name,
 					"error", err,
 				)
-				resultRow, appendErr := r.appendToolResult(ctx, session.ID, call.ID, output.ToolCall.Name, domain.ToolResultStatusFailed, err.Error(), nil)
+				resultRow, appendErr := r.appendToolResult(ctx, session.ID, callRecord.ID, call.CallID, call.Name, domain.ToolResultStatusFailed, err.Error(), nil)
 				if appendErr != nil {
 					return errors.Join(err, appendErr)
 				}
@@ -691,7 +640,7 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 				return err
 			}
 
-			resultRow, err := r.appendToolResult(ctx, session.ID, call.ID, output.ToolCall.Name, domain.ToolResultStatusSucceeded, result.MetaText, result.ToolMessage)
+			resultRow, err := r.appendToolResult(ctx, session.ID, callRecord.ID, call.CallID, call.Name, domain.ToolResultStatusSucceeded, result.MetaText, result.ToolMessage)
 			if err != nil {
 				return err
 			}
@@ -700,12 +649,18 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			}
 			r.logInfo(ctx, "runtime tool call completed",
 				"session_id", session.ID,
-				"tool_name", output.ToolCall.Name,
+				"tool_name", call.Name,
 				"wait_for_user", result.WaitForUser,
 				"async_execution_started", result.AsyncExecutionStarted,
 				"task_id", result.TaskID,
 				"meta_preview", previewText(result.MetaText, 240),
 			)
+			if result.OutputItem.CallID != "" {
+				conversation = append(conversation, result.OutputItem)
+				if err := r.persistConversationState(ctx, session, conversation, providerState); err != nil {
+					return err
+				}
+			}
 			if err := r.consumeToolResult(ctx, session, result); err != nil {
 				return err
 			}
@@ -713,17 +668,40 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			if result.WaitForUser || result.AsyncExecutionStarted {
 				return nil
 			}
-
-			conversation = append(conversation, ConversationItem{
-				Role:      "tool",
-				Kind:      string(domain.TimelineRowKindToolResultMeta),
-				Content:   result.MetaText,
-				ToolName:  output.ToolCall.Name,
-				ToolInput: cloneRaw(result.ToolMessage),
-			})
 			continue
+		}
 
-		default:
+		text := outputMessageText(output.Items)
+		if text != "" {
+			r.logInfo(ctx, "runtime llm returned assistant text",
+				"session_id", session.ID,
+				"done", output.Done,
+				"text_preview", previewText(text, 240),
+			)
+			if !output.Streamed {
+				if err := r.publishAssistantStream(ctx, session.ID, text); err != nil {
+					return err
+				}
+			}
+			row, err := r.appendAssistant(ctx, session.ID, text)
+			if err != nil {
+				return err
+			}
+			if output.Done {
+				session.Status = domain.SessionStatusCompleted
+			} else {
+				session.Status = domain.SessionStatusIdle
+			}
+			if err := r.bumpSession(ctx, session); err != nil {
+				return err
+			}
+			if err := r.publishTimelineRow(ctx, *session, row); err != nil {
+				return err
+			}
+			return r.publishSessionState(ctx, *session)
+		}
+
+		if len(output.Items) == 0 {
 			r.logError(ctx, "runtime llm returned empty output",
 				"session_id", session.ID,
 			)
@@ -736,6 +714,12 @@ func (r *Runtime) continueLoop(ctx context.Context, session *domain.Session, con
 			}
 			return ErrEmptyModelOutput
 		}
+
+		session.Status = domain.SessionStatusIdle
+		if err := r.bumpSession(ctx, session); err != nil {
+			return err
+		}
+		return r.publishSessionState(ctx, *session)
 	}
 }
 
@@ -778,32 +762,19 @@ func chunkText(text string, size int) []string {
 	return chunks
 }
 
-func (r *Runtime) rebuildConversation(ctx context.Context, sessionID string) ([]ConversationItem, error) {
+func (r *Runtime) rebuildConversation(ctx context.Context, sessionID string) ([]agentapi.Item, error) {
 	messages, err := r.repos.Messages.ListBySession(ctx, sessionID, domain.CursorPage{})
 	if err != nil {
 		return nil, err
 	}
-	results, err := r.repos.ToolResults.ListBySession(ctx, sessionID, domain.CursorPage{})
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]ConversationItem, 0, len(messages)+len(results))
+	items := make([]agentapi.Item, 0, len(messages))
 	for _, msg := range messages {
-		items = append(items, ConversationItem{
-			Role:    string(msg.Role),
-			Kind:    string(msg.Kind),
-			Content: msg.Content,
-		})
-	}
-	for _, result := range results {
-		items = append(items, ConversationItem{
-			Role:      "tool",
-			Kind:      string(domain.TimelineRowKindToolResultMeta),
-			Content:   result.Text,
-			ToolName:  result.ToolName,
-			ToolInput: cloneRaw(result.Payload),
-		})
+		switch msg.Role {
+		case domain.MessageRoleUser:
+			items = append(items, agentapi.UserMessage(msg.Content))
+		case domain.MessageRoleAssistant:
+			items = append(items, agentapi.AssistantMessage(msg.Content))
+		}
 	}
 	return items, nil
 }
@@ -830,14 +801,16 @@ func (r *Runtime) appendAssistant(ctx context.Context, sessionID string, text st
 	return row, r.repos.Timelines.Append(ctx, row)
 }
 
-func (r *Runtime) appendToolCall(ctx context.Context, sessionID string, invocation *ToolInvocation) (domain.ToolCall, domain.TimelineRow, error) {
+func (r *Runtime) appendToolCall(ctx context.Context, sessionID string, item agentapi.Item) (domain.ToolCall, domain.TimelineRow, error) {
 	now := r.clock.Now()
-	argsPreview := string(invocation.Args)
+	argsPreview := item.Arguments
+	arguments := agentapi.ArgumentsJSON(item)
 	call := domain.ToolCall{
 		ID:          r.ids.NewID("toolcall"),
 		SessionID:   sessionID,
-		ToolName:    invocation.Name,
-		Arguments:   cloneRaw(invocation.Args),
+		ToolName:    item.Name,
+		CallID:      optionalStringPtr(item.CallID),
+		Arguments:   cloneRaw(arguments),
 		ArgsPreview: &argsPreview,
 		Source:      domain.ToolCallSourceAgentLoop,
 		CreatedAt:   now,
@@ -850,7 +823,7 @@ func (r *Runtime) appendToolCall(ctx context.Context, sessionID string, invocati
 		SessionID:   sessionID,
 		Kind:        domain.TimelineRowKindToolCallMeta,
 		CreatedAt:   now,
-		ToolName:    invocation.Name,
+		ToolName:    item.Name,
 		ArgsPreview: &argsPreview,
 		Source:      domain.TimelineRowSourceAgentLoop,
 	}
@@ -860,17 +833,18 @@ func (r *Runtime) appendToolCall(ctx context.Context, sessionID string, invocati
 	return call, row, nil
 }
 
-func (r *Runtime) appendToolResult(ctx context.Context, sessionID, toolCallID, toolName string, status domain.ToolResultStatus, text string, payload json.RawMessage) (domain.TimelineRow, error) {
-	return r.appendToolResultWithSource(ctx, sessionID, nil, &toolCallID, toolName, status, text, domain.TimelineRowSourceAgentLoop, payload)
+func (r *Runtime) appendToolResult(ctx context.Context, sessionID, toolCallID string, callID string, toolName string, status domain.ToolResultStatus, text string, payload json.RawMessage) (domain.TimelineRow, error) {
+	return r.appendToolResultWithSource(ctx, sessionID, nil, &toolCallID, strPtr(callID), toolName, status, text, domain.TimelineRowSourceAgentLoop, payload)
 }
 
-func (r *Runtime) appendToolResultWithSource(ctx context.Context, sessionID string, taskID *string, toolCallID *string, toolName string, status domain.ToolResultStatus, text string, source domain.TimelineRowSource, payload json.RawMessage) (domain.TimelineRow, error) {
+func (r *Runtime) appendToolResultWithSource(ctx context.Context, sessionID string, taskID *string, toolCallID *string, callID *string, toolName string, status domain.ToolResultStatus, text string, source domain.TimelineRowSource, payload json.RawMessage) (domain.TimelineRow, error) {
 	now := r.clock.Now()
 	if err := r.repos.ToolResults.Append(ctx, domain.ToolResult{
 		ID:         r.ids.NewID("toolresult"),
 		SessionID:  sessionID,
 		TaskID:     taskID,
 		ToolCallID: toolCallID,
+		CallID:     cloneStringPtr(callID),
 		ToolName:   toolName,
 		Status:     status,
 		Text:       text,
@@ -1310,6 +1284,22 @@ func approvalRejectedText(reason *string) string {
 }
 
 func strPtr(v string) *string { return &v }
+
+func optionalStringPtr(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+func cloneStringPtr(in *string) *string {
+	if in == nil {
+		return nil
+	}
+	value := *in
+	return &value
+}
 
 func (r *Runtime) publishSessionState(ctx context.Context, session domain.Session) error {
 	if r.events == nil {

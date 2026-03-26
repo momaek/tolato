@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	"github.com/momaek/tolato/internal/server/domain"
 )
@@ -19,8 +20,8 @@ func TestRegistryDefinitions(t *testing.T) {
 		t.Fatalf("len(defs) = %d, want %d", len(defs), len(want))
 	}
 	for i, def := range defs {
-		if def.Name != want[i] {
-			t.Fatalf("defs[%d].Name = %q, want %q", i, def.Name, want[i])
+		if def.Function.Name != want[i] {
+			t.Fatalf("defs[%d].Function.Name = %q, want %q", i, def.Function.Name, want[i])
 		}
 	}
 }
@@ -29,7 +30,7 @@ func TestListNodesTool(t *testing.T) {
 	registry := NewRegistry(fakeNodeSource{nodes: sampleNodes()})
 
 	raw := mustJSON(t, ListNodesInput{Region: "asia", Tag: "prod", Busy: boolPtr(true)})
-	result, err := registry.Call(context.Background(), "list_nodes", raw)
+	result, err := registry.Call(context.Background(), functionCall("list_nodes", raw))
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -48,9 +49,9 @@ func TestListNodesTool(t *testing.T) {
 func TestResolveTargetNodesTool(t *testing.T) {
 	registry := NewRegistry(fakeNodeSource{nodes: sampleNodes()})
 
-	result, err := registry.Call(context.Background(), "resolve_target_nodes", mustJSON(t, ResolveTargetNodesInput{
+	result, err := registry.Call(context.Background(), functionCall("resolve_target_nodes", mustJSON(t, ResolveTargetNodesInput{
 		Query: "tokyo",
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -80,10 +81,10 @@ func TestRequestTargetConfirmationTool(t *testing.T) {
 		Source:       domain.TargetSourceAssistantResolved,
 	}
 
-	result, err := tool.Call(context.Background(), mustJSON(t, RequestTargetConfirmationInput{
+	result, err := tool.Call(context.Background(), functionCall("request_target_confirmation", mustJSON(t, RequestTargetConfirmationInput{
 		TargetContext: ctxValue,
 		Message:       "confirm the selected nodes",
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -101,7 +102,7 @@ func TestRequestTargetConfirmationTool(t *testing.T) {
 func TestProposePlanTool(t *testing.T) {
 	registry := NewRegistry(fakeNodeSource{nodes: sampleNodes()})
 
-	result, err := registry.Call(context.Background(), "propose_plan", mustJSON(t, ProposePlanInput{
+	result, err := registry.Call(context.Background(), functionCall("propose_plan", mustJSON(t, ProposePlanInput{
 		InputText: "restart nginx on jp-tokyo-01",
 		TargetContext: domain.ActiveTargetContext{
 			Status:       domain.TargetStatusPendingConfirmation,
@@ -110,7 +111,7 @@ func TestProposePlanTool(t *testing.T) {
 			DisplayLabel: "jp-tokyo-01",
 			Source:       domain.TargetSourceAssistantResolved,
 		},
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -132,11 +133,11 @@ func TestProposePlanTool(t *testing.T) {
 func TestRequestApprovalTool(t *testing.T) {
 	registry := NewRegistry(fakeNodeSource{nodes: sampleNodes()})
 
-	result, err := registry.Call(context.Background(), "request_approval", mustJSON(t, RequestApprovalInput{
+	result, err := registry.Call(context.Background(), functionCall("request_approval", mustJSON(t, RequestApprovalInput{
 		TaskID:    "task-7",
 		RiskLevel: domain.RiskLevelHigh,
 		Reason:    "restart production nginx",
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -172,7 +173,7 @@ func TestExecOnNodesTool(t *testing.T) {
 	}
 	registry := NewRegistry(fakeNodeSource{nodes: sampleNodes()}, WithExecutionStarter(starter))
 
-	result, err := registry.Call(context.Background(), "exec_on_nodes", mustJSON(t, ExecOnNodesInput{
+	result, err := registry.Call(context.Background(), functionCall("exec_on_nodes", mustJSON(t, ExecOnNodesInput{
 		SessionID: "sess-1",
 		InputText: "run diagnostics",
 		Command:   "uptime",
@@ -184,7 +185,7 @@ func TestExecOnNodesTool(t *testing.T) {
 			Source:       domain.TargetSourceUserExplicit,
 		},
 		RiskLevel: domain.RiskLevelLow,
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -208,7 +209,7 @@ func TestInferRiskForbidden(t *testing.T) {
 func TestSummarizeExecutionTool(t *testing.T) {
 	registry := NewRegistry(fakeNodeSource{nodes: sampleNodes()})
 
-	result, err := registry.Call(context.Background(), "summarize_execution", mustJSON(t, SummarizeExecutionInput{
+	result, err := registry.Call(context.Background(), functionCall("summarize_execution", mustJSON(t, SummarizeExecutionInput{
 		TaskID:      "task-10",
 		Status:      domain.TaskStatusPartialFailed,
 		TargetLabel: "tokyo batch",
@@ -217,7 +218,7 @@ func TestSummarizeExecutionTool(t *testing.T) {
 			Success: 2,
 			Failed:  1,
 		},
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -261,6 +262,15 @@ func (f *fakeExecutionStarter) RecordChunk(ctx context.Context, input appexecuti
 	_ = ctx
 	_ = input
 	return nil
+}
+
+func functionCall(name string, raw json.RawMessage) agentapi.Item {
+	return agentapi.Item{
+		Type:      "function_call",
+		Name:      name,
+		Arguments: string(raw),
+		CallID:    "call_" + name,
+	}
 }
 
 func (f *fakeExecutionStarter) FinishExecution(ctx context.Context, input appexecution.FinishExecutionInput) error {

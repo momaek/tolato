@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	"github.com/momaek/tolato/internal/server/domain"
 )
@@ -22,21 +23,18 @@ func NewListNodesTool(source NodeSource) Tool {
 
 func (t listNodesTool) Name() string { return "list_nodes" }
 
-func (t listNodesTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Name:        t.Name(),
-		Description: "List node summaries for search, filtering, and target resolution.",
-	}
+func (t listNodesTool) Definition() agentapi.ToolSpec {
+	return listNodesToolSpec()
 }
 
-func (t listNodesTool) Call(ctx context.Context, input json.RawMessage) (ToolResult, error) {
+func (t listNodesTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
 	if t.source == nil {
 		return ToolResult{}, fmt.Errorf("node source is not configured")
 	}
 
 	var req ListNodesInput
-	if len(input) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
+	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
+		if err := json.Unmarshal(args, &req); err != nil {
 			return ToolResult{}, err
 		}
 	}
@@ -56,7 +54,9 @@ func (t listNodesTool) Call(ctx context.Context, input json.RawMessage) (ToolRes
 		return ToolResult{}, err
 	}
 
+	output := string(payload)
 	return ToolResult{
+		OutputItem:  agentapi.FunctionCallOutput(call.CallID, output),
 		MetaText:    fmt.Sprintf("listed %d nodes", len(nodes)),
 		ToolMessage: payload,
 	}, nil
@@ -72,21 +72,18 @@ func NewResolveTargetNodesTool(source NodeSource) Tool {
 
 func (t resolveTargetNodesTool) Name() string { return "resolve_target_nodes" }
 
-func (t resolveTargetNodesTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Name:        t.Name(),
-		Description: "Resolve a natural-language target description into candidate nodes and a tentative target context.",
-	}
+func (t resolveTargetNodesTool) Definition() agentapi.ToolSpec {
+	return resolveTargetNodesToolSpec()
 }
 
-func (t resolveTargetNodesTool) Call(ctx context.Context, input json.RawMessage) (ToolResult, error) {
+func (t resolveTargetNodesTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
 	if t.source == nil {
 		return ToolResult{}, fmt.Errorf("node source is not configured")
 	}
 
 	var req ResolveTargetNodesInput
-	if len(input) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
+	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
+		if err := json.Unmarshal(args, &req); err != nil {
 			return ToolResult{}, err
 		}
 	}
@@ -102,7 +99,9 @@ func (t resolveTargetNodesTool) Call(ctx context.Context, input json.RawMessage)
 		return ToolResult{}, err
 	}
 
+	output := string(payload)
 	return ToolResult{
+		OutputItem:  agentapi.FunctionCallOutput(call.CallID, output),
 		MetaText:    fmt.Sprintf("resolved %d target candidate(s)", len(resolved.Candidates)),
 		ToolMessage: payload,
 	}, nil
@@ -116,17 +115,14 @@ func NewRequestTargetConfirmationTool() Tool {
 
 func (t requestTargetConfirmationTool) Name() string { return "request_target_confirmation" }
 
-func (t requestTargetConfirmationTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Name:        t.Name(),
-		Description: "Pause the loop and ask the user to confirm the resolved target context.",
-	}
+func (t requestTargetConfirmationTool) Definition() agentapi.ToolSpec {
+	return requestTargetConfirmationToolSpec()
 }
 
-func (t requestTargetConfirmationTool) Call(ctx context.Context, input json.RawMessage) (ToolResult, error) {
+func (t requestTargetConfirmationTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
 	var req RequestTargetConfirmationInput
-	if len(input) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
+	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
+		if err := json.Unmarshal(args, &req); err != nil {
 			return ToolResult{}, err
 		}
 	}
@@ -144,7 +140,9 @@ func (t requestTargetConfirmationTool) Call(ctx context.Context, input json.RawM
 		return ToolResult{}, err
 	}
 
+	output := string(payload)
 	return ToolResult{
+		OutputItem:           agentapi.FunctionCallOutput(call.CallID, output),
 		MetaText:             confirmationMessage(req.TargetContext),
 		ToolMessage:          payload,
 		WaitForUser:          true,
@@ -161,17 +159,14 @@ func NewProposePlanTool() Tool {
 
 func (t proposePlanTool) Name() string { return "propose_plan" }
 
-func (t proposePlanTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Name:        t.Name(),
-		Description: "Propose a compact plan for the selected target nodes and task text.",
-	}
+func (t proposePlanTool) Definition() agentapi.ToolSpec {
+	return proposePlanToolSpec()
 }
 
-func (t proposePlanTool) Call(ctx context.Context, input json.RawMessage) (ToolResult, error) {
+func (t proposePlanTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
 	var req ProposePlanInput
-	if len(input) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
+	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
+		if err := json.Unmarshal(args, &req); err != nil {
 			return ToolResult{}, err
 		}
 	}
@@ -182,7 +177,9 @@ func (t proposePlanTool) Call(ctx context.Context, input json.RawMessage) (ToolR
 		return ToolResult{}, err
 	}
 
+	output := string(payload)
 	return ToolResult{
+		OutputItem:    agentapi.FunctionCallOutput(call.CallID, output),
 		MetaText:      plan.Summary,
 		ToolMessage:   payload,
 		AppendPlanRow: true,
@@ -197,17 +194,14 @@ func NewRequestApprovalTool() Tool {
 
 func (t requestApprovalTool) Name() string { return "request_approval" }
 
-func (t requestApprovalTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Name:        t.Name(),
-		Description: "Pause the loop and request explicit user approval for a planned task.",
-	}
+func (t requestApprovalTool) Definition() agentapi.ToolSpec {
+	return requestApprovalToolSpec()
 }
 
-func (t requestApprovalTool) Call(ctx context.Context, input json.RawMessage) (ToolResult, error) {
+func (t requestApprovalTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
 	var req RequestApprovalInput
-	if len(input) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
+	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
+		if err := json.Unmarshal(args, &req); err != nil {
 			return ToolResult{}, err
 		}
 	}
@@ -233,7 +227,9 @@ func (t requestApprovalTool) Call(ctx context.Context, input json.RawMessage) (T
 		return ToolResult{}, err
 	}
 
+	output := string(payload)
 	return ToolResult{
+		OutputItem:           agentapi.FunctionCallOutput(call.CallID, output),
 		MetaText:             message,
 		ToolMessage:          payload,
 		WaitForUser:          requiresApproval,
@@ -293,21 +289,18 @@ func NewExecOnNodesTool(execution ExecutionStarter) Tool {
 
 func (t execOnNodesTool) Name() string { return "exec_on_nodes" }
 
-func (t execOnNodesTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Name:        t.Name(),
-		Description: "Create task and execution records for node dispatch and pause the loop for async execution.",
-	}
+func (t execOnNodesTool) Definition() agentapi.ToolSpec {
+	return execOnNodesToolSpec()
 }
 
-func (t execOnNodesTool) Call(ctx context.Context, input json.RawMessage) (ToolResult, error) {
+func (t execOnNodesTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
 	if t.execution == nil {
 		return ToolResult{}, fmt.Errorf("execution starter is not configured")
 	}
 
 	var req ExecOnNodesInput
-	if len(input) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
+	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
+		if err := json.Unmarshal(args, &req); err != nil {
 			return ToolResult{}, err
 		}
 	}
@@ -348,7 +341,9 @@ func (t execOnNodesTool) Call(ctx context.Context, input json.RawMessage) (ToolR
 		return ToolResult{}, err
 	}
 
+	output := string(payload)
 	return ToolResult{
+		OutputItem:            agentapi.FunctionCallOutput(call.CallID, output),
 		MetaText:              message,
 		ToolMessage:           payload,
 		AsyncExecutionStarted: true,
@@ -366,19 +361,16 @@ func NewSummarizeExecutionTool() Tool {
 
 func (t summarizeExecutionTool) Name() string { return "summarize_execution" }
 
-func (t summarizeExecutionTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Name:        t.Name(),
-		Description: "Summarize the completed execution aggregate into a final summary row.",
-	}
+func (t summarizeExecutionTool) Definition() agentapi.ToolSpec {
+	return summarizeExecutionToolSpec()
 }
 
-func (t summarizeExecutionTool) Call(ctx context.Context, input json.RawMessage) (ToolResult, error) {
+func (t summarizeExecutionTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
 	_ = ctx
 
 	var req SummarizeExecutionInput
-	if len(input) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
+	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
+		if err := json.Unmarshal(args, &req); err != nil {
 			return ToolResult{}, err
 		}
 	}
@@ -397,7 +389,9 @@ func (t summarizeExecutionTool) Call(ctx context.Context, input json.RawMessage)
 		return ToolResult{}, err
 	}
 
+	output := string(payload)
 	return ToolResult{
+		OutputItem:       agentapi.FunctionCallOutput(call.CallID, output),
 		MetaText:         summary,
 		ToolMessage:      payload,
 		TaskID:           req.TaskID,

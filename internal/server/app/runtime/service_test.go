@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	"github.com/momaek/tolato/internal/server/domain"
 	"github.com/momaek/tolato/internal/server/infra"
 	infralock "github.com/momaek/tolato/internal/server/infra/lock"
@@ -32,7 +33,7 @@ func TestHandleUserMessageAssistantText(t *testing.T) {
 	}
 
 	llm := &fakeLLM{
-		outputs: []ModelTurnOutput{{AssistantText: strPtr("hello"), Done: true}},
+		outputs: []ModelTurnOutput{assistantTurn("hello", true, false)},
 	}
 	rt := NewService(Repositories{
 		Sessions:    store.Sessions,
@@ -100,7 +101,7 @@ func TestHandleUserMessageAssistantTextSkipsSyntheticStreamWhenAlreadyStreamed(t
 	}
 
 	llm := &fakeLLM{
-		outputs: []ModelTurnOutput{{AssistantText: strPtr("hello"), Done: true, Streamed: true}},
+		outputs: []ModelTurnOutput{assistantTurn("hello", true, true)},
 	}
 	rt := NewService(Repositories{
 		Sessions:    store.Sessions,
@@ -146,7 +147,7 @@ func TestHandleUserMessageToolWaitsForTargetConfirmation(t *testing.T) {
 	}
 	payload := mustRaw(t, map[string]any{"targetContext": targetCtx})
 	llm := &fakeLLM{
-		outputs: []ModelTurnOutput{{ToolCall: &ToolInvocation{Name: "request_target_confirmation", Args: mustRaw(t, map[string]string{"text": "tokyo"})}}},
+		outputs: []ModelTurnOutput{toolTurn("request_target_confirmation", map[string]string{"text": "tokyo"})},
 	}
 	rt := NewService(Repositories{
 		Sessions:    store.Sessions,
@@ -237,7 +238,7 @@ func TestResumeAfterTargetConfirmationContinuesLoop(t *testing.T) {
 	}
 
 	llm := &fakeLLM{
-		outputs: []ModelTurnOutput{{AssistantText: strPtr("Proceeding with jp-tokyo-01"), Done: true}},
+		outputs: []ModelTurnOutput{assistantTurn("Proceeding with jp-tokyo-01", true, false)},
 	}
 	rt := NewService(Repositories{
 		Sessions:    store.Sessions,
@@ -395,7 +396,7 @@ func TestHandleUserMessageToolWaitsForApproval(t *testing.T) {
 	}
 
 	llm := &fakeLLM{
-		outputs: []ModelTurnOutput{{ToolCall: &ToolInvocation{Name: "request_approval", Args: mustRaw(t, map[string]any{"taskId": taskID})}}},
+		outputs: []ModelTurnOutput{toolTurn("request_approval", map[string]any{"taskId": taskID})},
 	}
 	rt := NewService(Repositories{
 		Sessions:    store.Sessions,
@@ -478,7 +479,7 @@ func TestResumeAfterApprovalApproveContinuesLoop(t *testing.T) {
 	}
 
 	llm := &fakeLLM{
-		outputs: []ModelTurnOutput{{AssistantText: strPtr("Approved. Proceeding."), Done: true}},
+		outputs: []ModelTurnOutput{assistantTurn("Approved. Proceeding.", true, false)},
 	}
 	rt := NewService(Repositories{
 		Sessions:    store.Sessions,
@@ -645,7 +646,7 @@ func TestHandleUserMessageToolStartsAsyncExecution(t *testing.T) {
 	}
 
 	llm := &fakeLLM{
-		outputs: []ModelTurnOutput{{ToolCall: &ToolInvocation{Name: "exec_on_nodes", Args: mustRaw(t, map[string]any{"inputText": "run diagnostics"})}}},
+		outputs: []ModelTurnOutput{toolTurn("exec_on_nodes", map[string]any{"inputText": "run diagnostics"})},
 	}
 	rt := NewService(Repositories{
 		Sessions:    store.Sessions,
@@ -708,8 +709,8 @@ func TestHandleUserMessageToolThenAssistant(t *testing.T) {
 
 	llm := &fakeLLM{
 		outputs: []ModelTurnOutput{
-			{ToolCall: &ToolInvocation{Name: "list_nodes", Args: mustRaw(t, map[string]string{"region": "asia"})}},
-			{AssistantText: strPtr("Found one node in asia"), Done: true},
+			toolTurn("list_nodes", map[string]string{"region": "asia"}),
+			assistantTurn("Found one node in asia", true, false),
 		},
 	}
 	rt := NewService(Repositories{
@@ -822,7 +823,7 @@ func TestHandleUserMessageDeduplicatesClientMessageID(t *testing.T) {
 	}
 
 	llm := &fakeLLM{
-		outputs: []ModelTurnOutput{{AssistantText: strPtr("done"), Done: true}},
+		outputs: []ModelTurnOutput{assistantTurn("done", true, false)},
 	}
 	rt := NewService(Repositories{
 		Sessions:    store.Sessions,
@@ -903,8 +904,8 @@ func TestHandleExecutionFinishedContinuesLoopWithSummary(t *testing.T) {
 
 	llm := &fakeLLM{
 		outputs: []ModelTurnOutput{
-			{ToolCall: &ToolInvocation{Name: "summarize_execution", Args: mustRaw(t, map[string]any{"taskId": taskID, "status": domain.TaskStatusPartialFailed})}},
-			{AssistantText: strPtr("Execution completed with one failure."), Done: true},
+			toolTurn("summarize_execution", map[string]any{"taskId": taskID, "status": domain.TaskStatusPartialFailed}),
+			assistantTurn("Execution completed with one failure.", true, false),
 		},
 	}
 	rt := NewService(Repositories{
@@ -958,7 +959,7 @@ type fakeLLM struct {
 	index   int
 }
 
-func (f *fakeLLM) RunTurn(ctx context.Context, input ModelTurnInput, tools []ToolDefinition) (ModelTurnOutput, error) {
+func (f *fakeLLM) RunTurn(ctx context.Context, input ModelTurnInput, tools []agentapi.ToolSpec) (ModelTurnOutput, error) {
 	_ = ctx
 	_ = input
 	_ = tools
@@ -975,17 +976,58 @@ type fakeTools struct {
 	err    error
 }
 
-func (f fakeTools) Definitions() []ToolDefinition {
-	return []ToolDefinition{
-		{Name: "request_target_confirmation", Description: "Request target confirmation"},
-		{Name: "summarize_execution", Description: "Summarize completed execution"},
+func (f fakeTools) Definitions() []agentapi.ToolSpec {
+	return []agentapi.ToolSpec{
+		agentapi.NewFunctionTool("request_target_confirmation", "Request target confirmation", map[string]any{}),
+		agentapi.NewFunctionTool("summarize_execution", "Summarize completed execution", map[string]any{}),
 	}
 }
 
-func (f fakeTools) Call(ctx context.Context, input ToolCallInput) (ToolResult, error) {
+func (f fakeTools) Call(ctx context.Context, input agentapi.Item) (ToolResult, error) {
 	_ = ctx
-	_ = input
-	return f.result, f.err
+	if f.err != nil {
+		return ToolResult{}, f.err
+	}
+	out := f.result
+	if out.OutputItem.CallID == "" {
+		out.OutputItem = agentapi.FunctionCallOutput(input.CallID, string(out.ToolMessage))
+	}
+	return out, nil
+}
+
+func assistantTurn(text string, done bool, streamed bool) ModelTurnOutput {
+	raw, err := json.Marshal([]agentapi.ContentPart{{
+		Type: "output_text",
+		Text: text,
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return ModelTurnOutput{
+		Items: []agentapi.Item{{
+			Type:    "message",
+			Role:    "assistant",
+			Content: raw,
+		}},
+		Done:     done,
+		Streamed: streamed,
+	}
+}
+
+func toolTurn(name string, args any) ModelTurnOutput {
+	raw, err := json.Marshal(args)
+	if err != nil {
+		panic(err)
+	}
+	return ModelTurnOutput{
+		Items: []agentapi.Item{{
+			Type:      "function_call",
+			Name:      name,
+			Arguments: string(raw),
+			CallID:    "call_" + name,
+		}},
+		Done: false,
+	}
 }
 
 type stubIDGen struct {

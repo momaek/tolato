@@ -238,6 +238,7 @@ type ToolCall struct {
 	SessionID   string
 	TaskID      *string
 	MessageID   *string
+	CallID      *string
 	ToolName    string
 	Arguments   json.RawMessage
 	ArgsPreview *string
@@ -250,6 +251,7 @@ type ToolResult struct {
 	SessionID  string
 	TaskID     *string
 	ToolCallID *string
+	CallID     *string
 	ToolName   string
 	Status     ToolResultStatus
 	Text       string

@@ -309,6 +309,9 @@ func cloneToolCall(in domain.ToolCall) domain.ToolCall {
 	if in.MessageID != nil {
 		out.MessageID = stringPtr(*in.MessageID)
 	}
+	if in.CallID != nil {
+		out.CallID = stringPtr(*in.CallID)
+	}
 	if in.ArgsPreview != nil {
 		out.ArgsPreview = stringPtr(*in.ArgsPreview)
 	}
@@ -323,6 +326,9 @@ func cloneToolResult(in domain.ToolResult) domain.ToolResult {
 	}
 	if in.ToolCallID != nil {
 		out.ToolCallID = stringPtr(*in.ToolCallID)
+	}
+	if in.CallID != nil {
+		out.CallID = stringPtr(*in.CallID)
 	}
 	return out
 }

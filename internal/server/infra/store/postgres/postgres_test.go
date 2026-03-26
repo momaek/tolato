@@ -141,15 +141,15 @@ func TestToolResultRepositoryListBySession(t *testing.T) {
 
 	base := time.Date(2026, 3, 22, 9, 30, 0, 0, time.UTC)
 	rows := sqlmock.NewRows([]string{
-		"id", "session_id", "task_id", "tool_call_id", "tool_name", "status", "text", "source", "payload", "created_at",
+		"id", "session_id", "task_id", "tool_call_id", "call_id", "tool_name", "status", "text", "source", "payload", "created_at",
 	}).AddRow(
-		"res-1", "sess-1", "task-1", "call-1", "list_nodes", "succeeded", "ok", "agent_loop", `{"count":3}`, base,
+		"res-1", "sess-1", "task-1", "call-1", "tool-call-1", "list_nodes", "succeeded", "ok", "agent_loop", `{"count":3}`, base,
 	).AddRow(
-		"res-2", "sess-1", nil, nil, "approval", "succeeded", "approved", "user_action", `{"approved":true}`, base.Add(time.Second),
+		"res-2", "sess-1", nil, nil, nil, "approval", "succeeded", "approved", "user_action", `{"approved":true}`, base.Add(time.Second),
 	)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT id, session_id, task_id, tool_call_id, tool_name, status, text, source, payload, created_at
+SELECT id, session_id, task_id, tool_call_id, call_id, tool_name, status, text, source, payload, created_at
 FROM tool_results
 WHERE session_id = $1
 ORDER BY created_at ASC, id ASC

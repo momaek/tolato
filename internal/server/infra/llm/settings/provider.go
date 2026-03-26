@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	"github.com/momaek/tolato/internal/server/app/runtime"
 	"github.com/momaek/tolato/internal/server/domain"
 	devllm "github.com/momaek/tolato/internal/server/infra/llm/devloop"
@@ -31,7 +32,7 @@ type modelConfig struct {
 	ApprovalMode string  `json:"approvalMode"`
 }
 
-func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []runtime.ToolDefinition) (runtime.ModelTurnOutput, error) {
+func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []agentapi.ToolSpec) (runtime.ModelTurnOutput, error) {
 	cfg, err := p.loadConfig(ctx)
 	if err != nil {
 		p.logError(ctx, "llm settings provider failed to load config", "error", err)
@@ -79,8 +80,8 @@ func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, to
 		"model", strings.TrimSpace(cfg.Model),
 		"session_id", input.SessionID,
 		"done", out.Done,
-		"assistant_text", out.AssistantText != nil,
-		"tool_name", toolName(out.ToolCall),
+		"output_items", len(out.Items),
+		"tool_name", toolName(out.Items),
 	)
 	return out, nil
 }
@@ -129,9 +130,11 @@ func (p *Provider) logError(ctx context.Context, msg string, args ...any) {
 	}
 }
 
-func toolName(call *runtime.ToolInvocation) string {
-	if call == nil {
-		return ""
+func toolName(items []agentapi.Item) string {
+	for _, item := range items {
+		if strings.TrimSpace(item.Type) == "function_call" {
+			return strings.TrimSpace(item.Name)
+		}
 	}
-	return call.Name
+	return ""
 }

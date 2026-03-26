@@ -177,6 +177,10 @@ func cloneToolCall(in domain.ToolCall) domain.ToolCall {
 		v := *in.MessageID
 		out.MessageID = &v
 	}
+	if in.CallID != nil {
+		v := *in.CallID
+		out.CallID = &v
+	}
 	if in.ArgsPreview != nil {
 		v := *in.ArgsPreview
 		out.ArgsPreview = &v
@@ -194,6 +198,10 @@ func cloneToolResult(in domain.ToolResult) domain.ToolResult {
 	if in.ToolCallID != nil {
 		v := *in.ToolCallID
 		out.ToolCallID = &v
+	}
+	if in.CallID != nil {
+		v := *in.CallID
+		out.CallID = &v
 	}
 	return out
 }

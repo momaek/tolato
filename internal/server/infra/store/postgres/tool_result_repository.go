@@ -18,16 +18,16 @@ func NewToolResultRepository(q Queryer) domain.ToolResultRepository {
 
 func (r *toolResultRepository) Append(ctx context.Context, result domain.ToolResult) error {
 	_, err := r.q.ExecContext(ctx, `
-INSERT INTO tool_results (id, session_id, task_id, tool_call_id, tool_name, status, text, source, payload, created_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-`, result.ID, result.SessionID, nullableString(result.TaskID), nullableString(result.ToolCallID), result.ToolName,
+INSERT INTO tool_results (id, session_id, task_id, tool_call_id, call_id, tool_name, status, text, source, payload, created_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+`, result.ID, result.SessionID, nullableString(result.TaskID), nullableString(result.ToolCallID), nullableString(result.CallID), result.ToolName,
 		string(result.Status), result.Text, string(result.Source), rawMessage(result.Payload), result.CreatedAt)
 	return err
 }
 
 func (r *toolResultRepository) ListBySession(ctx context.Context, sessionID string, page domain.CursorPage) ([]domain.ToolResult, error) {
 	rows, err := r.q.QueryContext(ctx, `
-SELECT id, session_id, task_id, tool_call_id, tool_name, status, text, source, payload, created_at
+SELECT id, session_id, task_id, tool_call_id, call_id, tool_name, status, text, source, payload, created_at
 FROM tool_results
 WHERE session_id = $1
 ORDER BY created_at ASC, id ASC
@@ -62,7 +62,7 @@ ORDER BY created_at ASC, id ASC
 
 func (r *toolResultRepository) ListByTask(ctx context.Context, taskID string) ([]domain.ToolResult, error) {
 	rows, err := r.q.QueryContext(ctx, `
-SELECT id, session_id, task_id, tool_call_id, tool_name, status, text, source, payload, created_at
+SELECT id, session_id, task_id, tool_call_id, call_id, tool_name, status, text, source, payload, created_at
 FROM tool_results
 WHERE task_id = $1
 ORDER BY created_at ASC, id ASC
@@ -91,10 +91,11 @@ func scanToolResult(rows Rows) (domain.ToolResult, error) {
 		id, sessionID, toolName, status, text, source string
 		taskID                                        sql.NullString
 		toolCallID                                    sql.NullString
+		callID                                        sql.NullString
 		payloadRaw                                    []byte
 		createdAt                                     time.Time
 	)
-	if err := rows.Scan(&id, &sessionID, &taskID, &toolCallID, &toolName, &status, &text, &source, &payloadRaw, &createdAt); err != nil {
+	if err := rows.Scan(&id, &sessionID, &taskID, &toolCallID, &callID, &toolName, &status, &text, &source, &payloadRaw, &createdAt); err != nil {
 		return domain.ToolResult{}, err
 	}
 	return domain.ToolResult{
@@ -102,6 +103,7 @@ func scanToolResult(rows Rows) (domain.ToolResult, error) {
 		SessionID:  sessionID,
 		TaskID:     nullStringPtr(taskID),
 		ToolCallID: nullStringPtr(toolCallID),
+		CallID:     nullStringPtr(callID),
 		ToolName:   toolName,
 		Status:     domain.ToolResultStatus(status),
 		Text:       text,

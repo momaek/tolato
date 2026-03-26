@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	"github.com/momaek/tolato/internal/server/app/runtime"
 )
 
@@ -18,7 +19,7 @@ func New(outputs []runtime.ModelTurnOutput) *Provider {
 	return &Provider{outputs: cloned}
 }
 
-func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []runtime.ToolDefinition) (runtime.ModelTurnOutput, error) {
+func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []agentapi.ToolSpec) (runtime.ModelTurnOutput, error) {
 	_ = ctx
 	_ = input
 	_ = tools

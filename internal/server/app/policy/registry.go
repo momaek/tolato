@@ -2,8 +2,9 @@ package policy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+
+	"github.com/momaek/tolato/internal/server/agentapi"
 )
 
 type NodeSource interface {
@@ -51,18 +52,18 @@ func NewRegistry(source NodeSource, options ...Option) *Registry {
 	return registry
 }
 
-func (r *Registry) Definitions() []ToolDefinition {
-	definitions := make([]ToolDefinition, 0, len(r.order))
+func (r *Registry) Definitions() []agentapi.ToolSpec {
+	definitions := make([]agentapi.ToolSpec, 0, len(r.order))
 	for _, name := range r.order {
 		definitions = append(definitions, r.tools[name].Definition())
 	}
 	return definitions
 }
 
-func (r *Registry) Call(ctx context.Context, name string, input json.RawMessage) (ToolResult, error) {
-	tool, ok := r.tools[name]
+func (r *Registry) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
+	tool, ok := r.tools[call.Name]
 	if !ok {
-		return ToolResult{}, fmt.Errorf("unknown tool %q", name)
+		return ToolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
-	return tool.Call(ctx, input)
+	return tool.Call(ctx, call)
 }

@@ -4,29 +4,26 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	"github.com/momaek/tolato/internal/server/domain"
 )
 
-type ToolDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
 type Tool interface {
 	Name() string
-	Definition() ToolDefinition
-	Call(ctx context.Context, input json.RawMessage) (ToolResult, error)
+	Definition() agentapi.ToolSpec
+	Call(ctx context.Context, call agentapi.Item) (ToolResult, error)
 }
 
 type ToolRegistry interface {
-	Definitions() []ToolDefinition
-	Call(ctx context.Context, name string, input json.RawMessage) (ToolResult, error)
+	Definitions() []agentapi.ToolSpec
+	Call(ctx context.Context, call agentapi.Item) (ToolResult, error)
 }
 
 type ExecutionStarter = appexecution.Service
 
 type ToolResult struct {
+	OutputItem            agentapi.Item
 	MetaText              string
 	ToolMessage           json.RawMessage
 	WaitForUser           bool

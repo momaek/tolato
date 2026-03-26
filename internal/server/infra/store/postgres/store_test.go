@@ -617,11 +617,12 @@ func toolCallFromArgs(args []any) domain.ToolCall {
 		SessionID:   asString(args[1]),
 		TaskID:      asStringPtr(args[2]),
 		MessageID:   asStringPtr(args[3]),
-		ToolName:    asString(args[4]),
-		Arguments:   asBytes(args[5]),
-		ArgsPreview: asStringPtr(args[6]),
-		Source:      domain.ToolCallSource(asString(args[7])),
-		CreatedAt:   asTime(args[8]),
+		CallID:      asStringPtr(args[4]),
+		ToolName:    asString(args[5]),
+		Arguments:   asBytes(args[6]),
+		ArgsPreview: asStringPtr(args[7]),
+		Source:      domain.ToolCallSource(asString(args[8])),
+		CreatedAt:   asTime(args[9]),
 	}
 }
 
@@ -631,12 +632,13 @@ func toolResultFromArgs(args []any) domain.ToolResult {
 		SessionID:  asString(args[1]),
 		TaskID:     asStringPtr(args[2]),
 		ToolCallID: asStringPtr(args[3]),
-		ToolName:   asString(args[4]),
-		Status:     domain.ToolResultStatus(asString(args[5])),
-		Text:       asString(args[6]),
-		Source:     domain.TimelineRowSource(asString(args[7])),
-		Payload:    asBytes(args[8]),
-		CreatedAt:  asTime(args[9]),
+		CallID:     asStringPtr(args[4]),
+		ToolName:   asString(args[5]),
+		Status:     domain.ToolResultStatus(asString(args[6])),
+		Text:       asString(args[7]),
+		Source:     domain.TimelineRowSource(asString(args[8])),
+		Payload:    asBytes(args[9]),
+		CreatedAt:  asTime(args[10]),
 	}
 }
 
@@ -845,7 +847,7 @@ func timelineRows(items []domain.TimelineRow) [][]any {
 func toolCallRows(items []domain.ToolCall) [][]any {
 	values := make([][]any, 0, len(items))
 	for _, item := range items {
-		values = append(values, []any{item.ID, item.SessionID, item.TaskID, item.MessageID, item.ToolName, item.Arguments, item.ArgsPreview, string(item.Source), item.CreatedAt})
+		values = append(values, []any{item.ID, item.SessionID, item.TaskID, item.MessageID, item.CallID, item.ToolName, item.Arguments, item.ArgsPreview, string(item.Source), item.CreatedAt})
 	}
 	return values
 }
@@ -853,7 +855,7 @@ func toolCallRows(items []domain.ToolCall) [][]any {
 func toolResultRows(items []domain.ToolResult) [][]any {
 	values := make([][]any, 0, len(items))
 	for _, item := range items {
-		values = append(values, []any{item.ID, item.SessionID, item.TaskID, item.ToolCallID, item.ToolName, string(item.Status), item.Text, string(item.Source), item.Payload, item.CreatedAt})
+		values = append(values, []any{item.ID, item.SessionID, item.TaskID, item.ToolCallID, item.CallID, item.ToolName, string(item.Status), item.Text, string(item.Source), item.Payload, item.CreatedAt})
 	}
 	return values
 }

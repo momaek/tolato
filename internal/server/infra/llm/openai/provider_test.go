@@ -8,34 +8,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/momaek/tolato/internal/server/agentapi"
 	"github.com/momaek/tolato/internal/server/app/runtime"
 	"github.com/momaek/tolato/internal/server/domain"
 )
 
-func TestSystemPromptIncludesExecOnNodesArgGuidance(t *testing.T) {
-	prompt := systemPrompt([]runtime.ToolDefinition{{
-		Name:        "exec_on_nodes",
-		Description: "dispatch command execution",
-	}})
-
-	for _, want := range []string{
-		"sessionId, inputText, command, commandArgs, targetContext, riskLevel",
-		"Never emit node_ids or task_text.",
-		"set command to \"bash\" and commandArgs to [\"-lc\", \"<snippet>\"]",
-		"Use native OpenAI function tools",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("systemPrompt() missing %q in %q", want, prompt)
-		}
-	}
-}
-
-func TestToolArgsGuidanceOnlyTargetsExecOnNodes(t *testing.T) {
-	if got := toolArgsGuidance("list_nodes"); got != "" {
-		t.Fatalf("toolArgsGuidance(list_nodes) = %q, want empty", got)
-	}
-	if got := toolArgsGuidance("exec_on_nodes"); !strings.Contains(got, "Function arguments must use canonical keys only") {
-		t.Fatalf("toolArgsGuidance(exec_on_nodes) = %q, want canonical guidance", got)
+func TestInstructionsIncludeRuntimeContext(t *testing.T) {
+	text := instructions(runtime.ModelTurnInput{
+		SessionID: "sess-1",
+		ActiveTargetContext: domain.ActiveTargetContext{
+			Status:       domain.TargetStatusConfirmed,
+			DisplayLabel: "jp-tokyo-01",
+		},
+	})
+	if !strings.Contains(text, "Runtime context JSON") || !strings.Contains(text, "jp-tokyo-01") {
+		t.Fatalf("instructions() = %q, want runtime context payload", text)
 	}
 }
 
@@ -70,21 +57,17 @@ func TestRunTurnStreamsToolCallAndPublishesEvents(t *testing.T) {
 		APIKey:   "test-key",
 		Events:   events,
 	}
-	output, err := provider.RunTurn(context.Background(), runtime.ModelTurnInput{SessionID: "sess-1"}, []runtime.ToolDefinition{{
-		Name:        "exec_on_nodes",
-		Description: "dispatch command execution",
-	}})
+	output, err := provider.RunTurn(context.Background(), runtime.ModelTurnInput{SessionID: "sess-1"}, []agentapi.ToolSpec{
+		agentapi.NewFunctionTool("exec_on_nodes", "dispatch command execution", map[string]any{"type": "object"}),
+	})
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if output.ToolCall == nil || output.ToolCall.Name != "exec_on_nodes" {
-		t.Fatalf("ToolCall = %#v, want exec_on_nodes", output.ToolCall)
+	if len(output.Items) != 1 || output.Items[0].Type != "function_call" || output.Items[0].Name != "exec_on_nodes" {
+		t.Fatalf("Items = %#v, want exec_on_nodes function_call", output.Items)
 	}
-	if got := string(output.ToolCall.Args); got != `{"inputText":"ls -la ~","command":"bash","commandArgs":["-lc","ls -la ~"]}` {
-		t.Fatalf("ToolCall args = %s", got)
-	}
-	if output.AssistantText != nil {
-		t.Fatalf("AssistantText = %#v, want nil", output.AssistantText)
+	if got := output.Items[0].Arguments; got != `{"inputText":"ls -la ~","command":"bash","commandArgs":["-lc","ls -la ~"]}` {
+		t.Fatalf("function_call arguments = %s", got)
 	}
 	if output.Done {
 		t.Fatalf("Done = true, want false")
@@ -92,10 +75,10 @@ func TestRunTurnStreamsToolCallAndPublishesEvents(t *testing.T) {
 	if !output.Streamed {
 		t.Fatalf("Streamed = false, want true")
 	}
-	if captured.ToolChoice != "auto" || !captured.Stream {
-		t.Fatalf("captured request = %#v, want tool_choice=auto and stream=true", captured)
+	if captured.ToolChoice != "auto" || !captured.Stream || captured.ParallelToolCalls {
+		t.Fatalf("captured request = %#v, want tool_choice=auto stream=true parallel_tool_calls=false", captured)
 	}
-	if len(captured.Tools) != 1 || captured.Tools[0].Name != "exec_on_nodes" {
+	if len(captured.Tools) != 1 || captured.Tools[0].Function.Name != "exec_on_nodes" || !captured.Tools[0].Function.Strict {
 		t.Fatalf("captured tools = %#v", captured.Tools)
 	}
 	if len(events.sse) != 4 {
@@ -130,11 +113,8 @@ func TestRunTurnStreamsAssistantText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if output.AssistantText == nil || *output.AssistantText != "列出了 home 目录内容。" {
-		t.Fatalf("AssistantText = %#v", output.AssistantText)
-	}
-	if output.ToolCall != nil {
-		t.Fatalf("ToolCall = %#v, want nil", output.ToolCall)
+	if len(output.Items) != 1 || agentapi.MessageText(output.Items[0]) != "列出了 home 目录内容。" {
+		t.Fatalf("Items = %#v", output.Items)
 	}
 	if !output.Done {
 		t.Fatalf("Done = false, want true")
@@ -146,8 +126,8 @@ func TestFinalizeTurnOutputFallsBackToCompletedReasoning(t *testing.T) {
 		completedResponse: json.RawMessage(`{"type":"response.completed","response":{"id":"resp_3","output":[{"type":"message","content":[{"type":"reasoning_text","text":"推断当前需要先确认目标节点。"}]}]}}`),
 	}
 	output := finalizeTurnOutput(acc)
-	if output.AssistantText == nil || *output.AssistantText != "推断当前需要先确认目标节点。" {
-		t.Fatalf("AssistantText = %#v", output.AssistantText)
+	if len(output.Items) != 1 || agentapi.MessageText(output.Items[0]) != "推断当前需要先确认目标节点。" {
+		t.Fatalf("Items = %#v", output.Items)
 	}
 }
 
