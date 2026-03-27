@@ -12,7 +12,7 @@ const nodeSchema = z.object({
   region: z.string(),
   os: z.string(),
   version: z.string(),
-  tags: z.array(z.string()),
+  tags: z.array(z.string()).nullable(),
   status: z.string(),
   busy: z.boolean(),
   last_seen_at: z.string(),
@@ -55,7 +55,7 @@ export async function listNodes(): Promise<NodeSummary[]> {
     version: node.version,
     ipAddress: node.ip_address ?? '',
     provider: node.provider ?? '',
-    tags: node.tags,
+    tags: node.tags ?? [],
     status: node.status as NodeSummary['status'],
     busy: node.busy,
     lastSeen: node.last_seen_at,
@@ -81,7 +81,7 @@ export async function getNodeDetail(
     version: parsed.version,
     ipAddress: parsed.ip_address ?? '',
     provider: parsed.provider ?? '',
-    tags: parsed.tags,
+    tags: parsed.tags ?? [],
     status: parsed.status as NodeDetail['status'],
     busy: parsed.busy,
     lastSeen: parsed.last_seen_at,
@@ -97,6 +97,26 @@ export async function getNodeDetail(
       createdAt: task.created_at,
     })),
   }
+}
+
+export async function fetchAgentToken(): Promise<string> {
+  if (appEnv.useMock) {
+    return 'agent-dev-token'
+  }
+  const response = await httpClient<{ agent_token: string }>(
+    '/api/v1/agent-token',
+  )
+  return response.agent_token
+}
+
+export async function upgradeNode(
+  nodeId: string,
+  payload: { downloadUrl: string; targetVersion: string },
+): Promise<{ taskId: string; executionIds: string[] }> {
+  return httpClient(`/api/v1/nodes/${nodeId}/upgrade`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 function adaptMetrics(metrics: z.infer<typeof nodeSchema>['metrics']) {

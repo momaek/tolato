@@ -15,7 +15,7 @@ import {
 import type { NodeStatus, NodeSummary } from '@/shared/types/node'
 import StatusBadge from '@/shared/ui/status-badge/StatusBadge.vue'
 import { cn } from '@/lib/utils'
-import { ArrowRight, ExternalLink, Play } from 'lucide-vue-next'
+import { ArrowRight, ExternalLink, Play, Terminal } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 
 defineProps<{
@@ -58,12 +58,17 @@ function regionLabel(node: NodeSummary) {
 
 function summaryText(node: NodeSummary) {
   return joinDisplayParts([
+    hasDisplayValue(node.ipAddress) ? node.ipAddress : null,
     hasDisplayValue(node.os) ? node.os : null,
     hasDisplayValue(node.provider) ? node.provider : null,
     t('common.metrics.lastSeen', {
       value: formatRelativeMinutes(node.lastSeen),
     }),
   ])
+}
+
+function shellUrl(nodeId: string) {
+  return `/console?nodeId=${encodeURIComponent(nodeId)}&shell=true`
 }
 
 function footerText(node: NodeSummary) {
@@ -121,7 +126,7 @@ function footerText(node: NodeSummary) {
               {{ summaryText(node) }}
             </div>
 
-            <div v-if="node.tags.length" class="flex flex-wrap gap-2">
+            <div v-if="node.tags?.length" class="flex flex-wrap gap-2">
               <Badge v-for="tag in node.tags" :key="tag" variant="outline">{{
                 tag
               }}</Badge>
@@ -207,6 +212,22 @@ function footerText(node: NodeSummary) {
             >
               <Play class="h-4 w-4" />
               {{ t('common.buttons.openInConsole') }}
+            </Button>
+
+            <Button
+              as-child
+              variant="outline"
+              size="sm"
+              :disabled="node.status === 'offline'"
+            >
+              <a
+                :href="shellUrl(node.id)"
+                target="_blank"
+                rel="noopener"
+              >
+                <Terminal class="h-4 w-4" />
+                {{ t('common.buttons.openShell') }}
+              </a>
             </Button>
 
             <Button as-child variant="ghost" size="sm">

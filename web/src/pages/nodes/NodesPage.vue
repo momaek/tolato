@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
@@ -10,14 +10,51 @@ import NodesFilterBar from '@/features/nodes-filter/NodesFilterBar.vue'
 import { useNodesStore } from '@/entities/node/model/nodes.store'
 import NodesTable from '@/widgets/nodes-table/NodesTable.vue'
 import { formatRelativeMinutes } from '@/shared/lib/format'
+import { fetchAgentToken } from '@/shared/api/adapters/nodes'
+import { Copy, Check } from 'lucide-vue-next'
 
 const router = useRouter()
 const nodesStore = useNodesStore()
 const { t } = useI18n()
 
+const agentToken = ref('')
+const tokenCopied = ref(false)
+const showToken = ref(false)
+const installCopied = ref(false)
+
+async function copyToken() {
+  await navigator.clipboard.writeText(agentToken.value)
+  tokenCopied.value = true
+  setTimeout(() => {
+    tokenCopied.value = false
+  }, 2000)
+}
+
+function installCommand(): string {
+  const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/agent`
+  return `curl -fsSL ${window.location.origin}/install-nodeagent.sh | bash -s -- \\
+  --server-url '${wsUrl}' \\
+  --auth-token '${agentToken.value}' \\
+  --download-url '<BINARY_DOWNLOAD_URL>' \\
+  --version '<VERSION>'`
+}
+
+async function copyInstallCommand() {
+  await navigator.clipboard.writeText(installCommand())
+  installCopied.value = true
+  setTimeout(() => {
+    installCopied.value = false
+  }, 2000)
+}
+
 onMounted(async () => {
   if (!nodesStore.items.length) {
     await nodesStore.fetchAll()
+  }
+  try {
+    agentToken.value = await fetchAgentToken()
+  } catch {
+    // token fetch is best-effort
   }
 })
 
@@ -209,6 +246,57 @@ function openConsole(nodeId: string) {
         :nodes="nodesStore.filteredItems"
         @open-console="openConsole"
       />
+
+      <Card v-if="agentToken" class="glass-panel border-border/70 rounded-2xl">
+        <CardContent class="space-y-3 p-6">
+          <div class="text-sm font-medium">
+            {{ t('pages.nodes.agentTokenTitle') }}
+          </div>
+          <p class="text-sm text-muted-foreground">
+            {{ t('pages.nodes.agentTokenDescription') }}
+          </p>
+          <div class="flex items-center gap-2">
+            <code
+              class="flex-1 rounded-lg border border-border/70 bg-background/80 px-3 py-2 text-sm font-mono cursor-pointer select-all"
+              @click="showToken = !showToken"
+            >{{ showToken ? agentToken : '•'.repeat(agentToken.length) }}</code>
+            <Button
+              variant="outline"
+              size="sm"
+              @click="copyToken"
+            >
+              <Check v-if="tokenCopied" class="h-4 w-4 text-emerald-500" />
+              <Copy v-else class="h-4 w-4" />
+              {{ tokenCopied ? t('pages.nodes.copied') : '' }}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card v-if="agentToken" class="glass-panel border-border/70 rounded-2xl">
+        <CardContent class="space-y-3 p-6">
+          <div class="text-sm font-medium">
+            {{ t('pages.nodes.installCommandTitle') }}
+          </div>
+          <p class="text-sm text-muted-foreground">
+            {{ t('pages.nodes.installCommandDescription') }}
+          </p>
+          <div class="space-y-2">
+            <pre
+              class="rounded-lg border border-border/70 bg-background/80 px-3 py-2 text-sm font-mono overflow-x-auto whitespace-pre-wrap"
+            >{{ installCommand() }}</pre>
+            <Button
+              variant="outline"
+              size="sm"
+              @click="copyInstallCommand"
+            >
+              <Check v-if="installCopied" class="h-4 w-4 text-emerald-500" />
+              <Copy v-else class="h-4 w-4" />
+              {{ installCopied ? t('pages.nodes.copied') : t('pages.nodes.copyInstallCommand') }}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <div class="grid gap-4 lg:grid-cols-3">
         <Card class="glass-panel border-border/70 rounded-2xl lg:col-span-2">
