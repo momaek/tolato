@@ -163,10 +163,12 @@ func main() {
 	logRecoveryReport(report)
 
 	router := ginhttp.NewRouter(ginhttp.Handler{
-		Nodes:    nodeService,
-		History:  historyService,
-		Settings: settingsService,
-		Auth:     authService,
+		Nodes:      nodeService,
+		History:    historyService,
+		Settings:   settingsService,
+		Auth:       authService,
+		Execution:  executionService,
+		AgentToken: cfg.Auth.AgentToken,
 	})
 	ginws.RegisterUIRoute(router, cfg.Server.UIWSPath, uiHandler)
 	ginws.RegisterAgentRoute(router, cfg.Server.AgentWSPath, agentHandler)
@@ -248,6 +250,13 @@ func openRepositories(ctx context.Context, cfg config.Config) (repositoryBundle,
 
 type executionStarterRef struct {
 	service appexecution.Service
+}
+
+func (r *executionStarterRef) StartUpgrade(ctx context.Context, input appexecution.StartUpgradeInput) (appexecution.StartDispatchResult, error) {
+	if r.service == nil {
+		return appexecution.StartDispatchResult{}, errors.New("execution service is not configured")
+	}
+	return r.service.StartUpgrade(ctx, input)
 }
 
 func (r *executionStarterRef) StartDispatch(ctx context.Context, input appexecution.StartDispatchInput) (appexecution.StartDispatchResult, error) {

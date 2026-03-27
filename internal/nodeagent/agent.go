@@ -44,9 +44,15 @@ func (r *Runner) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if err := r.runSession(ctx); err != nil && ctx.Err() == nil {
-			failures++
-			r.logger().Printf("nodeagent reconnecting after error: %v", err)
+		if err := r.runSession(ctx); err != nil {
+			if errors.Is(err, errUpgradeExit) {
+				r.logger().Printf("nodeagent exiting after upgrade")
+				os.Exit(0)
+			}
+			if ctx.Err() == nil {
+				failures++
+				r.logger().Printf("nodeagent reconnecting after error: %v", err)
+			}
 		} else {
 			failures = 0
 		}
@@ -59,6 +65,10 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 }
+
+// errUpgradeExit is a sentinel error indicating the agent should exit
+// after a successful binary upgrade so that systemd can restart it.
+var errUpgradeExit = errors.New("agent upgrade completed, exiting for restart")
 
 const maxReconnectDelay = 60 * time.Second
 
@@ -91,14 +101,15 @@ func (r *Runner) runSession(ctx context.Context) error {
 
 	r.logger().Printf("nodeagent connected to %s as %s", r.URL, r.NodeID)
 	session := &session{
-		nodeID:   r.NodeID,
-		metadata: r.metadata(),
-		conn:     conn,
-		logger:   r.logger(),
-		executor: r.executor(),
-		active:   make(map[string]struct{}),
-		sem:      make(chan struct{}, r.maxConcurrent()),
-		shells:   make(map[string]*ShellSession),
+		nodeID:    r.NodeID,
+		metadata:  r.metadata(),
+		conn:      conn,
+		logger:    r.logger(),
+		executor:  r.executor(),
+		active:    make(map[string]struct{}),
+		sem:       make(chan struct{}, r.maxConcurrent()),
+		shells:    make(map[string]*ShellSession),
+		upgradeCh: make(chan struct{}),
 	}
 	if err := session.sendRegister(); err != nil {
 		return err
@@ -127,6 +138,10 @@ func (r *Runner) runSession(ctx context.Context) error {
 			}
 		case err := <-readErr:
 			return err
+		case <-session.upgradeCh:
+			session.gracefulShutdown()
+			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "upgrade"), time.Now().Add(time.Second))
+			return errUpgradeExit
 		}
 	}
 }
@@ -191,6 +206,9 @@ type session struct {
 
 	shellsMu sync.RWMutex
 	shells   map[string]*ShellSession // executionID -> ShellSession
+
+	upgradeOnce sync.Once
+	upgradeCh   chan struct{} // closed when upgrade completes and agent should exit
 }
 
 func (s *session) readLoop(ctx context.Context) error {
@@ -272,6 +290,11 @@ func (s *session) handleDispatch(ctx context.Context, cmd appexecution.DispatchC
 
 	if cmd.Action == "open_shell" {
 		s.handleShellDispatch(ctx, cmd)
+		return
+	}
+
+	if cmd.Action == "upgrade_agent" {
+		s.handleUpgradeDispatch(ctx, cmd)
 		return
 	}
 
@@ -384,6 +407,37 @@ func (s *session) handleShellDispatch(ctx context.Context, cmd appexecution.Disp
 	result := shell.Wait()
 	s.logger.Printf("nodeagent shell exited execution=%s status=%s", cmd.ExecutionID, result.Status)
 	s.finishExecution(cmd, result)
+}
+
+func (s *session) handleUpgradeDispatch(ctx context.Context, cmd appexecution.DispatchCommand) {
+	if !s.beginExecution(cmd.ExecutionID) {
+		s.logger.Printf("nodeagent ignored duplicate upgrade dispatch execution=%s", cmd.ExecutionID)
+		return
+	}
+	defer s.endExecution(cmd.ExecutionID)
+
+	var args appexecution.UpgradeAgentArgs
+	if len(cmd.Args) > 0 {
+		_ = json.Unmarshal(cmd.Args, &args)
+	}
+	if args.DownloadURL == "" {
+		s.finishExecution(cmd, failureResult(64, "upgrade requires downloadUrl"))
+		return
+	}
+
+	emitter := chunkEmitterFunc(func(stream domain.ExecutionStream, text string) error {
+		return s.sendChunk(cmd, stream, text)
+	})
+
+	s.logger.Printf("nodeagent starting upgrade execution=%s url=%s version=%s", cmd.ExecutionID, args.DownloadURL, args.TargetVersion)
+	result := handleUpgrade(ctx, args.DownloadURL, args.TargetVersion, emitter)
+	s.finishExecution(cmd, result)
+
+	if result.Status == domain.ExecutionStatusSuccess {
+		s.upgradeOnce.Do(func() {
+			close(s.upgradeCh)
+		})
+	}
 }
 
 const gracefulShutdownTimeout = 5 * time.Second

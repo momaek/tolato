@@ -15,11 +15,19 @@ const userActionActorID = "ui_user"
 
 type Service interface {
 	StartDispatch(ctx context.Context, input StartDispatchInput) (StartDispatchResult, error)
+	StartUpgrade(ctx context.Context, input StartUpgradeInput) (StartDispatchResult, error)
 	CancelTask(ctx context.Context, sessionID string, taskID string, idempotencyKey string) error
 	RecordChunk(ctx context.Context, input RecordChunkInput) error
 	FinishExecution(ctx context.Context, input FinishExecutionInput) error
 	SendShellInput(ctx context.Context, input ShellInputInput) error
 	ResizeShell(ctx context.Context, input ShellResizeInput) error
+}
+
+type StartUpgradeInput struct {
+	SessionID     string
+	NodeID        string
+	DownloadURL   string
+	TargetVersion string
 }
 
 type ShellInputInput struct {
@@ -89,6 +97,11 @@ type OpenShellArgs struct {
 	Shell string `json:"shell,omitempty"` // e.g. "/bin/bash"; defaults to $SHELL or /bin/sh
 	Rows  int    `json:"rows,omitempty"`
 	Cols  int    `json:"cols,omitempty"`
+}
+
+type UpgradeAgentArgs struct {
+	DownloadURL   string `json:"downloadUrl"`
+	TargetVersion string `json:"targetVersion"`
 }
 
 type Repositories struct {
@@ -291,6 +304,99 @@ func (s *service) StartDispatch(ctx context.Context, input StartDispatchInput) (
 		TaskID:           taskID,
 		ExecutionGroupID: groupID,
 		ExecutionIDs:     executionIDs,
+	}, nil
+}
+
+func (s *service) StartUpgrade(ctx context.Context, input StartUpgradeInput) (StartDispatchResult, error) {
+	if err := s.validateReady(); err != nil {
+		return StartDispatchResult{}, err
+	}
+	if input.SessionID == "" || input.NodeID == "" || strings.TrimSpace(input.DownloadURL) == "" {
+		return StartDispatchResult{}, domain.ErrInvalidArgument
+	}
+
+	now := s.clock.Now()
+	taskID := s.ids.NewID("task")
+	groupID := s.ids.NewID("execgrp")
+	task := domain.Task{
+		ID:        taskID,
+		SessionID: input.SessionID,
+		InputText: fmt.Sprintf("upgrade agent on %s to %s", input.NodeID, input.TargetVersion),
+		OperationTargetSnapshot: domain.TargetSnapshot{
+			Scope:      "single",
+			NodeIDs:    []string{input.NodeID},
+			CapturedAt: now,
+		},
+		Status:         domain.TaskStatusQueued,
+		ApprovalStatus: domain.ApprovalStatusNotRequired,
+		RiskLevel:      domain.RiskLevelHigh,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := s.repos.Tasks.Create(ctx, task); err != nil {
+		return StartDispatchResult{}, err
+	}
+
+	executionID := s.ids.NewID("exec")
+	execution := domain.Execution{
+		ID:        executionID,
+		TaskID:    taskID,
+		SessionID: input.SessionID,
+		NodeID:    input.NodeID,
+		Status:    domain.ExecutionStatusQueued,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.repos.Executions.Create(ctx, execution); err != nil {
+		return StartDispatchResult{}, err
+	}
+
+	if s.dispatcher != nil {
+		upgradeArgs := UpgradeAgentArgs{
+			DownloadURL:   strings.TrimSpace(input.DownloadURL),
+			TargetVersion: strings.TrimSpace(input.TargetVersion),
+		}
+		args, err := json.Marshal(upgradeArgs)
+		if err != nil {
+			return StartDispatchResult{}, err
+		}
+		cmd := DispatchCommand{
+			Type:        "task.dispatch",
+			SessionID:   input.SessionID,
+			TaskID:      taskID,
+			ExecutionID: executionID,
+			NodeID:      input.NodeID,
+			Action:      "upgrade_agent",
+			Args:        args,
+			RiskLevel:   domain.RiskLevelHigh,
+			Timestamp:   now.UTC().Format(time.RFC3339),
+		}
+		if err := s.dispatcher.DispatchToNode(ctx, input.NodeID, cmd); err != nil {
+			return StartDispatchResult{}, err
+		}
+		s.logInfo(ctx, "upgrade dispatched to node",
+			"session_id", input.SessionID,
+			"task_id", taskID,
+			"execution_id", executionID,
+			"node_id", input.NodeID,
+			"target_version", input.TargetVersion,
+		)
+		execution.Status = domain.ExecutionStatusDispatched
+		execution.UpdatedAt = now
+		if err := s.repos.Executions.Update(ctx, execution); err != nil {
+			return StartDispatchResult{}, err
+		}
+		task.Status = domain.TaskStatusDispatched
+		task.UpdatedAt = now
+		if err := s.repos.Tasks.Update(ctx, task); err != nil {
+			return StartDispatchResult{}, err
+		}
+	}
+
+	return StartDispatchResult{
+		TaskID:           taskID,
+		ExecutionGroupID: groupID,
+		ExecutionIDs:     []string{executionID},
 	}, nil
 }
 

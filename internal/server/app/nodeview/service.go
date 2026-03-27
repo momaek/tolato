@@ -46,6 +46,7 @@ type NodeSummary struct {
 	Region     string   `json:"region"`
 	OS         string   `json:"os"`
 	Version    string   `json:"version"`
+	IPAddress  string   `json:"ip_address,omitempty"`
 	Tags       []string `json:"tags"`
 	Status     string   `json:"status"`
 	Busy       bool     `json:"busy"`
@@ -132,6 +133,7 @@ func summaryFromPolicy(node policy.NodeSummary) NodeSummary {
 		Region:     node.Region,
 		OS:         node.OS,
 		Version:    node.Version,
+		IPAddress:  node.IPAddress,
 		Tags:       append([]string(nil), node.Tags...),
 		Status:     node.Status,
 		Busy:       node.Busy,
@@ -150,9 +152,13 @@ func (s *service) detailFromPolicy(ctx context.Context, node policy.NodeSummary)
 		return NodeDetail{}, err
 	}
 	meta := nodeDetailMetadata(node)
+	ipAddress := node.IPAddress
+	if ipAddress == "" {
+		ipAddress = meta.IPAddress
+	}
 	return NodeDetail{
 		NodeSummary: summaryFromPolicy(node),
-		IPAddress:   meta.IPAddress,
+		IPAddress:   ipAddress,
 		Provider:    meta.Provider,
 		Kernel:      meta.Kernel,
 		Uptime:      meta.Uptime,

@@ -39,16 +39,17 @@ type ToolResult struct {
 }
 
 type NodeSummary struct {
-	ID       string   `json:"id"`
-	Hostname string   `json:"hostname"`
-	Region   string   `json:"region"`
-	OS       string   `json:"os"`
-	Version  string   `json:"version"`
-	Tags     []string `json:"tags"`
-	Status   string   `json:"status"`
-	Busy     bool     `json:"busy"`
-	LastSeen string   `json:"lastSeen"`
-	Metrics  Metrics  `json:"metrics"`
+	ID        string   `json:"id"`
+	Hostname  string   `json:"hostname"`
+	Region    string   `json:"region"`
+	OS        string   `json:"os"`
+	Version   string   `json:"version"`
+	IPAddress string   `json:"ipAddress,omitempty"`
+	Tags      []string `json:"tags"`
+	Status    string   `json:"status"`
+	Busy      bool     `json:"busy"`
+	LastSeen  string   `json:"lastSeen"`
+	Metrics   Metrics  `json:"metrics"`
 }
 
 type Metrics struct {

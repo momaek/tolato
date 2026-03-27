@@ -145,6 +145,7 @@ func (r *MemoryAgentRegistry) Snapshots() []AgentPresenceSnapshot {
 			snapshot.Region = meta.Region
 			snapshot.OS = meta.OS
 			snapshot.Version = meta.Version
+			snapshot.IPAddress = meta.IPAddress
 			snapshot.Tags = append([]string(nil), meta.Tags...)
 		}
 		if state, ok := r.runtime[nodeID]; ok {
@@ -158,10 +159,11 @@ func (r *MemoryAgentRegistry) Snapshots() []AgentPresenceSnapshot {
 
 func cloneAgentNodeMetadata(meta AgentNodeMetadata) AgentNodeMetadata {
 	return AgentNodeMetadata{
-		Hostname: meta.Hostname,
-		Region:   meta.Region,
-		OS:       meta.OS,
-		Version:  meta.Version,
-		Tags:     append([]string(nil), meta.Tags...),
+		Hostname:  meta.Hostname,
+		Region:    meta.Region,
+		OS:        meta.OS,
+		Version:   meta.Version,
+		IPAddress: meta.IPAddress,
+		Tags:      append([]string(nil), meta.Tags...),
 	}
 }

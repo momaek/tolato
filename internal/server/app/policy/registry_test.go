@@ -250,6 +250,12 @@ func (f *fakeExecutionStarter) StartDispatch(ctx context.Context, input appexecu
 	return f.result, f.err
 }
 
+func (f *fakeExecutionStarter) StartUpgrade(ctx context.Context, input appexecution.StartUpgradeInput) (appexecution.StartDispatchResult, error) {
+	_ = ctx
+	_ = input
+	return f.result, f.err
+}
+
 func (f *fakeExecutionStarter) CancelTask(ctx context.Context, sessionID string, taskID string, idempotencyKey string) error {
 	_ = ctx
 	_ = sessionID

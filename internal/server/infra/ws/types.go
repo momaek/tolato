@@ -51,6 +51,7 @@ type AgentPresenceSnapshot struct {
 	Region        string
 	OS            string
 	Version       string
+	IPAddress     string
 	Tags          []string
 	Busy          bool
 	Metrics       AgentNodeMetrics
@@ -66,11 +67,12 @@ type AgentRegistry interface {
 }
 
 type AgentNodeMetadata struct {
-	Hostname string
-	Region   string
-	OS       string
-	Version  string
-	Tags     []string
+	Hostname  string
+	Region    string
+	OS        string
+	Version   string
+	IPAddress string
+	Tags      []string
 }
 
 type AgentNodeMetrics struct {

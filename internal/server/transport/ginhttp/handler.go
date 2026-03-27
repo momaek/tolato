@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	appauth "github.com/momaek/tolato/internal/server/app/auth"
+	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	"github.com/momaek/tolato/internal/server/app/history"
 	"github.com/momaek/tolato/internal/server/app/nodeview"
 	"github.com/momaek/tolato/internal/server/app/settings"
@@ -43,11 +44,17 @@ type AuthService interface {
 	AuthenticateToken(ctx context.Context, token string) (appauth.Principal, error)
 }
 
+type ExecutionService interface {
+	StartUpgrade(ctx context.Context, input appexecution.StartUpgradeInput) (appexecution.StartDispatchResult, error)
+}
+
 type Handler struct {
-	Nodes    NodeViewService
-	History  HistoryService
-	Settings SettingsService
-	Auth     AuthService
+	Nodes      NodeViewService
+	History    HistoryService
+	Settings   SettingsService
+	Auth       AuthService
+	Execution  ExecutionService
+	AgentToken string
 }
 
 func (h Handler) RegisterRoutes(router gin.IRouter) {
@@ -58,8 +65,10 @@ func (h Handler) RegisterRoutes(router gin.IRouter) {
 	if h.Auth != nil {
 		protected.Use(h.requireAuth())
 	}
+	protected.GET("/agent-token", h.getAgentToken)
 	protected.GET("/nodes", h.listNodes)
 	protected.GET("/nodes/:id", h.getNode)
+	protected.POST("/nodes/:id/upgrade", h.upgradeNode)
 	protected.GET("/history/tasks", h.listHistoryTasks)
 	protected.GET("/history/tasks/:id", h.getHistoryTask)
 	protected.GET("/settings/model-config", h.getModelConfig)
@@ -120,6 +129,10 @@ func (h Handler) requireAuth() gin.HandlerFunc {
 	}
 }
 
+func (h Handler) getAgentToken(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"agent_token": h.AgentToken})
+}
+
 func (h Handler) listNodes(c *gin.Context) {
 	if h.Nodes == nil {
 		writeError(c, http.StatusNotImplemented, "node view service is not configured")
@@ -152,6 +165,39 @@ func (h Handler) getNode(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, item)
+}
+
+func (h Handler) upgradeNode(c *gin.Context) {
+	if h.Execution == nil {
+		writeError(c, http.StatusNotImplemented, "execution service is not configured")
+		return
+	}
+
+	nodeID := c.Param("id")
+	var input struct {
+		DownloadURL   string `json:"downloadUrl"`
+		TargetVersion string `json:"targetVersion"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(input.DownloadURL) == "" {
+		writeError(c, http.StatusBadRequest, "downloadUrl is required")
+		return
+	}
+
+	result, err := h.Execution.StartUpgrade(c.Request.Context(), appexecution.StartUpgradeInput{
+		SessionID:     "sess-console-1",
+		NodeID:        nodeID,
+		DownloadURL:   input.DownloadURL,
+		TargetVersion: input.TargetVersion,
+	})
+	if err != nil {
+		writeDomainError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, result)
 }
 
 func (h Handler) listHistoryTasks(c *gin.Context) {

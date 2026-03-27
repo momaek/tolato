@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"strings"
 	"time"
 
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	infraws "github.com/momaek/tolato/internal/server/infra/ws"
+	"github.com/momaek/tolato/internal/server/transport/ginws"
 )
 
 type ExecutionService interface {
@@ -49,7 +52,11 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) ([]byte, error) {
 		if payload.NodeID == "" {
 			return nil, errors.New("nodeId is required")
 		}
-		d.Agents.BindNode(payload.NodeID, clientID, payload.Metadata)
+		meta := payload.Metadata
+		if meta.IPAddress == "" {
+			meta.IPAddress = clientIPFromContext(ctx)
+		}
+		d.Agents.BindNode(payload.NodeID, clientID, meta)
 		return json.Marshal(Ack{
 			Type:      TypeAgentAck,
 			NodeID:    payload.NodeID,
@@ -145,4 +152,26 @@ func (d Dispatcher) now() time.Time {
 		return d.Now()
 	}
 	return time.Now()
+}
+
+func clientIPFromContext(ctx context.Context) string {
+	req, ok := ginws.HTTPRequestFromContext(ctx)
+	if !ok || req == nil {
+		return ""
+	}
+	// Check common reverse-proxy headers first.
+	for _, header := range []string{"X-Forwarded-For", "X-Real-Ip"} {
+		if value := req.Header.Get(header); value != "" {
+			// X-Forwarded-For may be comma-separated; take the first.
+			if ip, _, ok := strings.Cut(value, ","); ok {
+				return strings.TrimSpace(ip)
+			}
+			return strings.TrimSpace(value)
+		}
+	}
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+	return host
 }

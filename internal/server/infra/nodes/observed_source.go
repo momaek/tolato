@@ -106,6 +106,9 @@ func overlayPresence(node policy.NodeSummary, snapshot infraws.AgentPresenceSnap
 	if snapshot.Version != "" {
 		node.Version = snapshot.Version
 	}
+	if snapshot.IPAddress != "" {
+		node.IPAddress = snapshot.IPAddress
+	}
 	if len(snapshot.Tags) > 0 {
 		node.Tags = append([]string(nil), snapshot.Tags...)
 	}
@@ -124,12 +127,13 @@ func overlayPresence(node policy.NodeSummary, snapshot infraws.AgentPresenceSnap
 
 func syntheticNode(snapshot infraws.AgentPresenceSnapshot, now time.Time, onlineTTL, offlineTTL time.Duration) policy.NodeSummary {
 	node := policy.NodeSummary{
-		ID:       snapshot.NodeID,
-		Hostname: fallback(snapshot.Hostname, snapshot.NodeID),
-		Region:   fallback(snapshot.Region, "Unknown"),
-		OS:       fallback(snapshot.OS, "unknown"),
-		Version:  fallback(snapshot.Version, "unknown"),
-		Tags:     append([]string(nil), snapshot.Tags...),
+		ID:        snapshot.NodeID,
+		Hostname:  fallback(snapshot.Hostname, snapshot.NodeID),
+		Region:    fallback(snapshot.Region, "Unknown"),
+		OS:        fallback(snapshot.OS, "unknown"),
+		Version:   fallback(snapshot.Version, "unknown"),
+		IPAddress: snapshot.IPAddress,
+		Tags:      append([]string(nil), snapshot.Tags...),
 		Status:   classifyPresence("", snapshot, now, onlineTTL, offlineTTL),
 		Busy:     snapshot.Busy,
 		Metrics: policy.Metrics{
