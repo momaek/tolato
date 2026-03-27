@@ -35,4 +35,12 @@ export function setAppLocale(locale: AppLocale) {
   syncLocaleSideEffects(locale)
 }
 
+/**
+ * Global t() for use outside Vue components (e.g. API adapters, WS clients).
+ * Inside components, prefer `useI18n().t` instead.
+ */
+export function t(key: string, named?: Record<string, unknown>): string {
+  return String(i18n.global.t(key, named ?? {}))
+}
+
 export default i18n

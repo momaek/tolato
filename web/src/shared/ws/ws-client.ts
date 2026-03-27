@@ -1,3 +1,4 @@
+import { t } from '@/app/i18n'
 import { appEnv } from '@/shared/config/env'
 import { createMockSessions, toSessionListItem } from '@/shared/mock/sessions'
 import { mockNodeSummaries } from '@/shared/mock/nodes'
@@ -84,11 +85,11 @@ class MockWSClient implements WSClient {
 
   async createSession(request: SessionCreateRequest) {
     const sessionId = `session-ops-${Math.floor(Math.random() * 900 + 100)}`
-    const title = request.title?.trim() || '新会话'
+    const title = request.title?.trim() || t('mockWs.newSession')
     const snapshot: SessionSnapshot = {
       id: sessionId,
       title,
-      summary: '等待新的任务输入。',
+      summary: t('mockWs.waitingInput'),
       status: 'idle',
       mode: 'ai_agent',
       revision: 1,
@@ -125,7 +126,7 @@ class MockWSClient implements WSClient {
   async requestSessionSnapshot(sessionId: string) {
     const snapshot = this.sessions.get(sessionId)
     if (!snapshot) {
-      throw new Error(`unknown session: ${sessionId}`)
+      throw new Error(t('ws.unknownSession', { sessionId }))
     }
     return cloneSnapshot(snapshot)
   }
@@ -153,12 +154,12 @@ class MockWSClient implements WSClient {
     const snapshot = this.requireSession(request.sessionId)
 
     if (snapshot.pendingActionType) {
-      throw new Error('session_busy')
+      throw new Error(t('ws.sessionBusy'))
     }
 
     const scenario = this.buildScenario(snapshot, request.text)
     snapshot.status = 'running'
-    snapshot.summary = '正在解析目标节点。'
+    snapshot.summary = t('mockWs.resolvingTarget')
     snapshot.targetContext = {
       state: 'pending_confirmation',
       scope: scenario.targetContextScope,
@@ -177,17 +178,17 @@ class MockWSClient implements WSClient {
 
     await this.emitMockAssistantStream(snapshot, {
       reasoning: scenario.targetSource === 'context_inherited'
-        ? '当前输入没有显式目标，先检查会话上下文里是否已有已确认目标。'
-        : '先列出在线节点并解析用户输入里的目标表达，确认本轮应该作用到哪台机器。',
+        ? t('mockWs.reasoningNoExplicitTarget')
+        : t('mockWs.reasoningResolveTarget'),
       content: scenario.targetSource === 'context_inherited'
-        ? `我会先沿用上一轮已确认的 ${scenario.targetRow.candidates.map(candidate => candidate.label).join(' / ')}，然后继续这轮分析。`
-        : '我先帮你解析目标节点，并检查当前可用节点范围。',
+        ? t('mockWs.contentReuseConfirmed', { targets: scenario.targetRow.candidates.map(candidate => candidate.label).join(' / ') })
+        : t('mockWs.contentResolveAndCheck'),
     })
 
     const rows = [
       this.makeUserRow(request.text),
       ...(scenario.targetSource === 'context_inherited'
-        ? [this.makeAssistantRow(`将沿用上一轮已确认的 ${scenario.targetRow.candidates.map(candidate => candidate.label).join(' / ')}。`)]
+        ? [this.makeAssistantRow(t('mockWs.inheritConfirmedTargets', { targets: scenario.targetRow.candidates.map(candidate => candidate.label).join(' / ') }))]
         : []),
       this.makeToolCallRow('calling list_nodes(status=online,stale)'),
       this.makeToolResultRow(`list_nodes returned ${snapshot.nodeHealthSummary.online + snapshot.nodeHealthSummary.busy} candidate nodes`, 'neutral'),
@@ -234,7 +235,7 @@ class MockWSClient implements WSClient {
         }
       }
 
-      const result = this.makeToolResultRow('候选节点顺序已刷新，请重新确认目标。', 'warning')
+      const result = this.makeToolResultRow(t('mockWs.candidatesRefreshed'), 'warning')
       snapshot.rows.push(result)
       this.bumpRevision(snapshot)
       this.bus.emit({ type: 'timeline.row.appended', sessionId: snapshot.id, row: result, revision: snapshot.revision })
@@ -245,7 +246,7 @@ class MockWSClient implements WSClient {
     if (request.action === 'clear') {
       snapshot.pendingActionType = undefined
       snapshot.status = 'idle'
-      snapshot.summary = '目标上下文已清空。'
+      snapshot.summary = t('mockWs.targetContextCleared')
       snapshot.targetContext = {
         state: 'unset',
         scope: 'unset',
@@ -277,16 +278,16 @@ class MockWSClient implements WSClient {
     snapshot.highlightedNodes = mockNodeSummaries.filter(node => confirmedNodeIds.includes(node.id))
     snapshot.pendingActionType = draft.blockedReason ? undefined : draft.approvalRow ? 'approval' : undefined
     snapshot.status = draft.blockedReason || draft.approvalRow ? 'attention' : 'running'
-    snapshot.summary = draft.blockedReason ?? (draft.approvalRow ? '计划已生成，等待审批。' : '低风险计划已生成，开始执行。')
+    snapshot.summary = draft.blockedReason ?? (draft.approvalRow ? t('mockWs.planGeneratedAwaitingApproval') : t('mockWs.lowRiskPlanGenerated'))
     snapshot.approvalStatus = draft.approvalRow ? 'pending' : 'not_required'
 
     await this.emitMockAssistantStream(snapshot, {
-      reasoning: '目标已经确认，接下来生成结构化计划，并判断风险等级以及是否需要审批。',
+      reasoning: t('mockWs.reasoningGeneratePlan'),
       content: draft.blockedReason
-        ? '我已经完成计划生成，但这次操作属于广播写操作，默认不会继续执行。'
+        ? t('mockWs.contentBroadcastWriteBlocked')
         : draft.approvalRow
-          ? `我已经生成针对 ${targetLabel} 的计划，这次操作需要你明确审批。`
-          : `我已经生成针对 ${targetLabel} 的只读计划，接下来会继续自动执行。`,
+          ? t('mockWs.contentPlanNeedsApproval', { target: targetLabel })
+          : t('mockWs.contentPlanAutoRun', { target: targetLabel }),
     })
 
     const resultRows = [
@@ -295,10 +296,10 @@ class MockWSClient implements WSClient {
       this.makeToolResultRow(`plan generated · ${draft.planRow.risk} risk`, draft.planRow.requiresApproval ? 'warning' : 'success'),
       this.makeAssistantRow(
         draft.blockedReason
-          ? '这次计划涉及广播写操作，MVP 默认不会继续执行，请先缩小目标范围。'
+          ? t('mockWs.broadcastWriteMVPBlocked')
           : draft.planRow.requiresApproval
-            ? `我已经为 ${targetLabel} 生成执行计划，这次操作会影响线上状态，需要你先审批。`
-            : `我已经为 ${targetLabel} 生成只读计划，风险较低，将继续自动执行。`,
+            ? t('mockWs.planForTargetExecution', { target: targetLabel })
+            : t('mockWs.planForTargetReadOnly', { target: targetLabel }),
       ),
       draft.planRow,
     ] as const
@@ -352,7 +353,7 @@ class MockWSClient implements WSClient {
     if (request.action !== 'approve') {
       snapshot.pendingActionType = undefined
       snapshot.status = 'completed'
-      snapshot.summary = request.action === 'reject' ? '审批已拒绝。' : '审批已取消。'
+      snapshot.summary = request.action === 'reject' ? t('mockWs.approvalRejected') : t('mockWs.approvalCancelled')
       const result = this.makeToolResultRow(
         `approval recorded · ${request.action === 'reject' ? 'Rejected' : 'Cancelled'} by Alex`,
         'warning',
@@ -368,7 +369,7 @@ class MockWSClient implements WSClient {
     snapshot.rows.push(result)
     snapshot.pendingActionType = undefined
     snapshot.status = 'running'
-    snapshot.summary = '审批已通过，任务执行中。'
+    snapshot.summary = t('mockWs.approvalPassedExecuting')
     this.bumpRevision(snapshot)
     this.bus.emit({ type: 'timeline.row.appended', sessionId: snapshot.id, row: result, revision: snapshot.revision })
     this.emitSessionSummary(snapshot)
@@ -443,25 +444,25 @@ class MockWSClient implements WSClient {
       skipped: executionRow.nodes.filter(node => node.status === 'skipped').length,
       markdown: draft.summaryMarkdown,
       nextSteps: draft.planRow.requiresApproval
-        ? ['观察 5 分钟内的 upstream 5xx', '如需回滚，可重新生成 restore 计划']
-        : ['如果延迟继续抬升，可升级为 reload 计划'],
+        ? [t('mockWs.nextStepWatch5xx'), t('mockWs.nextStepRollback')]
+        : [t('mockWs.nextStepUpgradeReload')],
     }
 
     snapshot.rows.push(summaryRow)
     await this.emitMockAssistantStream(snapshot, {
-      reasoning: '汇总节点执行结果，生成一条更适合用户直接阅读的自然语言结论。',
+      reasoning: t('mockWs.reasoningSummarize'),
       content: draft.planRow.requiresApproval
-        ? '执行已经完成，重载后的健康检查正常，建议继续观察短时间内的 upstream 和 5xx 变化。'
-        : '只读诊断已经完成，目前没有发现需要立刻处理的异常，可以继续观察。',
+        ? t('mockWs.contentWriteComplete')
+        : t('mockWs.contentReadComplete'),
     })
     const assistantConclusion = this.makeAssistantRow(
       draft.planRow.requiresApproval
-        ? '执行已经完成，重载后的健康检查正常。接下来建议短时间观察 upstream 和 5xx 变化。'
-        : '只读诊断已经完成，目前没有发现需要立刻处理的异常，可以继续观察。',
+        ? t('mockWs.assistantWriteConclusion')
+        : t('mockWs.assistantReadConclusion'),
     )
     snapshot.rows.push(assistantConclusion)
     snapshot.status = 'completed'
-    snapshot.summary = draft.planRow.requiresApproval ? '执行完成，Nginx reload 成功。' : '只读诊断完成。'
+    snapshot.summary = draft.planRow.requiresApproval ? t('mockWs.summaryWriteComplete') : t('mockWs.summaryReadComplete')
     snapshot.approvalStatus = draft.planRow.requiresApproval ? 'approved' : 'not_required'
     this.bumpRevision(snapshot)
     this.bus.emit({ type: 'timeline.row.appended', sessionId: snapshot.id, row: summaryRow, revision: snapshot.revision })
@@ -516,7 +517,7 @@ class MockWSClient implements WSClient {
         label: node.hostname,
         region: node.region,
         scope: 'all_online',
-        reason: node.status === 'busy' ? '在线但忙碌，广播执行时需要谨慎观察。' : '当前在线，可加入广播目标集合。',
+        reason: node.status === 'busy' ? t('mockWs.candidateBusyReason') : t('mockWs.candidateOnlineReason'),
         source: 'resolver',
         tags: node.tags,
       }))
@@ -524,7 +525,7 @@ class MockWSClient implements WSClient {
       targetSource = 'assistant_resolved'
       sourceLabel = 'resolve_target_nodes("all online nodes")'
       scopeLabel = 'all online nodes'
-      basis = `输入“${text}”命中了广播范围，候选列表展示当前所有在线节点。`
+      basis = t('mockWs.broadcastHitBasis', { text })
       originalTargetText = 'all online nodes'
       confirmedNodeIds = onlineNodes.map(node => node.id)
     } else if (shouldInheritTarget) {
@@ -535,7 +536,7 @@ class MockWSClient implements WSClient {
         label: node.hostname,
         region: node.region,
         scope: snapshot.targetContext.scope === 'unset' ? 'single' : snapshot.targetContext.scope,
-        reason: '当前输入没有显式目标，沿用上一轮已确认目标。',
+        reason: t('mockWs.inheritTargetReason'),
         source: 'session_context',
         tags: node.tags,
       }))
@@ -543,9 +544,9 @@ class MockWSClient implements WSClient {
       targetSource = 'context_inherited'
       sourceLabel = 'reuse_confirmed_target_context'
       scopeLabel = targetContextScope === 'all_online' ? 'all online nodes' : targetContextScope === 'multi' ? 'multi-node target set' : 'single node'
-      basis = '当前输入未提供新的目标表达，系统将沿用上一轮已经确认的目标集合。'
+      basis = t('mockWs.inheritTargetBasis')
       originalTargetText = snapshot.targetContext.summary
-      inheritedHint = '沿用上一轮已确认目标'
+      inheritedHint = t('mockWs.inheritTargetHint')
       confirmedNodeIds = [...snapshot.targetContext.confirmedNodeIds]
     } else if (normalized.includes('东京') || normalized.includes('tokyo')) {
       candidates = mockNodeSummaries
@@ -556,16 +557,16 @@ class MockWSClient implements WSClient {
           label: node.hostname,
           region: node.region,
           scope: 'single',
-          reason: node.id === 'jp-tokyo-01' ? '最近活跃，且会话摘要正在关注该节点。' : '同区域备选节点。',
+          reason: node.id === 'jp-tokyo-01' ? t('mockWs.tokyoActiveReason') : t('mockWs.tokyoBackupReason'),
           source: 'resolver',
           tags: node.tags,
         }))
       targetContextScope = 'single'
       targetSource = 'assistant_resolved'
-      sourceLabel = 'resolve_target_nodes("东京节点")'
+      sourceLabel = `resolve_target_nodes(“${t('mockWs.tokyoTarget')}”)`
       scopeLabel = candidates.length > 1 ? 'single node from region cluster' : 'single node'
-      basis = `根据输入“${text}”解析得到以下候选目标。`
-      originalTargetText = '东京节点'
+      basis = t('mockWs.resolvedBasis', { text })
+      originalTargetText = t('mockWs.tokyoTarget')
       confirmedNodeIds = candidates.length > 0 ? [candidates[0].nodeId] : []
     } else {
       const defaultNode = mockNodeSummaries[2]
@@ -576,7 +577,7 @@ class MockWSClient implements WSClient {
           label: defaultNode.hostname,
           region: defaultNode.region,
           scope: 'single',
-          reason: '文本中提到了 API / Docker 相关上下文。',
+          reason: t('mockWs.defaultContextReason'),
           source: 'resolver',
           tags: defaultNode.tags,
         },
@@ -585,12 +586,12 @@ class MockWSClient implements WSClient {
       targetSource = 'assistant_resolved'
       sourceLabel = 'resolve_target_nodes'
       scopeLabel = 'single node'
-      basis = `根据输入“${text}”解析得到以下候选目标。`
+      basis = t('mockWs.resolvedBasis', { text })
       originalTargetText = text
       confirmedNodeIds = [defaultNode.id]
     }
 
-    const blockedReason = writePlan && targetContextScope !== 'single' ? '广播写操作在 MVP 中默认阻断，请缩小目标范围后重试。' : undefined
+    const blockedReason = writePlan && targetContextScope !== 'single' ? t('mockWs.broadcastBlockedMessage') : undefined
     const targetLabel = this.getConfirmedTargetLabel(confirmedNodeIds, targetContextScope, candidates[0]?.label ?? 'selected node')
     const planPackage = this.createPlanPackage({
       taskId,
@@ -614,7 +615,7 @@ class MockWSClient implements WSClient {
         id: `row-target-${taskId}`,
         kind: 'target_confirmation',
         createdAt: nowIso(),
-        title: targetContextScope === 'all_online' ? '需要确认广播目标' : '需要确认目标节点',
+        title: targetContextScope === 'all_online' ? t('mockWs.confirmBroadcastTitle') : t('mockWs.confirmTargetTitle'),
         originalTargetText,
         basis,
         scope: scopeLabel,
@@ -665,32 +666,32 @@ class MockWSClient implements WSClient {
       inputText: options.inputText,
       summary: options.writePlan
         ? isBroadcast
-          ? `对 ${options.targetLabel} 执行串行写操作前置检查，并评估是否允许继续。`
-          : `对 ${options.targetLabel} 进行 Nginx reload，并在前后做健康验证。`
+          ? t('mockWs.planWriteBroadcastSummary', { target: options.targetLabel })
+          : t('mockWs.planWriteSingleSummary', { target: options.targetLabel })
         : isBroadcast
-          ? `对 ${options.targetLabel} 执行广播只读诊断，汇总逐节点指标与异常线索。`
-          : `对 ${options.targetLabel} 执行只读诊断，汇总当前指标与异常线索。`,
+          ? t('mockWs.planReadBroadcastSummary', { target: options.targetLabel })
+          : t('mockWs.planReadSingleSummary', { target: options.targetLabel }),
       impact: options.writePlan
         ? isBroadcast
-          ? `涉及 ${options.targetCount} 个节点的写操作，默认阻断，不进入执行阶段。`
-          : '影响单节点入口流量承载，预计 1-2 秒。'
+          ? t('mockWs.impactWriteBroadcast', { count: options.targetCount })
+          : t('mockWs.impactWriteSingle')
         : isBroadcast
-          ? `只读执行，会串行采样 ${options.targetCount} 个在线节点，不改写任何节点状态。`
-          : '只读，不改写任何节点状态。',
+          ? t('mockWs.impactReadBroadcast', { count: options.targetCount })
+          : t('mockWs.impactReadSingle'),
       risk,
       requiresApproval,
       targetLabel: options.targetLabel,
       targetSource: options.targetSource,
-      autoExecutionHint: !options.writePlan ? '低风险只读计划将自动执行，无需审批。' : undefined,
+      autoExecutionHint: !options.writePlan ? t('mockWs.autoExecutionHint') : undefined,
       steps: options.writePlan
         ? [
-            { action: 'inspect_nginx', argsLabel: '读取活跃连接和 worker', risk: isBroadcast ? 'medium' : 'low', timeoutSec: 20, broadcastAllowed: false },
-            { action: 'reload_nginx', argsLabel: 'nginx -s reload', risk: isBroadcast ? 'high' : 'medium', timeoutSec: 30, broadcastAllowed: false },
-            { action: 'verify_service', argsLabel: '检查 error log 和 upstream', risk: isBroadcast ? 'medium' : 'low', timeoutSec: 45, broadcastAllowed: false },
+            { action: 'inspect_nginx', argsLabel: t('mockWs.stepInspectNginx'), risk: isBroadcast ? 'medium' : 'low', timeoutSec: 20, broadcastAllowed: false },
+            { action: 'reload_nginx', argsLabel: t('mockWs.stepReloadNginx'), risk: isBroadcast ? 'high' : 'medium', timeoutSec: 30, broadcastAllowed: false },
+            { action: 'verify_service', argsLabel: t('mockWs.stepVerifyService'), risk: isBroadcast ? 'medium' : 'low', timeoutSec: 45, broadcastAllowed: false },
           ]
         : [
-            { action: 'inspect_node', argsLabel: '采样 CPU / memory / disk', risk: 'low', timeoutSec: 20, broadcastAllowed: true },
-            { action: 'inspect_service', argsLabel: '读取服务健康和日志 tail', risk: 'low', timeoutSec: 45, broadcastAllowed: true },
+            { action: 'inspect_node', argsLabel: t('mockWs.stepInspectNode'), risk: 'low', timeoutSec: 20, broadcastAllowed: true },
+            { action: 'inspect_service', argsLabel: t('mockWs.stepInspectService'), risk: 'low', timeoutSec: 45, broadcastAllowed: true },
           ],
     }
 
@@ -702,9 +703,9 @@ class MockWSClient implements WSClient {
             kind: 'approval' as const,
             createdAt: nowIso(),
             taskId: options.taskId,
-            reason: '计划包含线上服务重载，需要显式批准。',
+            reason: t('mockWs.approvalReasonReload'),
             risk,
-            impact: isBroadcast ? `${options.targetCount} 个节点的写操作` : '单节点写操作',
+            impact: isBroadcast ? t('mockWs.approvalImpactBroadcast', { count: options.targetCount }) : t('mockWs.approvalImpactSingle'),
             targetLabel: options.targetLabel,
           }
         : undefined
@@ -712,10 +713,10 @@ class MockWSClient implements WSClient {
     return {
       planRow,
       approvalRow,
-      executionTitle: options.writePlan ? '执行 nginx reload' : '执行只读诊断',
+      executionTitle: options.writePlan ? t('mockWs.executionWriteTitle') : t('mockWs.executionReadTitle'),
       summaryMarkdown: options.writePlan
-        ? `${options.targetLabel} 已完成 **nginx reload**，前后健康检查都通过，未发现新的 5xx 激增。`
-        : `${options.targetLabel} 的只读检查已完成，目前没有发现需要立即处理的异常。`,
+        ? t('mockWs.summaryWriteMarkdown', { target: options.targetLabel })
+        : t('mockWs.summaryReadMarkdown', { target: options.targetLabel }),
     }
   }
 
@@ -742,7 +743,7 @@ class MockWSClient implements WSClient {
   private requireSession(sessionId: string) {
     const session = this.sessions.get(sessionId)
     if (!session) {
-      throw new Error(`unknown session: ${sessionId}`)
+      throw new Error(t('ws.unknownSession', { sessionId }))
     }
     return session
   }

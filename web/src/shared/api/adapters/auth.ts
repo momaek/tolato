@@ -1,5 +1,6 @@
 import { ofetch } from 'ofetch'
 
+import { t } from '@/app/i18n'
 import { appEnv } from '@/shared/config/env'
 import { toErrorMessage } from '@/shared/lib/errors'
 import type { AuthSession, LoginInput } from '@/shared/types/auth'
@@ -13,7 +14,7 @@ const anonymousHttpClient = ofetch.create({
       payload?.error ||
       payload?.message ||
       `${response.status} ${response.statusText}`.trim() ||
-      toErrorMessage(undefined, 'Request failed'),
+      toErrorMessage(undefined, t('errors.requestFailed')),
     )
   },
 })

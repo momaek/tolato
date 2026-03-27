@@ -7,6 +7,7 @@ import { useConsoleSessionListStore } from '@/entities/session/model/session-lis
 import { useConsoleSessionViewStore } from '@/entities/session/model/session-view.store'
 import { useSettingsStore } from '@/entities/settings/model/settings.store'
 import { useHistoryStore } from '@/entities/task/model/history.store'
+import { t } from '@/app/i18n'
 import { login } from '@/shared/api/adapters/auth'
 import { clearStoredAuthSession, getAuthSession, setAuthSession } from '@/shared/auth/session'
 import { appEnv } from '@/shared/config/env'
@@ -53,7 +54,7 @@ export const useAuthStore = defineStore('auth', {
         this.error = null
         return session
       } catch (error) {
-        this.error = toErrorMessage(error, 'Failed to sign in')
+        this.error = toErrorMessage(error, t('errors.failedToSignIn'))
         return null
       } finally {
         this.loggingIn = false

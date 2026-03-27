@@ -1,3 +1,4 @@
+import { t } from '@/app/i18n'
 import { httpClient } from '@/shared/api/http-client'
 import { appEnv } from '@/shared/config/env'
 import { mockSettings } from '@/shared/mock/settings'
@@ -146,7 +147,7 @@ export async function listModelOptions(
     throw new Error(
       payload?.error?.message ||
         `${response.status} ${response.statusText}`.trim() ||
-        'Failed to load model list',
+        t('errors.failedToLoadModels'),
     )
   }
 

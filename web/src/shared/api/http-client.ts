@@ -1,5 +1,6 @@
 import { ofetch } from 'ofetch'
 
+import { t } from '@/app/i18n'
 import { clearStoredAuthSession, getAccessToken } from '@/shared/auth/session'
 import { appEnv } from '@/shared/config/env'
 import { toErrorMessage } from '@/shared/lib/errors'
@@ -33,7 +34,7 @@ export const httpClient = ofetch.create({
       payload?.error ||
       payload?.message ||
       `${response.status} ${response.statusText}`.trim() ||
-      toErrorMessage(undefined, 'Request failed'),
+      toErrorMessage(undefined, t('errors.requestFailed')),
     )
   },
 })

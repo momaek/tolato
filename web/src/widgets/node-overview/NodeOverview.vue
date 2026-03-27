@@ -1,8 +1,19 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import {
   displayValue,
   formatPercent,
@@ -11,15 +22,23 @@ import {
   joinDisplayParts,
   normalizePercentValue,
 } from '@/shared/lib/format'
+import { upgradeNode } from '@/shared/api/adapters/nodes'
 import type { NodeDetail, NodeStatus } from '@/shared/types/node'
 import StatusBadge from '@/shared/ui/status-badge/StatusBadge.vue'
 import { cn } from '@/lib/utils'
+import { ArrowUpCircle } from 'lucide-vue-next'
 
 const props = defineProps<{
   node: NodeDetail
 }>()
 
 const { t } = useI18n()
+
+const upgradeOpen = ref(false)
+const upgradeUrl = ref('')
+const upgradeVersion = ref('')
+const upgradeLoading = ref(false)
+const upgradeError = ref('')
 
 function statusTone(status: NodeStatus) {
   if (status === 'offline') return 'bg-stone-400'
@@ -53,6 +72,25 @@ function headerMeta(node: NodeDetail) {
       value: formatRelativeMinutes(node.lastSeen),
     }),
   ])
+}
+
+async function handleUpgrade() {
+  if (!upgradeUrl.value.trim()) return
+  upgradeLoading.value = true
+  upgradeError.value = ''
+  try {
+    await upgradeNode(props.node.id, {
+      downloadUrl: upgradeUrl.value.trim(),
+      targetVersion: upgradeVersion.value.trim(),
+    })
+    upgradeOpen.value = false
+    upgradeUrl.value = ''
+    upgradeVersion.value = ''
+  } catch (err: any) {
+    upgradeError.value = err?.message || t('nodeOverview.upgradeDialog.error')
+  } finally {
+    upgradeLoading.value = false
+  }
 }
 </script>
 
@@ -141,7 +179,7 @@ function headerMeta(node: NodeDetail) {
           <div class="mt-4 space-y-4 text-sm">
             <div>
               <div class="mb-2 flex items-center justify-between">
-                <span>CPU</span>
+                <span>{{ t('nodesTable.cpu') }}</span>
                 <span class="font-medium tabular-nums">{{
                   formatPercent(node.metrics.cpu)
                 }}</span>
@@ -155,7 +193,7 @@ function headerMeta(node: NodeDetail) {
             </div>
             <div>
               <div class="mb-2 flex items-center justify-between">
-                <span>Memory</span>
+                <span>{{ t('nodesTable.memory') }}</span>
                 <span class="font-medium tabular-nums">{{
                   formatPercent(node.metrics.memory)
                 }}</span>
@@ -169,7 +207,7 @@ function headerMeta(node: NodeDetail) {
             </div>
             <div>
               <div class="mb-2 flex items-center justify-between">
-                <span>Disk</span>
+                <span>{{ t('nodesTable.disk') }}</span>
                 <span class="font-medium tabular-nums">{{
                   formatPercent(node.metrics.disk)
                 }}</span>
@@ -193,13 +231,96 @@ function headerMeta(node: NodeDetail) {
               <dt class="text-muted-foreground">
                 {{ t('nodeOverview.agentVersion') }}
               </dt>
-              <dd>
+              <dd class="flex items-center gap-2">
                 {{
                   displayValue(
                     node.agentVersion,
                     t('common.labels.notAvailable'),
                   )
                 }}
+                <Dialog v-model:open="upgradeOpen">
+                  <DialogTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="h-7 px-2"
+                      :disabled="node.status === 'offline'"
+                    >
+                      <ArrowUpCircle class="mr-1 h-3.5 w-3.5" />
+                      {{ t('nodeOverview.upgrade') }}
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent class="max-w-md rounded-2xl">
+                    <DialogHeader>
+                      <DialogTitle>{{
+                        t('nodeOverview.upgradeDialog.title')
+                      }}</DialogTitle>
+                      <DialogDescription>{{
+                        t('nodeOverview.upgradeDialog.description')
+                      }}</DialogDescription>
+                    </DialogHeader>
+                    <div class="space-y-4 py-2">
+                      <div class="space-y-2">
+                        <label
+                          class="text-sm font-medium"
+                          for="upgrade-url"
+                        >
+                          {{ t('nodeOverview.upgradeDialog.downloadUrl') }}
+                        </label>
+                        <input
+                          id="upgrade-url"
+                          v-model="upgradeUrl"
+                          type="url"
+                          :placeholder="
+                            t(
+                              'nodeOverview.upgradeDialog.downloadUrlPlaceholder',
+                            )
+                          "
+                          class="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        />
+                      </div>
+                      <div class="space-y-2">
+                        <label
+                          class="text-sm font-medium"
+                          for="upgrade-version"
+                        >
+                          {{ t('nodeOverview.upgradeDialog.targetVersion') }}
+                        </label>
+                        <input
+                          id="upgrade-version"
+                          v-model="upgradeVersion"
+                          type="text"
+                          :placeholder="
+                            t(
+                              'nodeOverview.upgradeDialog.targetVersionPlaceholder',
+                            )
+                          "
+                          class="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        />
+                      </div>
+                      <p
+                        v-if="upgradeError"
+                        class="text-sm text-destructive"
+                      >
+                        {{ upgradeError }}
+                      </p>
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        @click="upgradeOpen = false"
+                      >
+                        {{ t('nodeOverview.upgradeDialog.cancel') }}
+                      </Button>
+                      <Button
+                        :disabled="!upgradeUrl.trim() || upgradeLoading"
+                        @click="handleUpgrade"
+                      >
+                        {{ t('nodeOverview.upgradeDialog.confirm') }}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </dd>
             </div>
             <div class="flex items-center justify-between gap-4">

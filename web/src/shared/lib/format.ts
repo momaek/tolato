@@ -1,4 +1,4 @@
-import { getAppLocale } from '@/app/i18n'
+import { getAppLocale, t } from '@/app/i18n'
 import type { AppLocale } from '@/app/i18n/locale'
 
 const EMPTY_DISPLAY_VALUES = new Set([
@@ -37,7 +37,7 @@ export function formatRelativeMinutes(
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
 
   if (diff < 1) {
-    return locale === 'zh-CN' ? '刚刚' : 'just now'
+    return t('common.states.justNow')
   }
 
   if (diff < 60) {
