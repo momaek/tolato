@@ -5,6 +5,7 @@ go 1.24.4
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Ingenimax/agent-sdk-go v0.2.42
+	github.com/creack/pty v1.1.24
 	github.com/gin-gonic/gin v1.10.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.8.0

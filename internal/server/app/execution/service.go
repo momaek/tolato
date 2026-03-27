@@ -18,6 +18,21 @@ type Service interface {
 	CancelTask(ctx context.Context, sessionID string, taskID string, idempotencyKey string) error
 	RecordChunk(ctx context.Context, input RecordChunkInput) error
 	FinishExecution(ctx context.Context, input FinishExecutionInput) error
+	SendShellInput(ctx context.Context, input ShellInputInput) error
+	ResizeShell(ctx context.Context, input ShellResizeInput) error
+}
+
+type ShellInputInput struct {
+	SessionID   string
+	ExecutionID string
+	Data        string // base64 encoded
+}
+
+type ShellResizeInput struct {
+	SessionID   string
+	ExecutionID string
+	Rows        int
+	Cols        int
 }
 
 type StartDispatchInput struct {
@@ -70,6 +85,12 @@ type RunCommandArgs struct {
 	Args    []string `json:"args,omitempty"`
 }
 
+type OpenShellArgs struct {
+	Shell string `json:"shell,omitempty"` // e.g. "/bin/bash"; defaults to $SHELL or /bin/sh
+	Rows  int    `json:"rows,omitempty"`
+	Cols  int    `json:"cols,omitempty"`
+}
+
 type Repositories struct {
 	Sessions    domain.SessionRepository
 	Tasks       domain.TaskRepository
@@ -88,6 +109,8 @@ type EventPublisher interface {
 
 type AgentDispatchPublisher interface {
 	DispatchToNode(ctx context.Context, nodeID string, cmd DispatchCommand) error
+	SendShellInput(ctx context.Context, nodeID string, executionID string, data string) error
+	SendShellResize(ctx context.Context, nodeID string, executionID string, rows, cols int) error
 }
 
 type CompletionHandler interface {
@@ -516,6 +539,40 @@ func (s *service) FinishExecution(ctx context.Context, input FinishExecutionInpu
 		return nil
 	}
 	return s.completion.HandleExecutionFinished(ctx, execution.SessionID, execution.TaskID)
+}
+
+func (s *service) SendShellInput(ctx context.Context, input ShellInputInput) error {
+	if input.ExecutionID == "" || input.Data == "" {
+		return domain.ErrInvalidArgument
+	}
+	execution, err := s.repos.Executions.Get(ctx, input.ExecutionID)
+	if err != nil {
+		return err
+	}
+	if input.SessionID != "" && execution.SessionID != input.SessionID {
+		return domain.ErrInvalidArgument
+	}
+	if s.dispatcher == nil {
+		return errors.New("agent dispatch publisher is not configured")
+	}
+	return s.dispatcher.SendShellInput(ctx, execution.NodeID, execution.ID, input.Data)
+}
+
+func (s *service) ResizeShell(ctx context.Context, input ShellResizeInput) error {
+	if input.ExecutionID == "" || input.Rows <= 0 || input.Cols <= 0 {
+		return domain.ErrInvalidArgument
+	}
+	execution, err := s.repos.Executions.Get(ctx, input.ExecutionID)
+	if err != nil {
+		return err
+	}
+	if input.SessionID != "" && execution.SessionID != input.SessionID {
+		return domain.ErrInvalidArgument
+	}
+	if s.dispatcher == nil {
+		return errors.New("agent dispatch publisher is not configured")
+	}
+	return s.dispatcher.SendShellResize(ctx, execution.NodeID, execution.ID, input.Rows, input.Cols)
 }
 
 func (s *service) validateReady() error {

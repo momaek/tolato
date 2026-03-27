@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	appruntime "github.com/momaek/tolato/internal/server/app/runtime"
 	appsession "github.com/momaek/tolato/internal/server/app/session"
 	"github.com/momaek/tolato/internal/server/domain"
@@ -29,6 +30,8 @@ type Runtime interface {
 
 type ExecutionService interface {
 	CancelTask(ctx context.Context, sessionID string, taskID string, idempotencyKey string) error
+	SendShellInput(ctx context.Context, input appexecution.ShellInputInput) error
+	ResizeShell(ctx context.Context, input appexecution.ShellResizeInput) error
 }
 
 type Dispatcher struct {
@@ -215,6 +218,41 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) (ResponseEnvelope,
 			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
 		}
 		if err := d.Execution.CancelTask(ctx, payload.SessionID, payload.TaskID, payload.IdempotencyKey); err != nil {
+			return ResponseEnvelope{}, err
+		}
+		return accepted(req.RequestID, payload.SessionID, now), nil
+
+	case TypeSessionShellInput:
+		if d.Execution == nil {
+			return ResponseEnvelope{}, errors.New("execution service is not configured")
+		}
+		payload, err := DecodePayload[SessionShellInputRequest](req)
+		if err != nil {
+			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
+		}
+		if err := d.Execution.SendShellInput(ctx, appexecution.ShellInputInput{
+			SessionID:   payload.SessionID,
+			ExecutionID: payload.ExecutionID,
+			Data:        payload.Data,
+		}); err != nil {
+			return ResponseEnvelope{}, err
+		}
+		return accepted(req.RequestID, payload.SessionID, now), nil
+
+	case TypeSessionShellResize:
+		if d.Execution == nil {
+			return ResponseEnvelope{}, errors.New("execution service is not configured")
+		}
+		payload, err := DecodePayload[SessionShellResizeRequest](req)
+		if err != nil {
+			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
+		}
+		if err := d.Execution.ResizeShell(ctx, appexecution.ShellResizeInput{
+			SessionID:   payload.SessionID,
+			ExecutionID: payload.ExecutionID,
+			Rows:        payload.Rows,
+			Cols:        payload.Cols,
+		}); err != nil {
 			return ResponseEnvelope{}, err
 		}
 		return accepted(req.RequestID, payload.SessionID, now), nil

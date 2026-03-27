@@ -28,6 +28,7 @@ type Runner struct {
 	AuthToken         string
 	HeartbeatInterval time.Duration
 	ReconnectDelay    time.Duration
+	MaxConcurrent     int
 	Dialer            *websocket.Dialer
 	Logger            *log.Logger
 	Executor          Executor
@@ -38,20 +39,43 @@ func (r *Runner) Run(ctx context.Context) error {
 		return errors.New("url and node id are required")
 	}
 
+	failures := 0
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 		if err := r.runSession(ctx); err != nil && ctx.Err() == nil {
+			failures++
 			r.logger().Printf("nodeagent reconnecting after error: %v", err)
+		} else {
+			failures = 0
 		}
 
+		delay := r.backoffDelay(failures)
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(r.reconnectDelay()):
+		case <-time.After(delay):
 		}
 	}
+}
+
+const maxReconnectDelay = 60 * time.Second
+
+func (r *Runner) backoffDelay(failures int) time.Duration {
+	base := r.reconnectDelay()
+	if failures <= 0 {
+		return base
+	}
+	shift := failures
+	if shift > 5 {
+		shift = 5 // cap at 2^5 = 32x
+	}
+	delay := base * (1 << shift)
+	if delay > maxReconnectDelay {
+		delay = maxReconnectDelay
+	}
+	return delay
 }
 
 func (r *Runner) runSession(ctx context.Context) error {
@@ -73,6 +97,8 @@ func (r *Runner) runSession(ctx context.Context) error {
 		logger:   r.logger(),
 		executor: r.executor(),
 		active:   make(map[string]struct{}),
+		sem:      make(chan struct{}, r.maxConcurrent()),
+		shells:   make(map[string]*ShellSession),
 	}
 	if err := session.sendRegister(); err != nil {
 		return err
@@ -92,6 +118,7 @@ func (r *Runner) runSession(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			session.gracefulShutdown()
 			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shutting down"), time.Now().Add(time.Second))
 			return nil
 		case <-ticker.C:
@@ -142,6 +169,13 @@ func (r *Runner) reconnectDelay() time.Duration {
 	return 2 * time.Second
 }
 
+func (r *Runner) maxConcurrent() int {
+	if r.MaxConcurrent > 0 {
+		return r.MaxConcurrent
+	}
+	return 10
+}
+
 type session struct {
 	nodeID   string
 	metadata infraws.AgentNodeMetadata
@@ -152,6 +186,11 @@ type session struct {
 	writeMu  sync.Mutex
 	activeMu sync.Mutex
 	active   map[string]struct{}
+	wg       sync.WaitGroup
+	sem      chan struct{} // concurrency limiter
+
+	shellsMu sync.RWMutex
+	shells   map[string]*ShellSession // executionID -> ShellSession
 }
 
 func (s *session) readLoop(ctx context.Context) error {
@@ -176,7 +215,33 @@ func (s *session) readLoop(ctx context.Context) error {
 				s.logger.Printf("nodeagent failed to decode dispatch: %v", err)
 				continue
 			}
-			go s.handleDispatch(ctx, cmd)
+			select {
+			case s.sem <- struct{}{}:
+				s.wg.Add(1)
+				go func() {
+					defer func() { <-s.sem; s.wg.Done() }()
+					s.handleDispatch(ctx, cmd)
+				}()
+			default:
+				s.logger.Printf("nodeagent rejected dispatch execution=%s: concurrency limit reached", cmd.ExecutionID)
+				s.finishExecution(cmd, failureResult(75, "agent concurrency limit reached"))
+			}
+		case wsagent.TypeShellInput:
+			var msg wsagent.Message
+			if err := json.Unmarshal(raw, &msg); err == nil {
+				var payload wsagent.ShellInputPayload
+				if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+					s.handleShellInput(payload)
+				}
+			}
+		case wsagent.TypeShellResize:
+			var msg wsagent.Message
+			if err := json.Unmarshal(raw, &msg); err == nil {
+				var payload wsagent.ShellResizePayload
+				if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+					s.handleShellResize(payload)
+				}
+			}
 		case wsagent.TypeAgentAck:
 			var ack wsagent.Ack
 			if err := json.Unmarshal(raw, &ack); err == nil {
@@ -204,6 +269,12 @@ func (s *session) handleDispatch(ctx context.Context, cmd appexecution.DispatchC
 		s.finishExecution(cmd, result)
 		return
 	}
+
+	if cmd.Action == "open_shell" {
+		s.handleShellDispatch(ctx, cmd)
+		return
+	}
+
 	if !s.beginExecution(cmd.ExecutionID) {
 		s.logger.Printf("nodeagent ignored duplicate dispatch execution=%s", cmd.ExecutionID)
 		return
@@ -234,6 +305,109 @@ func (s *session) endExecution(executionID string) {
 	s.activeMu.Unlock()
 }
 
+func (s *session) registerShell(executionID string, shell *ShellSession) {
+	s.shellsMu.Lock()
+	s.shells[executionID] = shell
+	s.shellsMu.Unlock()
+}
+
+func (s *session) unregisterShell(executionID string) {
+	s.shellsMu.Lock()
+	delete(s.shells, executionID)
+	s.shellsMu.Unlock()
+}
+
+func (s *session) getShell(executionID string) *ShellSession {
+	s.shellsMu.RLock()
+	defer s.shellsMu.RUnlock()
+	return s.shells[executionID]
+}
+
+func (s *session) handleShellInput(payload wsagent.ShellInputPayload) {
+	shell := s.getShell(payload.ExecutionID)
+	if shell == nil {
+		s.logger.Printf("nodeagent shell input for unknown execution=%s", payload.ExecutionID)
+		return
+	}
+	if err := shell.WriteBase64(payload.Data); err != nil {
+		s.logger.Printf("nodeagent shell input write error execution=%s: %v", payload.ExecutionID, err)
+	}
+}
+
+func (s *session) handleShellResize(payload wsagent.ShellResizePayload) {
+	shell := s.getShell(payload.ExecutionID)
+	if shell == nil {
+		s.logger.Printf("nodeagent shell resize for unknown execution=%s", payload.ExecutionID)
+		return
+	}
+	if err := shell.Resize(payload.Rows, payload.Cols); err != nil {
+		s.logger.Printf("nodeagent shell resize error execution=%s: %v", payload.ExecutionID, err)
+	}
+}
+
+func (s *session) handleShellDispatch(ctx context.Context, cmd appexecution.DispatchCommand) {
+	if !s.beginExecution(cmd.ExecutionID) {
+		s.logger.Printf("nodeagent ignored duplicate shell dispatch execution=%s", cmd.ExecutionID)
+		return
+	}
+	defer s.endExecution(cmd.ExecutionID)
+
+	var args appexecution.OpenShellArgs
+	if len(cmd.Args) > 0 {
+		_ = json.Unmarshal(cmd.Args, &args)
+	}
+	if args.Rows <= 0 {
+		args.Rows = 24
+	}
+	if args.Cols <= 0 {
+		args.Cols = 80
+	}
+
+	emitter := chunkEmitterFunc(func(stream domain.ExecutionStream, text string) error {
+		return s.sendChunk(cmd, stream, text)
+	})
+
+	s.logger.Printf("nodeagent opening shell execution=%s shell=%s rows=%d cols=%d", cmd.ExecutionID, args.Shell, args.Rows, args.Cols)
+	shell, err := StartShell(ctx, args.Shell, args.Rows, args.Cols, emitter)
+	if err != nil {
+		s.logger.Printf("nodeagent shell start failed execution=%s: %v", cmd.ExecutionID, err)
+		s.finishExecution(cmd, failureResult(1, err.Error()))
+		return
+	}
+
+	s.registerShell(cmd.ExecutionID, shell)
+	defer func() {
+		s.unregisterShell(cmd.ExecutionID)
+		shell.Close()
+	}()
+
+	result := shell.Wait()
+	s.logger.Printf("nodeagent shell exited execution=%s status=%s", cmd.ExecutionID, result.Status)
+	s.finishExecution(cmd, result)
+}
+
+const gracefulShutdownTimeout = 5 * time.Second
+
+func (s *session) gracefulShutdown() {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		s.logger.Printf("nodeagent all executions finished")
+	case <-time.After(gracefulShutdownTimeout):
+		s.logger.Printf("nodeagent shutdown timeout, %d executions still running", s.activeCount())
+	}
+}
+
+func (s *session) activeCount() int {
+	s.activeMu.Lock()
+	defer s.activeMu.Unlock()
+	return len(s.active)
+}
+
 func (s *session) sendRegister() error {
 	payload, err := json.Marshal(wsagent.RegisterPayload{
 		NodeID:   s.nodeID,
@@ -249,10 +423,16 @@ func (s *session) sendRegister() error {
 	})
 }
 
+func (s *session) isBusy() bool {
+	s.activeMu.Lock()
+	defer s.activeMu.Unlock()
+	return len(s.active) > 0
+}
+
 func (s *session) sendHeartbeat() error {
 	payload, err := json.Marshal(wsagent.HeartbeatPayload{
 		NodeID:  s.nodeID,
-		Runtime: collectRuntime(),
+		Runtime: collectRuntime(s.isBusy()),
 	})
 	if err != nil {
 		return err

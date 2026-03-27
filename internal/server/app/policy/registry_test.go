@@ -279,6 +279,18 @@ func (f *fakeExecutionStarter) FinishExecution(ctx context.Context, input appexe
 	return nil
 }
 
+func (f *fakeExecutionStarter) SendShellInput(ctx context.Context, input appexecution.ShellInputInput) error {
+	_ = ctx
+	_ = input
+	return nil
+}
+
+func (f *fakeExecutionStarter) ResizeShell(ctx context.Context, input appexecution.ShellResizeInput) error {
+	_ = ctx
+	_ = input
+	return nil
+}
+
 func (f fakeNodeSource) ListNodes(ctx context.Context) ([]NodeSummary, error) {
 	return append([]NodeSummary(nil), f.nodes...), nil
 }

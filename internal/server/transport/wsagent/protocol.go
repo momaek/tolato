@@ -14,6 +14,8 @@ const (
 	TypeExecutionChunk  = "execution.chunk"
 	TypeExecutionFinish = "execution.finished"
 	TypeTaskDispatch    = "task.dispatch"
+	TypeShellInput      = "shell.input"
+	TypeShellResize     = "shell.resize"
 	TypeAgentAck        = "agent.ack"
 	TypeAgentError      = "agent.error"
 )
@@ -51,6 +53,19 @@ type FinishedPayload struct {
 	Status       domain.ExecutionStatus `json:"status"`
 	ExitCode     *int                   `json:"exitCode,omitempty"`
 	StatusReason *string                `json:"statusReason,omitempty"`
+}
+
+type ShellInputPayload struct {
+	ExecutionID string `json:"executionId"`
+	NodeID      string `json:"nodeId"`
+	Data        string `json:"data"` // base64 encoded raw bytes
+}
+
+type ShellResizePayload struct {
+	ExecutionID string `json:"executionId"`
+	NodeID      string `json:"nodeId"`
+	Rows        int    `json:"rows"`
+	Cols        int    `json:"cols"`
 }
 
 type DispatchCommand = appexecution.DispatchCommand

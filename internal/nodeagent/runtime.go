@@ -11,10 +11,14 @@ import (
 	infraws "github.com/momaek/tolato/internal/server/infra/ws"
 )
 
-func collectRuntime() infraws.AgentNodeRuntime {
+func collectRuntime(busy bool) infraws.AgentNodeRuntime {
 	return infraws.AgentNodeRuntime{
-		Busy: false,
+		Busy: busy,
 		Metrics: infraws.AgentNodeMetrics{
+			// NOTE: cpuLoadFraction and memoryUsageFraction read from /proc and
+			// only return meaningful values on Linux. On other platforms they
+			// silently return 0. diskUsageFraction uses syscall.Statfs which
+			// works on both Linux and macOS.
 			CPU:    cpuLoadFraction(),
 			Memory: memoryUsageFraction(),
 			Disk:   diskUsageFraction("/"),

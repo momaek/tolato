@@ -432,6 +432,14 @@ func (s *stubDispatchPublisher) DispatchToNode(ctx context.Context, nodeID strin
 	return nil
 }
 
+func (s *stubDispatchPublisher) SendShellInput(ctx context.Context, nodeID string, executionID string, data string) error {
+	return nil
+}
+
+func (s *stubDispatchPublisher) SendShellResize(ctx context.Context, nodeID string, executionID string, rows, cols int) error {
+	return nil
+}
+
 type stubCompletionHandler struct {
 	calls []struct {
 		SessionID string

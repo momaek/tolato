@@ -129,10 +129,6 @@ func (e *LocalExecutor) nodeLabel() string {
 }
 
 func streamLocalCommand(ctx context.Context, spec CommandSpec, emit func(stream domain.ExecutionStream, text string) error) error {
-	if err := emit(domain.ExecutionStreamStdout, fmt.Sprintf("$ %s\n", strings.TrimSpace(strings.Join(append([]string{spec.Name}, spec.Args...), " ")))); err != nil {
-		return err
-	}
-
 	cmd := exec.CommandContext(ctx, spec.Name, spec.Args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

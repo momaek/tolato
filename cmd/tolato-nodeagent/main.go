@@ -23,6 +23,7 @@ func main() {
 	heartbeat := flag.Duration("heartbeat", 5*time.Second, "heartbeat interval")
 	reconnect := flag.Duration("reconnect", 2*time.Second, "reconnect delay")
 	timeout := flag.Duration("timeout", 20*time.Second, "per-dispatch execution timeout")
+	maxConcurrent := flag.Int("max-concurrent", 10, "maximum concurrent dispatch executions")
 	flag.Parse()
 
 	if *nodeID == "" {
@@ -41,6 +42,7 @@ func main() {
 		AuthToken:         *authToken,
 		HeartbeatInterval: *heartbeat,
 		ReconnectDelay:    *reconnect,
+		MaxConcurrent:     *maxConcurrent,
 		Executor: &nodeagent.LocalExecutor{
 			NodeID:  *nodeID,
 			Timeout: *timeout,

@@ -25,6 +25,8 @@ const (
 	TypeSessionApprovalReject   = "session.approval.reject"
 	TypeSessionOperationCancel  = "session.operation.cancel"
 	TypeSubscriptionsUpdate     = "subscriptions.update"
+	TypeSessionShellInput       = "session.shell.input"
+	TypeSessionShellResize      = "session.shell.resize"
 	TypeSessionActionAccepted   = "session.action.accepted"
 	TypeError                   = "error"
 )
@@ -105,6 +107,19 @@ type SessionOperationCancelRequest struct {
 	SessionID      string `json:"sessionId"`
 	TaskID         string `json:"taskId"`
 	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+type SessionShellInputRequest struct {
+	SessionID   string `json:"sessionId"`
+	ExecutionID string `json:"executionId"`
+	Data        string `json:"data"` // base64 encoded
+}
+
+type SessionShellResizeRequest struct {
+	SessionID   string `json:"sessionId"`
+	ExecutionID string `json:"executionId"`
+	Rows        int    `json:"rows"`
+	Cols        int    `json:"cols"`
 }
 
 type SubscriptionsUpdateRequest struct {

@@ -278,6 +278,20 @@ func (r *executionStarterRef) FinishExecution(ctx context.Context, input appexec
 	return r.service.FinishExecution(ctx, input)
 }
 
+func (r *executionStarterRef) SendShellInput(ctx context.Context, input appexecution.ShellInputInput) error {
+	if r.service == nil {
+		return errors.New("execution service is not configured")
+	}
+	return r.service.SendShellInput(ctx, input)
+}
+
+func (r *executionStarterRef) ResizeShell(ctx context.Context, input appexecution.ShellResizeInput) error {
+	if r.service == nil {
+		return errors.New("execution service is not configured")
+	}
+	return r.service.ResizeShell(ctx, input)
+}
+
 func logRecoveryReport(report recovery.ScanReport) {
 	if len(report.FailedRunning) == 0 && len(report.PausedWaiting) == 0 && len(report.WaitingAsync) == 0 {
 		return
