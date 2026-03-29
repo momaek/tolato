@@ -91,19 +91,21 @@ function mapRuntimeSessionStatus(
 }
 
 // ── Turn mutation helpers ──
+// IMPORTANT: After push/unshift into a reactive array, always return the
+// element from the array (not the local variable) so the caller gets the
+// Vue reactive proxy. Otherwise mutations won't trigger re-renders.
 
 function getOrCreateAssistantTurn(turns: Turn[], createdAt?: string): AssistantTurn {
   const last = turns[turns.length - 1]
   if (last && last.type === 'assistant') return last
-  const turn: AssistantTurn = {
+  turns.push({
     type: 'assistant',
     id: `turn-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     createdAt: createdAt ?? new Date().toISOString(),
     status: 'streaming',
     blocks: [],
-  }
-  turns.push(turn)
-  return turn
+  })
+  return turns[turns.length - 1] as AssistantTurn
 }
 
 function findLastPendingToolBlock(blocks: ContentBlock[]): ToolUseBlock | undefined {
@@ -124,18 +126,15 @@ function findLastTextBlock(blocks: ContentBlock[]) {
 function findOrCreateThinkingBlock(blocks: ContentBlock[]) {
   const existing = blocks[0]
   if (existing?.type === 'thinking') return existing
-  const block = { type: 'thinking' as const, text: '' }
-  blocks.unshift(block)
-  return block
+  blocks.unshift({ type: 'thinking' as const, text: '' })
+  return blocks[0] as { type: 'thinking'; text: string }
 }
 
 function getOrCreateStreamingTextBlock(blocks: ContentBlock[]) {
-  // Find the last text block that is still streaming (no rowId)
   const last = blocks[blocks.length - 1]
   if (last?.type === 'text' && !last.rowId) return last
-  const block = { type: 'text' as const, text: '' }
-  blocks.push(block)
-  return block
+  blocks.push({ type: 'text' as const, text: '' })
+  return blocks[blocks.length - 1] as { type: 'text'; text: string; rowId?: string }
 }
 
 // ── Store ──
@@ -277,6 +276,12 @@ export const useConsoleSessionViewStore = defineStore('console-session-view', {
       }
 
       if (row.kind === 'tool_call_meta') {
+        // Dedup: if last ToolUseBlock was created from SSE (no callRowId), attach the row ID
+        const pending = findLastPendingToolBlock(turn.blocks)
+        if (pending && !pending.callRowId) {
+          pending.callRowId = row.id
+          return
+        }
         const toolName = row.label.replace(/\(.*$/, '').trim()
         const argsPreview = row.label.includes('(')
           ? row.label.slice(row.label.indexOf('(') + 1, -1)

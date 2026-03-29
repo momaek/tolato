@@ -9,6 +9,13 @@ const props = defineProps<{
 
 const isExecuting = computed(() => !props.block.result)
 
+const hasArgs = computed(() => {
+  const args = props.block.argsPreview?.trim()
+  if (!args) return false
+  // Hide empty JSON objects/arrays
+  return args !== '{}' && args !== '[]' && args !== ''
+})
+
 const resultToneClass = computed(() => {
   if (!props.block.result) return ''
   switch (props.block.result.tone) {
@@ -54,7 +61,7 @@ const resultTextClass = computed(() => {
     </div>
 
     <pre
-      v-if="block.argsPreview"
+      v-if="hasArgs"
       class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-[0.7rem] bg-background/70 px-3 py-2 font-mono text-[11px] leading-5 text-muted-foreground"
     >{{ block.argsPreview }}</pre>
 
