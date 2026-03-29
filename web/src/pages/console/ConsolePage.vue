@@ -14,7 +14,6 @@ import ConsoleHeader from '@/widgets/console-header/ConsoleHeader.vue'
 import ConsoleSidebar from '@/widgets/console-sidebar/ConsoleSidebar.vue'
 import ConsoleTimeline from '@/widgets/console-timeline/ConsoleTimeline.vue'
 import { toErrorMessage } from '@/shared/lib/errors'
-import type { ApprovalRow, TargetCandidate } from '@/shared/types/console'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,12 +32,10 @@ const hasActiveSession = computed(() => Boolean(listStore.activeSessionId))
 const sessionGenerating = computed(
   () =>
     snapshot.value?.status === 'running' ||
-    snapshot.value?.llmStreamState?.status === 'streaming' ||
     viewStore.isActiveMessageSubmitting,
 )
 const composerDisabled = computed(
   () =>
-    Boolean(snapshot.value?.pendingActionType) ||
     sessionGenerating.value ||
     !hasNodes.value ||
     !hasActiveSession.value,
@@ -108,41 +105,6 @@ async function handleSubmit(text: string) {
   }
 }
 
-async function handleConfirmTarget(candidate: TargetCandidate) {
-  try {
-    await viewStore.confirmTarget(candidate)
-  } catch (error) {
-    toast.error(toErrorMessage(error, 'Failed to confirm target'))
-  }
-}
-
-async function handleReselectTarget() {
-  try {
-    await viewStore.reselectTarget()
-  } catch (error) {
-    toast.error(toErrorMessage(error, 'Failed to refresh target candidates'))
-  }
-}
-
-async function handleClearTarget() {
-  try {
-    await viewStore.clearTargetContext()
-  } catch (error) {
-    toast.error(toErrorMessage(error, 'Failed to clear target context'))
-  }
-}
-
-async function handleApprovalAction(
-  action: 'approve' | 'reject' | 'cancel',
-  row: ApprovalRow,
-) {
-  try {
-    await viewStore.submitApproval(action, row)
-  } catch (error) {
-    toast.error(toErrorMessage(error, 'Failed to submit approval action'))
-  }
-}
-
 onMounted(async () => {
   if (!nodesStore.initialized) {
     await nodesStore.fetchAll()
@@ -177,7 +139,7 @@ watch(
     </div>
 
     <section class="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
-      <ConsoleHeader :snapshot="snapshot" @clear-target="handleClearTarget" />
+      <ConsoleHeader :snapshot="snapshot" />
       <Card
         v-if="!hasNodes"
         class="border-amber-300/50 bg-amber-50/80 shadow-sm dark:bg-amber-950/20"
@@ -218,13 +180,8 @@ watch(
       <div class="min-h-0 flex-1">
         <ConsoleTimeline
           class="h-full"
-          :rows="viewStore.activeRows"
+          :turns="viewStore.activeTurns"
           :loading="viewStore.isLoadingSnapshot"
-          :llm-stream-state="snapshot?.llmStreamState ?? null"
-          @confirm-target="handleConfirmTarget"
-          @reselect-target="handleReselectTarget"
-          @clear-target="handleClearTarget"
-          @approval-action="handleApprovalAction"
         />
       </div>
       <div

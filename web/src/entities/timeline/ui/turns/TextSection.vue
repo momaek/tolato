@@ -3,30 +3,35 @@ import MarkdownRender from 'markstream-vue'
 import { Copy } from 'lucide-vue-next'
 
 import { Button } from '@/components/ui/button'
-import type { AssistantTextRow as Row } from '@/shared/types/console'
+import type { TextBlock } from '@/shared/types/console'
 
 const props = defineProps<{
-  row: Row
+  block: TextBlock
+  streaming: boolean
 }>()
 
-function copyAssistantText(markdown: string) {
-  globalThis.navigator?.clipboard?.writeText(markdown)
+function copyText() {
+  globalThis.navigator?.clipboard?.writeText(props.block.text)
 }
 </script>
 
 <template>
-  <div class="max-w-none px-1 py-0.5">
+  <div class="max-w-none">
     <MarkdownRender
-      :content="props.row.markdown"
+      :content="block.text"
       class="prose prose-stone max-w-none text-[15px] leading-7 [&_p]:my-0 [&_p+p]:mt-2 [&_ul]:my-2 [&_li]:my-0"
     />
+    <span
+      v-if="streaming"
+      class="ml-0.5 inline-block h-[1em] w-[0.5ch] translate-y-[2px] animate-pulse rounded-[1px] bg-foreground/70 align-baseline"
+    />
 
-    <div class="mt-2 flex">
+    <div v-if="!streaming && block.text" class="mt-2 flex">
       <Button
         variant="ghost"
         size="icon-sm"
         class="size-7 rounded-md text-muted-foreground/80 hover:text-foreground"
-        @click="copyAssistantText(props.row.markdown)"
+        @click="copyText"
       >
         <Copy class="size-3.5" />
       </Button>

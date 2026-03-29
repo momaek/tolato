@@ -1,24 +1,35 @@
 import { defineStore } from 'pinia'
 
 import { useConsoleSessionListStore } from '@/entities/session/model/session-list.store'
+import { assembleRowsIntoTurns } from '@/entities/session/model/turn-assembler'
 import type {
-  ApprovalRow,
+  AssistantTurn,
+  ContentBlock,
   SessionSnapshot,
-  TargetCandidate,
   TimelineRow,
+  ToolUseBlock,
+  Turn,
 } from '@/shared/types/console'
 import { getWSClient } from '@/shared/ws/ws-client'
 import type { WSUIEvent } from '@/shared/ws/protocol'
 
-function applySnapshotRevision(
-  current: SessionSnapshot | undefined,
-  incoming: SessionSnapshot,
-) {
-  if (!current || incoming.revision >= current.revision) {
-    return incoming
-  }
+// ── Snapshot with turns ──
 
-  return current
+interface SnapshotWithTurns extends SessionSnapshot {
+  turns: Turn[]
+}
+
+function applySnapshotRevision(
+  current: SnapshotWithTurns | undefined,
+  incoming: SessionSnapshot,
+): SnapshotWithTurns {
+  if (current && incoming.revision < current.revision) {
+    return current
+  }
+  return {
+    ...incoming,
+    turns: assembleRowsIntoTurns(incoming.rows),
+  }
 }
 
 function isSessionRowEvent(
@@ -29,16 +40,15 @@ function isSessionRowEvent(
 
 function readTextDelta(rawEvent: Record<string, unknown>) {
   const delta = rawEvent.delta
-  if (typeof delta === 'string') {
-    return delta
-  }
-
+  if (typeof delta === 'string') return delta
   const text = rawEvent.text
-  if (typeof text === 'string') {
-    return text
-  }
-
+  if (typeof text === 'string') return text
   return ''
+}
+
+function readString(rawEvent: Record<string, unknown>, key: string) {
+  const value = rawEvent[key]
+  return typeof value === 'string' ? value : ''
 }
 
 function readObject(rawEvent: Record<string, unknown>, key: string) {
@@ -49,36 +59,21 @@ function readObject(rawEvent: Record<string, unknown>, key: string) {
   return undefined
 }
 
-function readString(rawEvent: Record<string, unknown>, key: string) {
-  const value = rawEvent[key]
-  return typeof value === 'string' ? value : ''
-}
-
 function readPendingToolName(rawEvent: Record<string, unknown>) {
-  const item = readObject(rawEvent, 'item') ?? readObject(rawEvent, 'output_item')
   const direct = readString(rawEvent, 'name')
-  if (direct) {
-    return direct
-  }
-  if (!item) {
-    return ''
-  }
+  if (direct) return direct
+  const item = readObject(rawEvent, 'item') ?? readObject(rawEvent, 'output_item')
+  if (!item) return ''
   const type = readString(item, 'type')
-  if (type && type !== 'function_call') {
-    return ''
-  }
+  if (type && type !== 'function_call') return ''
   return readString(item, 'name')
 }
 
 function readPendingToolArguments(rawEvent: Record<string, unknown>) {
   const direct = readString(rawEvent, 'arguments')
-  if (direct) {
-    return direct
-  }
+  if (direct) return direct
   const item = readObject(rawEvent, 'item') ?? readObject(rawEvent, 'output_item')
-  if (!item) {
-    return ''
-  }
+  if (!item) return ''
   return readString(item, 'arguments')
 }
 
@@ -87,36 +82,68 @@ function mapRuntimeSessionStatus(
 ): SessionSnapshot['status'] {
   switch (status) {
     case 'running':
-    case 'waiting_async_execution':
       return 'running'
-    case 'paused_wait_target_confirmation':
-    case 'paused_wait_approval':
     case 'failed':
-      return 'attention'
-    case 'completed':
-      return 'completed'
+      return 'failed'
     default:
       return 'idle'
   }
 }
 
-function pendingActionTypeForStatus(
-  status: string | undefined,
-): SessionSnapshot['pendingActionType'] {
-  switch (status) {
-    case 'paused_wait_target_confirmation':
-      return 'target_confirmation'
-    case 'paused_wait_approval':
-      return 'approval'
-    default:
-      return undefined
+// ── Turn mutation helpers ──
+
+function getOrCreateAssistantTurn(turns: Turn[], createdAt?: string): AssistantTurn {
+  const last = turns[turns.length - 1]
+  if (last && last.type === 'assistant') return last
+  const turn: AssistantTurn = {
+    type: 'assistant',
+    id: `turn-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    createdAt: createdAt ?? new Date().toISOString(),
+    status: 'streaming',
+    blocks: [],
   }
+  turns.push(turn)
+  return turn
 }
+
+function findLastPendingToolBlock(blocks: ContentBlock[]): ToolUseBlock | undefined {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i]
+    if (b.type === 'tool_use' && !b.result) return b
+  }
+  return undefined
+}
+
+function findLastTextBlock(blocks: ContentBlock[]) {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (blocks[i].type === 'text') return blocks[i] as { type: 'text'; text: string; rowId?: string }
+  }
+  return undefined
+}
+
+function findOrCreateThinkingBlock(blocks: ContentBlock[]) {
+  const existing = blocks[0]
+  if (existing?.type === 'thinking') return existing
+  const block = { type: 'thinking' as const, text: '' }
+  blocks.unshift(block)
+  return block
+}
+
+function getOrCreateStreamingTextBlock(blocks: ContentBlock[]) {
+  // Find the last text block that is still streaming (no rowId)
+  const last = blocks[blocks.length - 1]
+  if (last?.type === 'text' && !last.rowId) return last
+  const block = { type: 'text' as const, text: '' }
+  blocks.push(block)
+  return block
+}
+
+// ── Store ──
 
 export const useConsoleSessionViewStore = defineStore('console-session-view', {
   state: () => ({
     activeSessionId: '' as string,
-    snapshots: {} as Record<string, SessionSnapshot>,
+    snapshots: {} as Record<string, SnapshotWithTurns>,
     submittingSessionIds: {} as Record<string, boolean>,
     isLoadingSnapshot: false,
     initialized: false,
@@ -127,8 +154,8 @@ export const useConsoleSessionViewStore = defineStore('console-session-view', {
         ? (state.snapshots[state.activeSessionId] ?? null)
         : null
     },
-    activeRows(): TimelineRow[] {
-      return this.activeSnapshot?.rows ?? []
+    activeTurns(): Turn[] {
+      return this.activeSnapshot?.turns ?? []
     },
     isActiveMessageSubmitting(state) {
       return state.activeSessionId
@@ -138,9 +165,7 @@ export const useConsoleSessionViewStore = defineStore('console-session-view', {
   },
   actions: {
     async initialize() {
-      if (this.initialized) {
-        return
-      }
+      if (this.initialized) return
 
       const client = getWSClient()
       client.subscribe((event) => {
@@ -160,151 +185,180 @@ export const useConsoleSessionViewStore = defineStore('console-session-view', {
           return
         }
 
+        const snapshot = this.snapshots[event.sessionId]
+        if (!snapshot) return
+
+        // ── timeline.row.appended → update both rows[] and turns[] ──
         if (event.type === 'timeline.row.appended') {
-          const snapshot = this.snapshots[event.sessionId]
-          if (!snapshot || event.revision < snapshot.revision) {
-            return
-          }
-          if (snapshot.llmStreamState?.status === 'completed') {
-            snapshot.llmStreamState = undefined
-          }
+          if (event.revision < snapshot.revision) return
           snapshot.revision = event.revision
-          const existingIndex = snapshot.rows.findIndex(
-            (row) => row.id === event.row.id,
-          )
+
+          // Keep rows[] in sync (for snapshot transport compat)
+          const existingIndex = snapshot.rows.findIndex((r) => r.id === event.row.id)
           if (existingIndex >= 0) {
-            snapshot.rows = snapshot.rows.map((row, index) =>
-              index === existingIndex ? event.row : row,
-            )
-            return
+            snapshot.rows = snapshot.rows.map((r, i) => (i === existingIndex ? event.row : r))
+          } else {
+            snapshot.rows = [...snapshot.rows, event.row]
           }
-          snapshot.rows = [...snapshot.rows, event.row]
+
+          // Update turns[]
+          this.applyRowToTurns(snapshot, event.row)
+          return
         }
 
-        if (
-          event.type === 'execution.chunk' ||
-          event.type === 'execution.finished' ||
-          event.type === 'timeline.row.updated'
-        ) {
-          const snapshot = this.snapshots[event.sessionId]
-          if (!snapshot || event.revision < snapshot.revision) {
-            return
-          }
+        // ── timeline.row.updated ──
+        if (event.type === 'timeline.row.updated') {
+          if (event.revision < snapshot.revision) return
           snapshot.revision = event.revision
-          const index = snapshot.rows.findIndex(
-            (row) => row.id === event.row.id,
-          )
-          if (index >= 0) {
-            snapshot.rows.splice(index, 1, event.row)
-          }
+          const idx = snapshot.rows.findIndex((r) => r.id === event.row.id)
+          if (idx >= 0) snapshot.rows.splice(idx, 1, event.row)
+          return
         }
 
+        // ── session.state.updated ──
         if (event.type === 'session.state.updated') {
-          const snapshot = this.snapshots[event.sessionId]
-          if (!snapshot || event.revision < snapshot.revision) {
-            return
-          }
+          if (event.revision < snapshot.revision) return
           snapshot.revision = event.revision
           snapshot.status = mapRuntimeSessionStatus(event.status)
-          snapshot.pendingActionType = pendingActionTypeForStatus(event.status)
-        }
-
-        if (
-          event.type === 'thread.target.pending' ||
-          event.type === 'thread.target.confirmed' ||
-          event.type === 'thread.target.cleared'
-        ) {
-          const snapshot = this.snapshots[event.sessionId]
-          if (!snapshot || event.revision < snapshot.revision) {
-            return
+          if (snapshot.status === 'idle' || snapshot.status === 'failed') {
+            const last = snapshot.turns[snapshot.turns.length - 1]
+            if (last?.type === 'assistant') {
+              last.status = 'completed'
+            }
           }
-          snapshot.revision = event.revision
-          snapshot.targetContext = event.targetContext
-          snapshot.pendingActionType =
-            event.type === 'thread.target.pending'
-              ? 'target_confirmation'
-              : undefined
+          // Clear legacy llmStreamState
+          if (snapshot.status === 'idle' && snapshot.llmStreamState) {
+            snapshot.llmStreamState = undefined
+          }
+          return
         }
 
+        // ── llm.sse.event → update turns[] directly ──
         if (event.type === 'llm.sse.event') {
-          const snapshot = this.snapshots[event.sessionId]
-          if (!snapshot) {
-            return
-          }
-
-          const streamState = snapshot.llmStreamState ?? {
-            responseId: event.responseId,
-            status: 'streaming' as const,
-            contentText: '',
-            reasoningText: '',
-            pendingToolName: '',
-            pendingToolArguments: '',
-            events: [],
-          }
-
-          streamState.responseId = event.responseId ?? streamState.responseId
-          streamState.status = 'streaming'
-          streamState.events.push({
-            sequenceNumber: event.sequenceNumber,
-            upstreamEventType: event.upstreamEventType,
-            rawEvent: event.rawEvent,
-          })
-
-          if (event.upstreamEventType === 'response.output_text.delta') {
-            streamState.contentText = `${streamState.contentText ?? ''}${readTextDelta(event.rawEvent)}`
-          }
-
-          if (event.upstreamEventType === 'response.reasoning_text.delta') {
-            streamState.reasoningText = `${streamState.reasoningText ?? ''}${readTextDelta(event.rawEvent)}`
-          }
-
-          if (
-            event.upstreamEventType === 'response.output_item.added' ||
-            event.upstreamEventType === 'response.output_item.done'
-          ) {
-            const toolName = readPendingToolName(event.rawEvent)
-            if (toolName) {
-              streamState.pendingToolName = toolName
-            }
-            const toolArguments = readPendingToolArguments(event.rawEvent)
-            if (toolArguments && !streamState.pendingToolArguments) {
-              streamState.pendingToolArguments = toolArguments
-            }
-          }
-
-          if (event.upstreamEventType === 'response.function_call_arguments.delta') {
-            streamState.pendingToolArguments = `${streamState.pendingToolArguments ?? ''}${readTextDelta(event.rawEvent)}`
-          }
-
-          if (event.upstreamEventType === 'response.function_call_arguments.done') {
-            const toolArguments = readPendingToolArguments(event.rawEvent)
-            if (toolArguments) {
-              streamState.pendingToolArguments = toolArguments
-            }
-            const toolName = readPendingToolName(event.rawEvent)
-            if (toolName) {
-              streamState.pendingToolName = toolName
-            }
-          }
-
-          snapshot.llmStreamState = streamState
+          this.applySSEToTurns(snapshot, event)
+          return
         }
 
+        // ── llm.response.completed → no-op on turn status ──
         if (event.type === 'llm.response.completed') {
-          const snapshot = this.snapshots[event.sessionId]
-          if (!snapshot?.llmStreamState) {
-            return
-          }
-          snapshot.llmStreamState.status = 'completed'
+          // Agent loop may continue with tool calls — don't mark completed.
+          return
         }
       })
 
       this.initialized = true
     },
-    async switchSession(sessionId: string) {
-      if (!sessionId) {
+
+    applyRowToTurns(snapshot: SnapshotWithTurns, row: TimelineRow) {
+      const turns = snapshot.turns
+
+      if (row.kind === 'user_message') {
+        turns.push({
+          type: 'user',
+          id: row.id,
+          createdAt: row.createdAt,
+          text: row.text,
+        })
         return
       }
+
+      const turn = getOrCreateAssistantTurn(turns, row.createdAt)
+
+      if (row.kind === 'assistant_text') {
+        // Dedup: if last TextBlock was built from streaming (no rowId), finalize it
+        const streamedText = findLastTextBlock(turn.blocks)
+        if (streamedText && !streamedText.rowId) {
+          streamedText.rowId = row.id
+          streamedText.text = row.markdown
+        } else {
+          turn.blocks.push({ type: 'text', text: row.markdown, rowId: row.id })
+        }
+        return
+      }
+
+      if (row.kind === 'tool_call_meta') {
+        const toolName = row.label.replace(/\(.*$/, '').trim()
+        const argsPreview = row.label.includes('(')
+          ? row.label.slice(row.label.indexOf('(') + 1, -1)
+          : undefined
+        turn.blocks.push({
+          type: 'tool_use',
+          toolName: toolName || row.label,
+          argsPreview,
+          callRowId: row.id,
+        })
+        return
+      }
+
+      if (row.kind === 'tool_result_meta') {
+        const pending = findLastPendingToolBlock(turn.blocks)
+        if (pending) {
+          pending.result = { label: row.label, tone: row.tone, rowId: row.id }
+        }
+        return
+      }
+    },
+
+    applySSEToTurns(
+      snapshot: SnapshotWithTurns,
+      event: Extract<WSUIEvent, { type: 'llm.sse.event' }>,
+    ) {
+      const turns = snapshot.turns
+      const turn = getOrCreateAssistantTurn(turns)
+      turn.status = 'streaming'
+      if (event.responseId) {
+        turn.responseId = event.responseId
+      }
+
+      if (event.upstreamEventType === 'response.reasoning_text.delta') {
+        const block = findOrCreateThinkingBlock(turn.blocks)
+        block.text += readTextDelta(event.rawEvent)
+        return
+      }
+
+      if (event.upstreamEventType === 'response.output_text.delta') {
+        const block = getOrCreateStreamingTextBlock(turn.blocks)
+        block.text += readTextDelta(event.rawEvent)
+        return
+      }
+
+      if (
+        event.upstreamEventType === 'response.output_item.added' ||
+        event.upstreamEventType === 'response.output_item.done'
+      ) {
+        const toolName = readPendingToolName(event.rawEvent)
+        if (toolName) {
+          turn.blocks.push({
+            type: 'tool_use',
+            toolName,
+            argsPreview: readPendingToolArguments(event.rawEvent) || undefined,
+          })
+        }
+        return
+      }
+
+      if (event.upstreamEventType === 'response.function_call_arguments.delta') {
+        const pending = findLastPendingToolBlock(turn.blocks)
+        if (pending) {
+          pending.argsPreview = (pending.argsPreview ?? '') + readTextDelta(event.rawEvent)
+        }
+        return
+      }
+
+      if (event.upstreamEventType === 'response.function_call_arguments.done') {
+        const pending = findLastPendingToolBlock(turn.blocks)
+        if (pending) {
+          const args = readPendingToolArguments(event.rawEvent)
+          if (args) pending.argsPreview = args
+          const name = readPendingToolName(event.rawEvent)
+          if (name) pending.toolName = name
+        }
+        return
+      }
+    },
+
+    async switchSession(sessionId: string) {
+      if (!sessionId) return
 
       const client = getWSClient()
       const listStore = useConsoleSessionListStore()
@@ -368,51 +422,6 @@ export const useConsoleSessionViewStore = defineStore('console-session-view', {
       } finally {
         this.submittingSessionIds[sessionId] = false
       }
-    },
-    async confirmTarget(candidate?: TargetCandidate) {
-      if (!this.activeSessionId) {
-        return
-      }
-      await getWSClient().confirmTarget({
-        type: 'session.target.confirm',
-        sessionId: this.activeSessionId,
-        action: 'confirm',
-        candidate,
-      })
-    },
-    async reselectTarget() {
-      if (!this.activeSessionId) {
-        return
-      }
-      await getWSClient().confirmTarget({
-        type: 'session.target.confirm',
-        sessionId: this.activeSessionId,
-        action: 'reselect',
-      })
-    },
-    async clearTargetContext() {
-      if (!this.activeSessionId) {
-        return
-      }
-      await getWSClient().confirmTarget({
-        type: 'session.target.confirm',
-        sessionId: this.activeSessionId,
-        action: 'clear',
-      })
-    },
-    async submitApproval(
-      action: 'approve' | 'reject' | 'cancel',
-      approvalRow?: ApprovalRow,
-    ) {
-      if (!this.activeSessionId) {
-        return
-      }
-      await getWSClient().submitApproval({
-        type: 'session.approval.action',
-        sessionId: this.activeSessionId,
-        action,
-        approvalRow,
-      })
     },
   },
 })
