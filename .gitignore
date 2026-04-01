@@ -1,3 +1,4 @@
 bin/
 .tolato/
 *.log
+tolato-server
