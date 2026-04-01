@@ -1,42 +1,75 @@
 package agentsdk
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
+	"github.com/Ingenimax/agent-sdk-go/pkg/memory"
 
 	"github.com/momaek/tolato/internal/server/agentapi"
 )
 
-// conversationToPrompt converts the agentapi conversation items into a
-// text prompt that agent-sdk-go can use. This is necessary because
-// agent-sdk-go's Agent.Run() accepts a single string input rather than
-// a structured conversation.
+// buildConversationMemory converts the agentapi conversation items into an
+// agent-sdk-go ConversationBuffer. This preserves full multi-turn context
+// including tool calls and their results, so the LLM can reason about
+// prior exchanges.
 //
-// For the initial message this is trivial (just the user text).
-// For resumed runs this function is not called — instead we feed the
-// tool result directly through the channel.
-func conversationToPrompt(items []agentapi.Item) string {
-	// Find the last user message — that's the input to the agent.
-	for i := len(items) - 1; i >= 0; i-- {
-		item := items[i]
-		if strings.TrimSpace(item.Role) == "user" || strings.TrimSpace(item.Type) == "" && strings.TrimSpace(item.Role) == "user" {
-			return agentapi.MessageText(item)
-		}
-	}
-	// Fallback: concatenate all user messages.
-	var b strings.Builder
+// The returned prompt is the last user message (the current turn input).
+func buildConversationMemory(items []agentapi.Item) (interfaces.Memory, string) {
+	mem := memory.NewConversationBuffer(memory.WithMaxSize(200))
+	ctx := context.Background()
+
+	var lastUserMessage string
+
 	for _, item := range items {
-		if strings.TrimSpace(item.Role) == "user" {
+		role := strings.TrimSpace(item.Role)
+		typ := strings.TrimSpace(item.Type)
+
+		switch {
+		case role == "user":
 			text := agentapi.MessageText(item)
 			if text != "" {
-				if b.Len() > 0 {
-					b.WriteString("\n")
-				}
-				b.WriteString(text)
+				_ = mem.AddMessage(ctx, interfaces.Message{
+					Role:    interfaces.MessageRoleUser,
+					Content: text,
+				})
+				lastUserMessage = text
 			}
+
+		case role == "assistant" || typ == "message" && role == "assistant":
+			text := agentapi.MessageText(item)
+			if text != "" {
+				_ = mem.AddMessage(ctx, interfaces.Message{
+					Role:    interfaces.MessageRoleAssistant,
+					Content: text,
+				})
+			}
+
+		case typ == "function_call":
+			// Record tool calls as assistant messages with tool call metadata.
+			_ = mem.AddMessage(ctx, interfaces.Message{
+				Role:    interfaces.MessageRoleAssistant,
+				Content: "",
+				ToolCalls: []interfaces.ToolCall{{
+					ID:        item.CallID,
+					Name:      item.Name,
+					Arguments: item.Arguments,
+				}},
+			})
+
+		case typ == "function_call_output":
+			// Record tool results as tool messages.
+			_ = mem.AddMessage(ctx, interfaces.Message{
+				Role:       interfaces.MessageRoleTool,
+				Content:    item.Output,
+				ToolCallID: item.CallID,
+			})
 		}
 	}
-	return b.String()
+
+	return mem, lastUserMessage
 }
 
 // extractLastFunctionOutput finds the last function_call_output item in

@@ -209,6 +209,8 @@ function mapTimelineRows(rows: BackendTimelineRow[]): TimelineRow[] {
           id: readRowID(row),
           kind: 'tool_call_meta',
           createdAt: readRowCreatedAt(row),
+          toolName: toolName || undefined,
+          argsPreview: args || undefined,
           label: args
             ? `${toolName}(${args})`
             : toolName || readRowText(row) || 'tool call',

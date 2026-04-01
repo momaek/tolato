@@ -77,6 +77,7 @@ func (p *Provider) startNewRunner(
 	timeout := time.Duration(p.config.runnerTimeout()) * time.Second
 	runCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	runner.cancel = cancel
+	runner.runCtx = runCtx
 
 	// Convert ToLaTo tools into intercepted tools.
 	interceptedTools := wrapToolSpecs(tools, runner.toolCallChan, runner.resultChan)
@@ -91,13 +92,17 @@ func (p *Provider) startNewRunner(
 	// Build system prompt with runtime context.
 	systemPrompt := buildSystemPrompt(input)
 
+	// Build conversation memory from history so the agent has full context.
+	mem, prompt := buildConversationMemory(input.Conversation)
+
 	// Create the agent.
 	opts := []agent.Option{
 		agent.WithLLM(llmClient),
 		agent.WithTools(interceptedTools...),
 		agent.WithSystemPrompt(systemPrompt),
-		agent.WithMaxIterations(20),              // high limit — the Runtime controls the actual loop via channels
-		agent.WithRequirePlanApproval(false),      // disable execution plans — we use a direct agentic loop
+		agent.WithMemory(mem),
+		agent.WithMaxIterations(20),         // high limit — the Runtime controls the actual loop via channels
+		agent.WithRequirePlanApproval(false), // disable execution plans — we use a direct agentic loop
 	}
 	if p.config.EnableThinking {
 		opts = append(opts, agent.WithStreamConfig(&interfaces.StreamConfig{
@@ -122,11 +127,11 @@ func (p *Provider) startNewRunner(
 	// Store the runner so resume can find it.
 	p.runners.Store(input.SessionID, runner)
 
-	// Determine the input prompt.
-	prompt := conversationToPrompt(input.Conversation)
+	// Set response ID BEFORE starting the forwarder to avoid race condition.
+	responseID := p.ids.NewID("resp")
+	runner.setResponseID(responseID)
 
 	// Launch the agent goroutine.
-	responseID := p.ids.NewID("resp")
 	go p.runAgent(runCtx, input.SessionID, responseID, agentInstance, prompt, runner)
 
 	// Wait for the first event.
@@ -211,7 +216,10 @@ func (p *Provider) resumeRunner(
 		return runtime.ModelTurnOutput{}, ctx.Err()
 	}
 
+	// Set response ID BEFORE waiting so the forwarder uses the new ID.
 	responseID := p.ids.NewID("resp")
+	runner.setResponseID(responseID)
+
 	return p.waitForEvent(ctx, input.SessionID, runner, responseID)
 }
 
@@ -226,12 +234,9 @@ func (p *Provider) waitForEvent(
 	responseID string,
 ) (runtime.ModelTurnOutput, error) {
 	// Ensure the single streaming forwarder goroutine is started exactly once
-	// for this runner's lifetime. This avoids multiple goroutines competing
-	// on the same streamChan across successive waitForEvent calls.
+	// for this runner's lifetime. The responseID was already set before calling
+	// this method, so the forwarder will tag events with the correct turn ID.
 	runner.startForwarder(sessionID, p.events)
-
-	// Update the response ID so the forwarder tags events with the current turn.
-	runner.setResponseID(responseID)
 
 	select {
 	case call := <-runner.toolCallChan:

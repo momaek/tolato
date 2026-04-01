@@ -5,9 +5,11 @@ import type { ToolUseBlock } from '@/shared/types/console'
 
 const props = defineProps<{
   block: ToolUseBlock
+  turnCompleted?: boolean
 }>()
 
-const isExecuting = computed(() => !props.block.result)
+const isExecuting = computed(() => !props.block.result && !props.turnCompleted)
+const isInterrupted = computed(() => !props.block.result && props.turnCompleted)
 
 const hasArgs = computed(() => {
   const args = props.block.argsPreview?.trim()
@@ -59,6 +61,10 @@ const resultTextClass = computed(() => {
         class="size-2 rounded-full bg-foreground/50 animate-pulse"
       />
       <span
+        v-else-if="isInterrupted"
+        class="size-2 rounded-full bg-muted-foreground/30"
+      />
+      <span
         v-else-if="block.result?.tone === 'success'"
         class="size-2 rounded-full bg-brand-success"
       />
@@ -83,6 +89,13 @@ const resultTextClass = computed(() => {
       <span class="font-mono text-[11px] font-medium leading-4" :class="[resultTextClass]">
         {{ block.result.label }}
       </span>
+    </div>
+
+    <div
+      v-if="isInterrupted"
+      class="mt-2 rounded-[0.7rem] border border-border/50 bg-muted/35 px-3 py-1.5"
+    >
+      <span class="font-mono text-[11px] font-medium leading-4 text-muted-foreground">interrupted</span>
     </div>
   </div>
 </template>

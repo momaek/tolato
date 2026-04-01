@@ -60,6 +60,7 @@ function isLastTextBlock(index: number) {
         <ToolUseSection
           v-else-if="block.type === 'tool_use'"
           :block="block"
+          :turn-completed="!isStreaming"
         />
       </template>
     </div>

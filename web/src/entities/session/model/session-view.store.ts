@@ -282,10 +282,11 @@ export const useConsoleSessionViewStore = defineStore('console-session-view', {
           pending.callRowId = row.id
           return
         }
-        const toolName = row.label.replace(/\(.*$/, '').trim()
-        const argsPreview = row.label.includes('(')
+        // Use dedicated fields from the row; fall back to parsing label only as last resort.
+        const toolName = row.toolName || row.label.replace(/\(.*$/, '').trim()
+        const argsPreview = row.argsPreview || (row.label.includes('(')
           ? row.label.slice(row.label.indexOf('(') + 1, -1)
-          : undefined
+          : undefined)
         turn.blocks.push({
           type: 'tool_use',
           toolName: toolName || row.label,

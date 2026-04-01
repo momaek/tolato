@@ -20,6 +20,11 @@ func (r *Runtime) loadConversationState(ctx context.Context, session domain.Sess
 		if err := json.Unmarshal(session.ProviderStateBlob, &state); err == nil {
 			return agentapi.CloneItems(state.Conversation), cloneRaw(state.Provider), nil
 		}
+		// Log corruption so we can diagnose state loss.
+		r.logError(ctx, "runtime conversation state blob corrupted, rebuilding from messages",
+			"session_id", session.ID,
+			"blob_size", len(session.ProviderStateBlob),
+		)
 	}
 
 	conversation, err := r.rebuildConversation(ctx, session.ID)

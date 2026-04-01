@@ -104,6 +104,7 @@ func marshalToolCallDone(tc *interfaces.ToolCallEvent) json.RawMessage {
 // response ID from the runner atomically, so a single goroutine handles
 // streaming across multiple turns without leaking.
 func forwardStreamEventsWithDynamicID(
+	ctx context.Context,
 	sessionID string,
 	runner *activeRunner,
 	events runtime.EventPublisher,
@@ -117,28 +118,37 @@ func forwardStreamEventsWithDynamicID(
 	seq := 0
 	eventCount := 0
 	for event := range runner.streamChan {
+		// Stop forwarding if context is cancelled (session closed).
+		select {
+		case <-ctx.Done():
+			slog.Info("agentsdk stream: forwarder cancelled",
+				"session_id", sessionID, "total_events", eventCount)
+			return
+		default:
+		}
+
 		responseID := runner.getResponseID()
 		seq++
 		eventCount++
 		switch event.Type {
 		case interfaces.AgentEventThinking:
 			raw := marshalDelta(event.ThinkingStep)
-			_ = events.LLMSSEEvent(context.Background(), sessionID, responseID, seq,
+			_ = events.LLMSSEEvent(ctx, sessionID, responseID, seq,
 				"response.reasoning_text.delta", raw)
 		case interfaces.AgentEventContent:
 			raw := marshalDelta(event.Content)
-			_ = events.LLMSSEEvent(context.Background(), sessionID, responseID, seq,
+			_ = events.LLMSSEEvent(ctx, sessionID, responseID, seq,
 				"response.output_text.delta", raw)
 		case interfaces.AgentEventToolCall:
 			if event.ToolCall != nil {
 				slog.Info("agentsdk stream: tool_call event",
 					"session_id", sessionID, "tool", event.ToolCall.Name)
 				itemRaw := marshalToolCallItem(event.ToolCall)
-				_ = events.LLMSSEEvent(context.Background(), sessionID, responseID, seq,
+				_ = events.LLMSSEEvent(ctx, sessionID, responseID, seq,
 					"response.output_item.added", itemRaw)
 				seq++
 				doneRaw := marshalToolCallDone(event.ToolCall)
-				_ = events.LLMSSEEvent(context.Background(), sessionID, responseID, seq,
+				_ = events.LLMSSEEvent(ctx, sessionID, responseID, seq,
 					"response.function_call_arguments.done", doneRaw)
 			}
 		case interfaces.AgentEventComplete:
@@ -146,7 +156,7 @@ func forwardStreamEventsWithDynamicID(
 				"session_id", sessionID, "response_id", responseID,
 				"total_events", eventCount,
 				"content_len", len(event.Content))
-			_ = events.LLMResponseCompleted(context.Background(), sessionID, responseID,
+			_ = events.LLMResponseCompleted(ctx, sessionID, responseID,
 				marshalComplete(responseID, event.Content))
 		case interfaces.AgentEventError:
 			slog.Warn("agentsdk stream: error event",

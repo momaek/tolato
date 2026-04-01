@@ -24,6 +24,7 @@ type activeRunner struct {
 	doneChan     chan RunResult
 	streamChan   chan interfaces.AgentStreamEvent
 	cancel       context.CancelFunc
+	runCtx       context.Context // context for the runner goroutine, used by forwarder
 
 	// responseID is updated atomically so the single forwarder goroutine
 	// always tags events with the current turn's response ID.
@@ -60,7 +61,11 @@ func (r *activeRunner) getResponseID() string {
 // multiple waitForEvent calls.
 func (r *activeRunner) startForwarder(sessionID string, events runtime.EventPublisher) {
 	r.forwarderOnce.Do(func() {
-		go forwardStreamEventsWithDynamicID(sessionID, r, events)
+		ctx := r.runCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		go forwardStreamEventsWithDynamicID(ctx, sessionID, r, events)
 	})
 }
 

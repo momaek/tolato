@@ -20,6 +20,8 @@ export interface AssistantTextRow extends TimelineRowBase {
 export interface ToolCallMetaRow extends TimelineRowBase {
   kind: 'tool_call_meta'
   label: string
+  toolName?: string
+  argsPreview?: string
 }
 
 export interface ToolResultMetaRow extends TimelineRowBase {
