@@ -48,6 +48,11 @@ type ExecutionService interface {
 	StartUpgrade(ctx context.Context, input appexecution.StartUpgradeInput) (appexecution.StartDispatchResult, error)
 }
 
+// ProbeAPI is an optional subsystem that registers probe routes.
+type ProbeAPI interface {
+	RegisterRoutes(group gin.IRouter)
+}
+
 type Handler struct {
 	Nodes      NodeViewService
 	History    HistoryService
@@ -55,6 +60,7 @@ type Handler struct {
 	Auth       AuthService
 	Execution  ExecutionService
 	AgentToken string
+	Probe      ProbeAPI // optional, nil if probe is disabled
 }
 
 func (h Handler) RegisterRoutes(router gin.IRouter) {
@@ -81,6 +87,11 @@ func (h Handler) RegisterRoutes(router gin.IRouter) {
 	protected.POST("/settings/sessions/revoke-others", h.revokeOtherSessions)
 	protected.GET("/settings/preferences", h.getPreferences)
 	protected.PUT("/settings/preferences", h.putPreferences)
+
+	// Register probe routes if enabled
+	if h.Probe != nil {
+		h.Probe.RegisterRoutes(protected)
+	}
 }
 
 func (h Handler) login(c *gin.Context) {

@@ -82,14 +82,6 @@ export const useConsoleSessionListStore = defineStore('console-session-list', {
           sortSessions(this.sessions)
         }
 
-        if (event.type === 'session.requires_attention') {
-          const session = this.sessions.find(
-            (item) => item.id === event.sessionId,
-          )
-          if (session) {
-            session.status = 'attention'
-          }
-        }
 
         if (event.type === 'session.unread.updated') {
           const session = this.sessions.find(

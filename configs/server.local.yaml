@@ -11,3 +11,18 @@ auth:
   admin_username: "admin"
   admin_password: "admin"
   agent_token: "agent-dev-token"
+
+# NodeProbe link monitoring (optional)
+probe:
+  enabled: true
+  retention_days: 30
+  telegram:
+    bot_token: ""
+    chat_id: ""
+  alert_rules:
+    latency_threshold_ms: 200
+    packet_loss_threshold_percent: 5
+    tcp_connect_threshold_ms: 500
+    bandwidth_threshold_mbps: 10
+    offline_timeout_seconds: 180
+    recovery_count: 3

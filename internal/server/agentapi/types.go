@@ -14,7 +14,7 @@ type FunctionSpec struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty"`
-	Strict      bool           `json:"strict"`
+	Strict      bool           `json:"strict,omitempty"`
 }
 
 type Item struct {
@@ -42,7 +42,6 @@ func NewFunctionTool(name, desc string, parameters map[string]any) ToolSpec {
 			Name:        strings.TrimSpace(name),
 			Description: strings.TrimSpace(desc),
 			Parameters:  parameters,
-			Strict:      true,
 		},
 	}
 }

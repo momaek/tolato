@@ -7,7 +7,6 @@ import (
 	"time"
 
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
-	appruntime "github.com/momaek/tolato/internal/server/app/runtime"
 	appsession "github.com/momaek/tolato/internal/server/app/session"
 	"github.com/momaek/tolato/internal/server/domain"
 )
@@ -23,9 +22,6 @@ type SessionService interface {
 
 type Runtime interface {
 	HandleUserMessage(ctx context.Context, sessionID string, text string, clientMessageID string) error
-	ResumeAfterTargetConfirmation(ctx context.Context, sessionID string, action appruntime.ConfirmTargetAction) error
-	ClearTargetContext(ctx context.Context, sessionID string, idempotencyKey string) error
-	ResumeAfterApproval(ctx context.Context, sessionID string, action appruntime.ApprovalAction) error
 }
 
 type ExecutionService interface {
@@ -131,83 +127,11 @@ func (d Dispatcher) Dispatch(ctx context.Context, raw []byte) (ResponseEnvelope,
 		}
 		return accepted(req.RequestID, payload.SessionID, now), nil
 
-	case TypeSessionTargetConfirm:
-		if d.Runtime == nil {
-			return ResponseEnvelope{}, errors.New("runtime is not configured")
-		}
-		payload, err := DecodePayload[SessionTargetConfirmRequest](req)
-		if err != nil {
-			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
-		}
-		if err := d.Runtime.ResumeAfterTargetConfirmation(ctx, payload.SessionID, appruntime.ConfirmTargetAction{
-			NodeIDs:        payload.NodeIDs,
-			Scope:          string(payload.Scope),
-			IdempotencyKey: payload.IdempotencyKey,
-		}); err != nil {
-			return ResponseEnvelope{}, err
-		}
-		return accepted(req.RequestID, payload.SessionID, now), nil
-
-	case TypeSessionTargetClear:
-		if d.Runtime == nil {
-			return ResponseEnvelope{}, errors.New("runtime is not configured")
-		}
-		payload, err := DecodePayload[SessionTargetClearRequest](req)
-		if err != nil {
-			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
-		}
-		if err := d.Runtime.ClearTargetContext(ctx, payload.SessionID, payload.IdempotencyKey); err != nil {
-			return ResponseEnvelope{}, err
-		}
-		return accepted(req.RequestID, payload.SessionID, now), nil
-
-	case TypeSessionTargetReselect:
-		if d.Runtime == nil {
-			return ResponseEnvelope{}, errors.New("runtime is not configured")
-		}
-		payload, err := DecodePayload[SessionTargetReselectRequest](req)
-		if err != nil {
-			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
-		}
-		if err := d.Runtime.ClearTargetContext(ctx, payload.SessionID, payload.IdempotencyKey); err != nil {
-			return ResponseEnvelope{}, err
-		}
-		return accepted(req.RequestID, payload.SessionID, now), nil
-
-	case TypeSessionApprovalApprove:
-		if d.Runtime == nil {
-			return ResponseEnvelope{}, errors.New("runtime is not configured")
-		}
-		payload, err := DecodePayload[SessionApprovalApproveRequest](req)
-		if err != nil {
-			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
-		}
-		if err := d.Runtime.ResumeAfterApproval(ctx, payload.SessionID, appruntime.ApprovalAction{
-			TaskID:         payload.TaskID,
-			Approved:       true,
-			IdempotencyKey: payload.IdempotencyKey,
-		}); err != nil {
-			return ResponseEnvelope{}, err
-		}
-		return accepted(req.RequestID, payload.SessionID, now), nil
-
-	case TypeSessionApprovalReject:
-		if d.Runtime == nil {
-			return ResponseEnvelope{}, errors.New("runtime is not configured")
-		}
-		payload, err := DecodePayload[SessionApprovalRejectRequest](req)
-		if err != nil {
-			return errorResponse(req.RequestID, "bad_request", err.Error()), nil
-		}
-		if err := d.Runtime.ResumeAfterApproval(ctx, payload.SessionID, appruntime.ApprovalAction{
-			TaskID:         payload.TaskID,
-			Approved:       false,
-			Reason:         payload.Reason,
-			IdempotencyKey: payload.IdempotencyKey,
-		}); err != nil {
-			return ResponseEnvelope{}, err
-		}
-		return accepted(req.RequestID, payload.SessionID, now), nil
+	case TypeSessionTargetConfirm, TypeSessionTargetClear, TypeSessionTargetReselect,
+		TypeSessionApprovalApprove, TypeSessionApprovalReject:
+		// These operations are now handled via the chat flow (confirm tokens).
+		// Return a deprecation error to inform the client.
+		return errorResponse(req.RequestID, "deprecated", "This action is now handled through the chat conversation."), nil
 
 	case TypeSessionOperationCancel:
 		if d.Execution == nil {

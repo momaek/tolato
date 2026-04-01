@@ -3,6 +3,7 @@ package devloop
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/momaek/tolato/internal/server/agentapi"
@@ -23,6 +24,9 @@ func New() *Provider {
 	return &Provider{}
 }
 
+// RunTurn implements a simplified dev loop using the 2-tool model:
+//
+//	list_nodes for listing, run_on_node for execution (with built-in resolution and confirmation).
 func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []agentapi.ToolSpec) (runtime.ModelTurnOutput, error) {
 	_ = ctx
 	_ = tools
@@ -36,89 +40,75 @@ func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, to
 			return assistantOutput("No user input available for this turn.", true), nil
 		}
 
-		return toolOutput("resolve_target_nodes", policy.ResolveTargetNodesInput{
-			Query: userText,
+		// Simple heuristic: if the user is asking about nodes, list them.
+		// Otherwise, try to run a command.
+		lower := strings.ToLower(userText)
+		if strings.Contains(lower, "节点") || strings.Contains(lower, "node") ||
+			strings.Contains(lower, "多少") || strings.Contains(lower, "list") ||
+			strings.Contains(lower, "show") {
+			return toolOutput("list_nodes", policy.ListNodesInput{
+				Query: userText,
+			}, state{
+				Stage:     "listed",
+				InputText: userText,
+			})
+		}
+
+		// Default: try run_on_node with the user's text as target.
+		return toolOutput("run_on_node", policy.RunOnNodeInput{
+			Target:  userText,
+			Command: "system_status",
 		}, state{
-			Stage:     "resolved",
+			Stage:     "executed",
 			InputText: userText,
 		})
 
-	case "resolved":
-		resolved, ok := lastToolPayload[policy.ResolveTargetNodesOutput](input.Conversation, "resolve_target_nodes")
+	case "listed":
+		// After listing nodes, produce a text summary.
+		listed, ok := lastToolPayload[policy.ListNodesOutput](input.Conversation, "list_nodes")
 		if !ok {
-			return assistantOutput("Unable to resolve targets from the latest turn.", true), nil
+			return assistantOutput("Unable to parse node listing.", true), nil
 		}
+		summary := fmt.Sprintf("Found %d node(s).", len(listed.Nodes))
+		return assistantOutput(summary, true), nil
 
-		return toolOutput("request_target_confirmation", policy.RequestTargetConfirmationInput{
-			TargetContext: resolved.TargetContext,
-		}, state{
-			Stage:     "waiting_target",
-			InputText: st.InputText,
-		})
-
-	case "waiting_target":
-		if input.ActiveTargetContext.Status != domain.TargetStatusConfirmed {
-			return assistantOutput("Waiting for target confirmation.", false), nil
-		}
-
-		return toolOutput("propose_plan", policy.ProposePlanInput{
-			InputText:        st.InputText,
-			TargetContext:    input.ActiveTargetContext,
-			RiskLevel:        domain.RiskLevelLow,
-			RequiresApproval: boolPtr(false),
-		}, state{
-			Stage:     "planned",
-			InputText: st.InputText,
-		})
-
-	case "planned":
-		plan, ok := lastToolPayload[policy.ProposedPlan](input.Conversation, "propose_plan")
+	case "executed":
+		// After run_on_node, produce a text summary from the result.
+		result, ok := lastToolPayload[policy.RunOnNodeOutput](input.Conversation, "run_on_node")
 		if !ok {
-			return assistantOutput("Unable to build a plan for the current turn.", true), nil
+			return assistantOutput("Unable to parse execution result.", true), nil
 		}
-
-		risk := plan.RiskLevel
-		if risk == "" {
-			risk = domain.RiskLevelLow
-		}
-		if risk != domain.RiskLevelLow {
-			return assistantOutput("Development console currently auto-runs only low-risk read-only tasks.", true), nil
-		}
-
-		return toolOutput("exec_on_nodes", policy.ExecOnNodesInput{
-			SessionID:     input.SessionID,
-			InputText:     st.InputText,
-			TargetContext: input.ActiveTargetContext,
-			RiskLevel:     risk,
-		}, state{
-			Stage:     "dispatched",
-			InputText: st.InputText,
-			RiskLevel: risk,
-		})
-
-	case "dispatched":
-		if input.CurrentTask == nil {
-			return assistantOutput("Waiting for execution state.", false), nil
-		}
-
-		return toolOutput("summarize_execution", policy.SummarizeExecutionInput{
-			TaskID:      input.CurrentTask.TaskID,
-			Status:      input.CurrentTask.Status,
-			Aggregate:   input.CurrentTask.Aggregate,
-			TargetLabel: targetLabel(input.ActiveTargetContext),
-		}, state{
-			Stage: "summarized",
-		})
-
-	case "summarized":
-		summary, ok := lastToolPayload[policy.SummarizeExecutionOutput](input.Conversation, "summarize_execution")
-		if !ok {
-			return assistantOutput("Execution completed.", true), nil
-		}
-		return assistantOutput(summary.Summary, true), nil
+		return assistantOutput(formatRunResult(result), true), nil
 
 	default:
 		return assistantOutput("Unsupported development loop state.", true), nil
+	}
+}
+
+func formatRunResult(result policy.RunOnNodeOutput) string {
+	switch result.Status {
+	case "completed":
+		if len(result.Results) == 0 {
+			if result.Message != "" {
+				return result.Message
+			}
+			return "Execution completed."
+		}
+		var b strings.Builder
+		for _, r := range result.Results {
+			b.WriteString(fmt.Sprintf("[%s] %s (exit %d): %s\n", r.Status, r.Hostname, r.ExitCode, r.Output))
+		}
+		return b.String()
+	case "needs_confirmation":
+		return result.Message
+	case "ambiguous":
+		return result.Message
+	case "no_match":
+		return result.Message
+	case "error":
+		return "Error: " + result.Message
+	default:
+		return result.Message
 	}
 }
 
@@ -152,20 +142,6 @@ func lastUserText(conversation []agentapi.Item) string {
 	return ""
 }
 
-func targetLabel(ctx domain.ActiveTargetContext) string {
-	if strings.TrimSpace(ctx.DisplayLabel) != "" {
-		return ctx.DisplayLabel
-	}
-	switch len(ctx.NodeIDs) {
-	case 0:
-		return "selected targets"
-	case 1:
-		return ctx.NodeIDs[0]
-	default:
-		return "selected targets"
-	}
-}
-
 func decodeState(raw json.RawMessage) state {
 	if len(raw) == 0 {
 		return state{}
@@ -189,9 +165,6 @@ func lastToolPayload[T any](conversation []agentapi.Item, toolName string) (T, b
 	var out T
 	for i := len(conversation) - 1; i >= 0; i-- {
 		item := conversation[i]
-		if item.Type != "function_call_output" || len(item.Content) != 0 {
-			// no-op
-		}
 		if item.Type != "function_call_output" || strings.TrimSpace(item.CallID) == "" {
 			continue
 		}
@@ -205,14 +178,6 @@ func lastToolPayload[T any](conversation []agentapi.Item, toolName string) (T, b
 		return out, true
 	}
 	return out, false
-}
-
-func boolPtr(v bool) *bool {
-	return &v
-}
-
-func strPtr(v string) *string {
-	return &v
 }
 
 func mustContent(text string) json.RawMessage {

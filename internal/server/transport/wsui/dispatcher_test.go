@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	appruntime "github.com/momaek/tolato/internal/server/app/runtime"
 	appsession "github.com/momaek/tolato/internal/server/app/session"
 	"github.com/momaek/tolato/internal/server/domain"
 )
@@ -215,7 +214,7 @@ func TestDispatcherSubscriptionsUpdate(t *testing.T) {
 	}
 }
 
-func TestDispatcherSessionTargetClear(t *testing.T) {
+func TestDispatcherSessionTargetClearReturnsDeprecated(t *testing.T) {
 	rt := &fakeRuntime{}
 	dispatcher := Dispatcher{
 		Runtime: rt,
@@ -234,38 +233,11 @@ func TestDispatcherSessionTargetClear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
-	if resp.Type != TypeSessionActionAccepted {
-		t.Fatalf("response type = %q, want %q", resp.Type, TypeSessionActionAccepted)
+	if resp.Type != TypeError {
+		t.Fatalf("response type = %q, want %q (deprecated)", resp.Type, TypeError)
 	}
-	if rt.clearSessionID != "sess-clear" || rt.clearKey != "idem-clear" {
-		t.Fatalf("runtime clear call = %#v, want sess-clear/idem-clear", rt)
-	}
-}
-
-func TestDispatcherSessionTargetReselect(t *testing.T) {
-	rt := &fakeRuntime{}
-	dispatcher := Dispatcher{
-		Runtime: rt,
-		Now:     func() time.Time { return time.Date(2026, 3, 22, 16, 20, 0, 0, time.UTC) },
-	}
-
-	raw := mustJSON(t, RequestEnvelope{
-		Type:      TypeSessionTargetReselect,
-		RequestID: "req-reselect",
-		Payload: mustPayload(t, SessionTargetReselectRequest{
-			SessionID:      "sess-reselect",
-			IdempotencyKey: "idem-reselect",
-		}),
-	})
-	resp, err := dispatcher.Dispatch(context.Background(), raw)
-	if err != nil {
-		t.Fatalf("Dispatch() error = %v", err)
-	}
-	if resp.Type != TypeSessionActionAccepted {
-		t.Fatalf("response type = %q, want %q", resp.Type, TypeSessionActionAccepted)
-	}
-	if rt.clearSessionID != "sess-reselect" || rt.clearKey != "idem-reselect" {
-		t.Fatalf("runtime clear call = %#v, want sess-reselect/idem-reselect", rt)
+	if resp.Error == nil || resp.Error.Code != "deprecated" {
+		t.Fatalf("error = %#v, want deprecated", resp.Error)
 	}
 }
 
@@ -287,8 +259,6 @@ type fakeRuntime struct {
 	sessionID       string
 	text            string
 	clientMessageID string
-	clearSessionID  string
-	clearKey        string
 	err             error
 }
 
@@ -300,26 +270,7 @@ func (f *fakeRuntime) HandleUserMessage(ctx context.Context, sessionID string, t
 	return f.err
 }
 
-func (f *fakeRuntime) ResumeAfterTargetConfirmation(ctx context.Context, sessionID string, action appruntime.ConfirmTargetAction) error {
-	_ = ctx
-	_ = sessionID
-	_ = action
-	return nil
-}
 
-func (f *fakeRuntime) ClearTargetContext(ctx context.Context, sessionID string, idempotencyKey string) error {
-	_ = ctx
-	f.clearSessionID = sessionID
-	f.clearKey = idempotencyKey
-	return nil
-}
-
-func (f *fakeRuntime) ResumeAfterApproval(ctx context.Context, sessionID string, action appruntime.ApprovalAction) error {
-	_ = ctx
-	_ = sessionID
-	_ = action
-	return nil
-}
 
 func (f *fakeSessionService) ListSessions(_ context.Context, clientID string) ([]appsession.SessionListItem, error) {
 	f.listClientID = clientID

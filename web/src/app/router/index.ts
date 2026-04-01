@@ -62,6 +62,31 @@ const router = createRouter({
       },
     },
     {
+      path: '/monitor',
+      name: 'monitor',
+      component: () => import('@/pages/monitor/MonitorPage.vue'),
+      meta: {
+        requiresAuth: true,
+      },
+    },
+    {
+      path: '/monitor/:id',
+      name: 'monitor-detail',
+      component: () => import('@/pages/monitor-detail/MonitorDetailPage.vue'),
+      props: true,
+      meta: {
+        requiresAuth: true,
+      },
+    },
+    {
+      path: '/alerts',
+      name: 'alerts',
+      component: () => import('@/pages/alerts/AlertsPage.vue'),
+      meta: {
+        requiresAuth: true,
+      },
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/pages/settings/SettingsPage.vue'),

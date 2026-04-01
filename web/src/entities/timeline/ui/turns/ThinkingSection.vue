@@ -12,7 +12,7 @@ const isThinkingActive = computed(() => props.streaming && props.block.text.leng
 </script>
 
 <template>
-  <details class="rounded-[0.8rem] border border-border/50 bg-muted/35 px-3 py-2">
+  <details v-if="block.text" class="rounded-[0.8rem] border border-border/50 bg-muted/35 px-3 py-2">
     <summary class="cursor-pointer list-none text-[11px] font-semibold tracking-[0.14em] text-muted-foreground select-none">
       thinking
       <span v-if="isThinkingActive" class="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-muted-foreground/50" />

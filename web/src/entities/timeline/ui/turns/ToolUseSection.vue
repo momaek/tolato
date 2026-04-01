@@ -16,6 +16,16 @@ const hasArgs = computed(() => {
   return args !== '{}' && args !== '[]' && args !== ''
 })
 
+const formattedArgs = computed(() => {
+  const args = props.block.argsPreview?.trim()
+  if (!args) return ''
+  try {
+    return JSON.stringify(JSON.parse(args), null, 2)
+  } catch {
+    return args
+  }
+})
+
 const resultToneClass = computed(() => {
   if (!props.block.result) return ''
   switch (props.block.result.tone) {
@@ -63,7 +73,7 @@ const resultTextClass = computed(() => {
     <pre
       v-if="hasArgs"
       class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-[0.7rem] bg-background/70 px-3 py-2 font-mono text-[11px] leading-5 text-muted-foreground"
-    >{{ block.argsPreview }}</pre>
+    >{{ formattedArgs }}</pre>
 
     <div
       v-if="block.result"

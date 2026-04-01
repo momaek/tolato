@@ -7,10 +7,6 @@ import (
 	"github.com/momaek/tolato/internal/server/agentapi"
 )
 
-type NodeSource interface {
-	ListNodes(ctx context.Context) ([]NodeSummary, error)
-}
-
 type Option func(*Registry)
 
 func WithExecutionStarter(starter ExecutionStarter) Option {
@@ -19,10 +15,24 @@ func WithExecutionStarter(starter ExecutionStarter) Option {
 	}
 }
 
+func WithExecutionWaiter(waiter ExecutionWaiter) Option {
+	return func(r *Registry) {
+		r.waiter = waiter
+	}
+}
+
+func WithExecutionResultQuerier(querier ExecutionResultQuerier) Option {
+	return func(r *Registry) {
+		r.resultQuerier = querier
+	}
+}
+
 type Registry struct {
-	tools     map[string]Tool
-	order     []string
-	execution ExecutionStarter
+	tools         map[string]Tool
+	order         []string
+	execution     ExecutionStarter
+	waiter        ExecutionWaiter
+	resultQuerier ExecutionResultQuerier
 }
 
 func NewRegistry(source NodeSource, options ...Option) *Registry {
@@ -36,14 +46,11 @@ func NewRegistry(source NodeSource, options ...Option) *Registry {
 		}
 	}
 
+	tokens := NewConfirmTokenStore()
+
 	tools := []Tool{
 		NewListNodesTool(source),
-		NewResolveTargetNodesTool(source),
-		NewRequestTargetConfirmationTool(),
-		NewProposePlanTool(),
-		NewRequestApprovalTool(),
-		NewExecOnNodesTool(registry.execution),
-		NewSummarizeExecutionTool(),
+		NewRunOnNodeTool(source, registry.execution, registry.waiter, registry.resultQuerier, tokens),
 	}
 	for _, tool := range tools {
 		registry.tools[tool.Name()] = tool

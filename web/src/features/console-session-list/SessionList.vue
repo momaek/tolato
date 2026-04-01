@@ -27,10 +27,8 @@ const statusTone = computed(() => {
     switch (status) {
       case 'running':
         return 'info'
-      case 'attention':
+      case 'failed':
         return 'warning'
-      case 'completed':
-        return 'success'
       default:
         return 'neutral'
     }
@@ -96,8 +94,7 @@ const statusTone = computed(() => {
                 <p class="line-clamp-2 text-xs leading-5 text-muted-foreground">
                   {{ session.summary }}
                 </p>
-                <div class="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  <span>{{ session.targetSummary }}</span>
+                <div class="flex items-center justify-end text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                   <span>{{ formatRelativeMinutes(session.updatedAt) }}</span>
                 </div>
               </div>

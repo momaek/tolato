@@ -1,10 +1,6 @@
 import type {
-  ApprovalRow,
-  ExecutionRow,
   SessionListItem,
   SessionSnapshot,
-  TargetCandidate,
-  TargetContext,
   TimelineRow,
 } from '@/shared/types/console'
 
@@ -36,24 +32,6 @@ export type WSUIEvent =
       revision: number
     }
   | {
-      type: 'thread.target.pending'
-      sessionId: string
-      revision: number
-      targetContext: TargetContext
-    }
-  | {
-      type: 'thread.target.confirmed'
-      sessionId: string
-      revision: number
-      targetContext: TargetContext
-    }
-  | {
-      type: 'thread.target.cleared'
-      sessionId: string
-      revision: number
-      targetContext: TargetContext
-    }
-  | {
       type: 'llm.sse.event'
       sessionId: string
       responseId?: string
@@ -67,20 +45,6 @@ export type WSUIEvent =
       responseId?: string
       rawResponse: Record<string, unknown>
     }
-  | {
-      type: 'execution.chunk'
-      sessionId: string
-      row: ExecutionRow
-      revision: number
-    }
-  | {
-      type: 'execution.finished'
-      sessionId: string
-      row: ExecutionRow
-      revision: number
-    }
-  | { type: 'session.requires_attention'; sessionId: string; revision: number }
-  | { type: 'session.finished'; sessionId: string; revision: number }
 
 export interface SessionsListRequest {
   type: 'sessions.list.request'
@@ -107,20 +71,6 @@ export interface SessionMessageSubmitRequest {
   text: string
 }
 
-export interface SessionTargetConfirmRequest {
-  type: 'session.target.confirm'
-  sessionId: string
-  action: 'confirm' | 'reselect' | 'clear'
-  candidate?: TargetCandidate
-}
-
-export interface SessionApprovalRequest {
-  type: 'session.approval.action'
-  sessionId: string
-  action: 'approve' | 'reject' | 'cancel'
-  approvalRow?: ApprovalRow
-}
-
 export interface SubscriptionsUpdateRequest {
   type: 'subscriptions.update'
   activeSessionId: string
@@ -133,8 +83,6 @@ export type WSUIRequest =
   | SessionsListRequest
   | SessionSnapshotRequest
   | SessionMessageSubmitRequest
-  | SessionTargetConfirmRequest
-  | SessionApprovalRequest
   | SubscriptionsUpdateRequest
 
 export interface WSClient {
@@ -147,6 +95,4 @@ export interface WSClient {
   requestSessionSnapshot(sessionId: string): Promise<SessionSnapshot>
   updateSubscriptions(request: SubscriptionsUpdateRequest): Promise<void>
   submitMessage(request: SessionMessageSubmitRequest): Promise<void>
-  confirmTarget(request: SessionTargetConfirmRequest): Promise<void>
-  submitApproval(request: SessionApprovalRequest): Promise<void>
 }

@@ -11,6 +11,29 @@ type Config struct {
 	Server ServerConfig `yaml:"server"`
 	Store  StoreConfig  `yaml:"store"`
 	Auth   AuthConfig   `yaml:"auth"`
+	Probe  ProbeConfig  `yaml:"probe"`
+}
+
+// ProbeConfig configures the NodeProbe link monitoring subsystem.
+type ProbeConfig struct {
+	Enabled        bool            `yaml:"enabled"`
+	RetentionDays  int             `yaml:"retention_days"`
+	Telegram       TelegramConfig  `yaml:"telegram"`
+	AlertRules     AlertThresholds `yaml:"alert_rules"`
+}
+
+type TelegramConfig struct {
+	BotToken string `yaml:"bot_token"`
+	ChatID   string `yaml:"chat_id"`
+}
+
+type AlertThresholds struct {
+	LatencyMs      float64 `yaml:"latency_threshold_ms"`
+	PacketLossPct  float64 `yaml:"packet_loss_threshold_percent"`
+	TCPConnectMs   float64 `yaml:"tcp_connect_threshold_ms"`
+	BandwidthMbps  float64 `yaml:"bandwidth_threshold_mbps"`
+	OfflineSeconds int     `yaml:"offline_timeout_seconds"`
+	RecoveryCount  int     `yaml:"recovery_count"`
 }
 
 type ServerConfig struct {
@@ -78,5 +101,28 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Server.AgentWSPath == "" {
 		c.Server.AgentWSPath = "/ws/agent"
+	}
+
+	// Probe defaults
+	if c.Probe.RetentionDays <= 0 {
+		c.Probe.RetentionDays = 30
+	}
+	if c.Probe.AlertRules.LatencyMs <= 0 {
+		c.Probe.AlertRules.LatencyMs = 200
+	}
+	if c.Probe.AlertRules.PacketLossPct <= 0 {
+		c.Probe.AlertRules.PacketLossPct = 5
+	}
+	if c.Probe.AlertRules.TCPConnectMs <= 0 {
+		c.Probe.AlertRules.TCPConnectMs = 500
+	}
+	if c.Probe.AlertRules.BandwidthMbps <= 0 {
+		c.Probe.AlertRules.BandwidthMbps = 10
+	}
+	if c.Probe.AlertRules.OfflineSeconds <= 0 {
+		c.Probe.AlertRules.OfflineSeconds = 180
+	}
+	if c.Probe.AlertRules.RecoveryCount <= 0 {
+		c.Probe.AlertRules.RecoveryCount = 3
 	}
 }

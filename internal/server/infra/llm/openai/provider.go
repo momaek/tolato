@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/momaek/tolato/internal/server/agentapi"
@@ -26,6 +27,9 @@ type Provider struct {
 	TimeoutSec  int
 	HTTPClient  *http.Client
 	Events      runtime.EventPublisher
+
+	clientOnce sync.Once
+	defaultClient *http.Client
 }
 
 type requestBody struct {
@@ -52,7 +56,7 @@ type streamAccumulator struct {
 	publishedStreaming bool
 }
 
-func (p Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []agentapi.ToolSpec) (runtime.ModelTurnOutput, error) {
+func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, tools []agentapi.ToolSpec) (runtime.ModelTurnOutput, error) {
 	if strings.TrimSpace(p.Model) == "" || strings.TrimSpace(p.APIKey) == "" {
 		return runtime.ModelTurnOutput{}, domain.ErrUnsupportedConfig
 	}
@@ -119,25 +123,28 @@ func (p Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, too
 	return out, nil
 }
 
-func (p Provider) endpoint() string {
+func (p *Provider) endpoint() string {
 	if strings.TrimSpace(p.Endpoint) != "" {
 		return strings.TrimRight(strings.TrimSpace(p.Endpoint), "/")
 	}
 	return "https://api.openai.com/v1"
 }
 
-func (p Provider) client() *http.Client {
+func (p *Provider) client() *http.Client {
 	if p.HTTPClient != nil {
 		return p.HTTPClient
 	}
-	timeout := 60 * time.Second
-	if p.TimeoutSec > 0 {
-		timeout = time.Duration(p.TimeoutSec) * time.Second
-	}
-	return &http.Client{Timeout: timeout}
+	p.clientOnce.Do(func() {
+		timeout := 60 * time.Second
+		if p.TimeoutSec > 0 {
+			timeout = time.Duration(p.TimeoutSec) * time.Second
+		}
+		p.defaultClient = &http.Client{Timeout: timeout}
+	})
+	return p.defaultClient
 }
 
-func (p Provider) consumeStream(ctx context.Context, sessionID string, body io.Reader, acc *streamAccumulator) error {
+func (p *Provider) consumeStream(ctx context.Context, sessionID string, body io.Reader, acc *streamAccumulator) error {
 	reader := bufio.NewReader(body)
 	var eventType string
 	var dataLines []string
@@ -192,7 +199,7 @@ func (p Provider) consumeStream(ctx context.Context, sessionID string, body io.R
 	return flush()
 }
 
-func (p Provider) consumeEvent(ctx context.Context, sessionID string, eventType string, raw json.RawMessage, acc *streamAccumulator) error {
+func (p *Provider) consumeEvent(ctx context.Context, sessionID string, eventType string, raw json.RawMessage, acc *streamAccumulator) error {
 	if acc.responseID == "" {
 		acc.responseID = firstNonEmpty(acc.responseID, detectResponseID(raw))
 	}
@@ -302,25 +309,7 @@ func finalizeTurnOutput(acc *streamAccumulator) runtime.ModelTurnOutput {
 }
 
 func instructions(input runtime.ModelTurnInput) string {
-	var builder strings.Builder
-	builder.WriteString("You are the ToLaTo control-plane runtime.\n")
-	builder.WriteString("Use the provided OpenAI function tools directly when lookup, planning, approval, target resolution, or execution is needed.\n")
-	builder.WriteString("Call at most one function per turn.\n")
-	builder.WriteString("If a function can execute the user's request, call it instead of narrating what you would do.\n")
-	builder.WriteString("Ask for clarification only when required data is genuinely missing.\n")
-
-	payload := map[string]any{
-		"activeTargetContext": input.ActiveTargetContext,
-		"pendingAction":       input.PendingAction,
-		"currentTask":         input.CurrentTask,
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return builder.String()
-	}
-	builder.WriteString("Runtime context JSON:\n")
-	builder.Write(raw)
-	return builder.String()
+	return runtime.BuildSystemPrompt(input)
 }
 
 func isEventStream(contentType string) bool {
@@ -352,8 +341,6 @@ func readTextDelta(raw []byte) string {
 	for _, path := range [][]string{
 		{"delta"},
 		{"text"},
-		{"arguments"},
-		{"item", "arguments"},
 	} {
 		if value := readJSONPathString(raw, path...); value != "" {
 			return value
@@ -509,10 +496,6 @@ func cloneRaw(raw []byte) json.RawMessage {
 		return nil
 	}
 	return append(json.RawMessage(nil), raw...)
-}
-
-func strPtr(v string) *string {
-	return &v
 }
 
 func cloneTools(tools []agentapi.ToolSpec) []agentapi.ToolSpec {

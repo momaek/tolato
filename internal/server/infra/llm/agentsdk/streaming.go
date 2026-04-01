@@ -3,6 +3,7 @@ package agentsdk
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/momaek/tolato/internal/server/app/runtime"
@@ -97,6 +98,63 @@ func marshalToolCallDone(tc *interfaces.ToolCallEvent) json.RawMessage {
 		"call_id":   tc.ID,
 	})
 	return raw
+}
+
+// forwardStreamEventsWithDynamicID is like forwardStreamEvents but reads the
+// response ID from the runner atomically, so a single goroutine handles
+// streaming across multiple turns without leaking.
+func forwardStreamEventsWithDynamicID(
+	sessionID string,
+	runner *activeRunner,
+	events runtime.EventPublisher,
+) {
+	if events == nil {
+		for range runner.streamChan {
+		}
+		return
+	}
+
+	seq := 0
+	eventCount := 0
+	for event := range runner.streamChan {
+		responseID := runner.getResponseID()
+		seq++
+		eventCount++
+		switch event.Type {
+		case interfaces.AgentEventThinking:
+			raw := marshalDelta(event.ThinkingStep)
+			_ = events.LLMSSEEvent(context.Background(), sessionID, responseID, seq,
+				"response.reasoning_text.delta", raw)
+		case interfaces.AgentEventContent:
+			raw := marshalDelta(event.Content)
+			_ = events.LLMSSEEvent(context.Background(), sessionID, responseID, seq,
+				"response.output_text.delta", raw)
+		case interfaces.AgentEventToolCall:
+			if event.ToolCall != nil {
+				slog.Info("agentsdk stream: tool_call event",
+					"session_id", sessionID, "tool", event.ToolCall.Name)
+				itemRaw := marshalToolCallItem(event.ToolCall)
+				_ = events.LLMSSEEvent(context.Background(), sessionID, responseID, seq,
+					"response.output_item.added", itemRaw)
+				seq++
+				doneRaw := marshalToolCallDone(event.ToolCall)
+				_ = events.LLMSSEEvent(context.Background(), sessionID, responseID, seq,
+					"response.function_call_arguments.done", doneRaw)
+			}
+		case interfaces.AgentEventComplete:
+			slog.Info("agentsdk stream: complete event",
+				"session_id", sessionID, "response_id", responseID,
+				"total_events", eventCount,
+				"content_len", len(event.Content))
+			_ = events.LLMResponseCompleted(context.Background(), sessionID, responseID,
+				marshalComplete(responseID, event.Content))
+		case interfaces.AgentEventError:
+			slog.Warn("agentsdk stream: error event",
+				"session_id", sessionID, "error", event.Error)
+		}
+	}
+	slog.Info("agentsdk stream: forwarder finished",
+		"session_id", sessionID, "total_events", eventCount)
 }
 
 func marshalComplete(responseID, content string) json.RawMessage {

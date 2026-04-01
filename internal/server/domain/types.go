@@ -305,6 +305,12 @@ type ExecutionAggregate struct {
 	Cancelled  int
 }
 
+// ExecutionResult carries the aggregate outcome of a completed task.
+type ExecutionResult struct {
+	TaskStatus TaskStatus
+	Aggregate  ExecutionAggregate
+}
+
 type AuditRecord struct {
 	ID        string
 	SessionID string

@@ -94,6 +94,12 @@ func convertParameters(params map[string]any) map[string]interfaces.ParameterSpe
 			requiredSet[s] = true
 		}
 	}
+	// Also handle []string for required.
+	if requiredStrSlice, ok := params["required"].([]string); ok {
+		for _, s := range requiredStrSlice {
+			requiredSet[s] = true
+		}
+	}
 
 	result := make(map[string]interfaces.ParameterSpec, len(properties))
 	for name, raw := range properties {
@@ -109,6 +115,16 @@ func convertParameters(params map[string]any) map[string]interfaces.ParameterSpe
 		}
 		if d, ok := prop["description"].(string); ok {
 			spec.Description = d
+		}
+		if e, ok := prop["enum"].([]any); ok {
+			spec.Enum = e
+		}
+		if items, ok := prop["items"].(map[string]any); ok {
+			itemSpec := &interfaces.ParameterSpec{}
+			if t, ok := items["type"].(string); ok {
+				itemSpec.Type = t
+			}
+			spec.Items = itemSpec
 		}
 		result[name] = spec
 	}

@@ -6,7 +6,6 @@ import (
 
 	"github.com/momaek/tolato/internal/server/agentapi"
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
-	"github.com/momaek/tolato/internal/server/domain"
 )
 
 type Tool interface {
@@ -22,20 +21,11 @@ type ToolRegistry interface {
 
 type ExecutionStarter = appexecution.Service
 
+// ToolResult is pure data — no control flags, no runtime instructions.
 type ToolResult struct {
-	OutputItem            agentapi.Item
-	MetaText              string
-	ToolMessage           json.RawMessage
-	WaitForUser           bool
-	PendingActionType     domain.PendingActionType
-	PendingActionPayload  json.RawMessage
-	AsyncExecutionStarted bool
-	TaskID                string
-	ExecutionGroupID      string
-	AppendPlanRow         bool
-	AppendApprovalRow     bool
-	AppendExecutionRow    bool
-	AppendSummaryRow      bool
+	OutputItem  agentapi.Item
+	MetaText    string
+	ToolMessage json.RawMessage
 }
 
 type NodeSummary struct {
@@ -71,97 +61,30 @@ type ListNodesOutput struct {
 	Nodes []NodeSummary `json:"nodes"`
 }
 
-type ResolveTargetNodesInput struct {
-	Query                string                      `json:"query,omitempty"`
-	CurrentTargetContext *domain.ActiveTargetContext `json:"currentTargetContext,omitempty"`
+type RunOnNodeInput struct {
+	Target       string   `json:"target"`
+	Command      string   `json:"command"`
+	Args         []string `json:"args,omitempty"`
+	ConfirmToken string   `json:"confirmToken,omitempty"`
 }
 
-type ResolveTargetNodesOutput struct {
-	Query         string                     `json:"query"`
-	TargetContext domain.ActiveTargetContext `json:"targetContext"`
-	Candidates    []domain.TargetCandidate   `json:"candidates,omitempty"`
-	Nodes         []NodeSummary              `json:"nodes,omitempty"`
+type RunOnNodeOutput struct {
+	Status       string           `json:"status"` // "completed" | "no_match" | "ambiguous" | "needs_confirmation" | "error"
+	Results      []NodeExecResult `json:"results,omitempty"`
+	Candidates   []NodeSummary    `json:"candidates,omitempty"`
+	ConfirmToken string           `json:"confirmToken,omitempty"`
+	Message      string           `json:"message,omitempty"`
 }
 
-type RequestTargetConfirmationInput struct {
-	TargetContext domain.ActiveTargetContext `json:"targetContext"`
-	Message       string                     `json:"message,omitempty"`
+type NodeExecResult struct {
+	NodeID   string `json:"nodeId"`
+	Hostname string `json:"hostname"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exitCode"`
+	Status   string `json:"status"` // "success" | "failed" | "timeout"
 }
 
-type RequestTargetConfirmationOutput struct {
-	TargetContext domain.ActiveTargetContext `json:"targetContext"`
-	Message       string                     `json:"message"`
-}
-
-type RequestApprovalInput struct {
-	TaskID           string           `json:"taskId"`
-	RiskLevel        domain.RiskLevel `json:"riskLevel"`
-	Message          string           `json:"message,omitempty"`
-	Reason           string           `json:"reason,omitempty"`
-	RequiresApproval *bool            `json:"requiresApproval,omitempty"`
-}
-
-type RequestApprovalOutput struct {
-	TaskID           string           `json:"taskId"`
-	RiskLevel        domain.RiskLevel `json:"riskLevel"`
-	Message          string           `json:"message"`
-	RequiresApproval bool             `json:"requiresApproval"`
-}
-
-type ExecOnNodesInput struct {
-	SessionID     string                     `json:"sessionId"`
-	InputText     string                     `json:"inputText"`
-	Command       string                     `json:"command,omitempty"`
-	CommandArgs   []string                   `json:"commandArgs,omitempty"`
-	TargetContext domain.ActiveTargetContext `json:"targetContext"`
-	RiskLevel     domain.RiskLevel           `json:"riskLevel,omitempty"`
-}
-
-type ExecOnNodesOutput struct {
-	TaskID           string           `json:"taskId"`
-	ExecutionGroupID string           `json:"executionGroupId"`
-	NodeIDs          []string         `json:"nodeIds"`
-	RiskLevel        domain.RiskLevel `json:"riskLevel"`
-	Message          string           `json:"message"`
-}
-
-type SummarizeExecutionInput struct {
-	TaskID      string                    `json:"taskId"`
-	Status      domain.TaskStatus         `json:"status"`
-	Aggregate   domain.ExecutionAggregate `json:"aggregate"`
-	TargetLabel string                    `json:"targetLabel,omitempty"`
-}
-
-type SummarizeExecutionOutput struct {
-	TaskID    string                    `json:"taskId"`
-	Status    domain.TaskStatus         `json:"status"`
-	Aggregate domain.ExecutionAggregate `json:"aggregate"`
-	Summary   string                    `json:"summary"`
-}
-
-type PlanStep struct {
-	Action           string           `json:"action"`
-	Args             map[string]any   `json:"args,omitempty"`
-	Risk             domain.RiskLevel `json:"risk"`
-	TimeoutSec       int              `json:"timeoutSec,omitempty"`
-	BroadcastAllowed bool             `json:"broadcastAllowed,omitempty"`
-}
-
-type ProposePlanInput struct {
-	InputText        string                     `json:"inputText"`
-	TargetContext    domain.ActiveTargetContext `json:"targetContext"`
-	RiskLevel        domain.RiskLevel           `json:"riskLevel,omitempty"`
-	RequiresApproval *bool                      `json:"requiresApproval,omitempty"`
-	Steps            []PlanStep                 `json:"steps,omitempty"`
-}
-
-type ProposedPlan struct {
-	TargetNodes      []string         `json:"targetNodes"`
-	Summary          string           `json:"summary"`
-	EstimatedImpact  string           `json:"estimatedImpact"`
-	RiskLevel        domain.RiskLevel `json:"riskLevel"`
-	RequiresApproval bool             `json:"requiresApproval"`
-	Steps            []PlanStep       `json:"steps"`
-	Metadata         map[string]any   `json:"metadata,omitempty"`
-	CreatedAt        string           `json:"createdAt"`
+// NodeSource provides access to node inventory.
+type NodeSource interface {
+	ListNodes(ctx context.Context) ([]NodeSummary, error)
 }

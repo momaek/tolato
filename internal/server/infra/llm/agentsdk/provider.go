@@ -2,8 +2,8 @@ package agentsdk
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -96,7 +96,8 @@ func (p *Provider) startNewRunner(
 		agent.WithLLM(llmClient),
 		agent.WithTools(interceptedTools...),
 		agent.WithSystemPrompt(systemPrompt),
-		agent.WithMaxIterations(20), // high limit — the Runtime controls the actual loop via channels
+		agent.WithMaxIterations(20),              // high limit — the Runtime controls the actual loop via channels
+		agent.WithRequirePlanApproval(false),      // disable execution plans — we use a direct agentic loop
 	}
 	if p.config.EnableThinking {
 		opts = append(opts, agent.WithStreamConfig(&interfaces.StreamConfig{
@@ -146,19 +147,25 @@ func (p *Provider) runAgent(
 	// Use RunStream to get thinking/content events for the frontend.
 	streamAgent, ok := interface{}(agentInstance).(interfaces.StreamingAgent)
 	if !ok {
-		// Fallback to non-streaming.
+		slog.Warn("agentsdk: agent does not implement StreamingAgent, falling back to non-streaming",
+			"session_id", sessionID)
 		result, err := agentInstance.Run(ctx, prompt)
 		runner.doneChan <- RunResult{Content: result, Error: err, Streamed: false}
 		return
 	}
 
+	slog.Info("agentsdk: starting RunStream",
+		"session_id", sessionID, "response_id", responseID,
+		"prompt_len", len(prompt))
 	eventCh, err := streamAgent.RunStream(ctx, prompt)
 	if err != nil {
+		slog.Error("agentsdk: RunStream failed", "session_id", sessionID, "error", err)
 		runner.doneChan <- RunResult{Error: err}
 		return
 	}
 
-	var finalContent string
+	var contentBuilder strings.Builder
+	var completeContent string
 	for event := range eventCh {
 		// Forward to the streaming forwarder goroutine.
 		select {
@@ -167,14 +174,21 @@ func (p *Provider) runAgent(
 			runner.doneChan <- RunResult{Error: ctx.Err()}
 			return
 		}
-		if event.Type == interfaces.AgentEventComplete {
-			finalContent = event.Content
-		}
-		if event.Type == interfaces.AgentEventContent {
-			finalContent = event.Content
+		switch event.Type {
+		case interfaces.AgentEventComplete:
+			// AgentEventComplete carries the full final content.
+			completeContent = event.Content
+		case interfaces.AgentEventContent:
+			// AgentEventContent deltas need to be accumulated.
+			contentBuilder.WriteString(event.Content)
 		}
 	}
 
+	// Prefer the complete event's content; fall back to accumulated deltas.
+	finalContent := completeContent
+	if finalContent == "" {
+		finalContent = contentBuilder.String()
+	}
 	runner.doneChan <- RunResult{Content: finalContent, Streamed: true}
 }
 
@@ -211,18 +225,18 @@ func (p *Provider) waitForEvent(
 	runner *activeRunner,
 	responseID string,
 ) (runtime.ModelTurnOutput, error) {
-	// Start streaming forwarder.
-	streamCtx, streamCancel := context.WithCancel(ctx)
-	go func() {
-		forwardStreamEvents(streamCtx, sessionID, responseID, runner.streamChan, p.events)
-		streamCancel()
-	}()
-	_ = streamCancel // used in goroutine above
+	// Ensure the single streaming forwarder goroutine is started exactly once
+	// for this runner's lifetime. This avoids multiple goroutines competing
+	// on the same streamChan across successive waitForEvent calls.
+	runner.startForwarder(sessionID, p.events)
+
+	// Update the response ID so the forwarder tags events with the current turn.
+	runner.setResponseID(responseID)
 
 	select {
 	case call := <-runner.toolCallChan:
 		// agent-sdk-go is blocked in Execute() waiting for a result.
-		callID := "call_" + strings.ReplaceAll(call.Name, " ", "_")
+		callID := p.ids.NewID("call")
 		return runtime.ModelTurnOutput{
 			ResponseID: responseID,
 			Items:      []agentapi.Item{toolCallToItem(call, callID)},
@@ -276,28 +290,7 @@ func (p *Provider) createLLMClient() (interfaces.LLM, error) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// System prompt builder
-// ---------------------------------------------------------------------------
-
+// buildSystemPrompt delegates to the shared runtime.BuildSystemPrompt.
 func buildSystemPrompt(input runtime.ModelTurnInput) string {
-	var b strings.Builder
-	b.WriteString("You are the ToLaTo control-plane runtime.\n")
-	b.WriteString("Use the provided function tools directly when lookup, planning, approval, target resolution, or execution is needed.\n")
-	b.WriteString("Call at most one function per turn.\n")
-	b.WriteString("If a function can execute the user's request, call it instead of narrating what you would do.\n")
-	b.WriteString("Ask for clarification only when required data is genuinely missing.\n")
-
-	payload := map[string]any{
-		"activeTargetContext": input.ActiveTargetContext,
-		"pendingAction":      input.PendingAction,
-		"currentTask":        input.CurrentTask,
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return b.String()
-	}
-	b.WriteString("Runtime context JSON:\n")
-	b.Write(raw)
-	return b.String()
+	return runtime.BuildSystemPrompt(input)
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/momaek/tolato/internal/server/agentapi"
@@ -21,6 +22,10 @@ type Provider struct {
 	Logger        domain.Logger
 	Events        runtime.EventPublisher
 	IDGenerator   domain.IDGenerator
+
+	mu            sync.Mutex
+	cachedClient  *agentsdk.Provider
+	cachedCfgKey  string // "provider|model|endpoint|apiKey" to detect config changes
 }
 
 type modelConfig struct {
@@ -55,15 +60,7 @@ func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, to
 	case "devloop":
 		out, err = devllm.New().RunTurn(ctx, input, tools)
 	case "openai", "anthropic", "gemini":
-		client := agentsdk.NewProvider(agentsdk.ProviderConfig{
-			ProviderType:   providerName,
-			Model:          cfg.Model,
-			APIKey:         cfg.APIKey,
-			Endpoint:       cfg.Endpoint,
-			Temperature:    cfg.Temperature,
-			MaxTokens:      cfg.MaxTokens,
-			EnableThinking: true,
-		}, p.Events, p.idGenerator())
+		client := p.getOrCreateClient(providerName, cfg)
 		out, err = client.RunTurn(ctx, input, tools)
 	default:
 		return runtime.ModelTurnOutput{}, fmt.Errorf("unsupported llm provider %q", cfg.Provider)
@@ -86,6 +83,31 @@ func (p *Provider) RunTurn(ctx context.Context, input runtime.ModelTurnInput, to
 		"tool_name", toolName(out.Items),
 	)
 	return out, nil
+}
+
+func (p *Provider) getOrCreateClient(providerName string, cfg modelConfig) *agentsdk.Provider {
+	key := providerName + "|" + cfg.Model + "|" + cfg.Endpoint + "|" + cfg.APIKey
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cachedClient != nil && p.cachedCfgKey == key {
+		return p.cachedClient
+	}
+	// Config changed or first call — create new client (and cleanup old runners).
+	if p.cachedClient != nil {
+		// Old client's runners will be garbage collected.
+		p.cachedClient = nil
+	}
+	p.cachedClient = agentsdk.NewProvider(agentsdk.ProviderConfig{
+		ProviderType:   providerName,
+		Model:          cfg.Model,
+		APIKey:         cfg.APIKey,
+		Endpoint:       cfg.Endpoint,
+		Temperature:    cfg.Temperature,
+		MaxTokens:      cfg.MaxTokens,
+		EnableThinking: true,
+	}, p.Events, p.idGenerator())
+	p.cachedCfgKey = key
+	return p.cachedClient
 }
 
 func (p *Provider) loadConfig(ctx context.Context) (modelConfig, error) {

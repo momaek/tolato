@@ -20,10 +20,6 @@ const props = defineProps<{
   snapshot: SessionSnapshot | null
 }>()
 
-const emit = defineEmits<{
-  clearTarget: []
-}>()
-
 const connectionStore = useConnectionStore()
 const { t } = useI18n()
 
@@ -37,23 +33,6 @@ const healthSummary = computed(() => {
     offline: props.snapshot.nodeHealthSummary.offline,
   })
 })
-
-const broadcastReminder = computed(() => {
-  const scope = props.snapshot?.targetContext.scope
-  if (scope === 'all_online') {
-    return t('console.header.broadcastAllOnline')
-  }
-
-  if (scope === 'multi') {
-    return t('console.header.broadcastMulti')
-  }
-
-  return ''
-})
-
-const canClearContext = computed(() => {
-  return props.snapshot?.targetContext.state === 'confirmed' && !props.snapshot.pendingActionType
-})
 </script>
 
 <template>
@@ -61,10 +40,9 @@ const canClearContext = computed(() => {
     <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       <div class="space-y-3">
         <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">{{ t('console.header.targetContext') }}</p>
           <div class="mt-1 flex flex-wrap items-center gap-3">
             <h1 class="text-2xl font-semibold tracking-tight text-foreground">
-              {{ snapshot?.targetContext.summary ?? t('console.header.targetUnset') }}
+              {{ snapshot?.title ?? t('console.header.targetUnset') }}
             </h1>
             <p class="text-sm text-muted-foreground">
               {{ t('common.connection.syncedRecently', { value: connectionStore.lastSyncedAt ? formatRelativeMinutes(connectionStore.lastSyncedAt) : t('common.labels.noSync') }) }}
@@ -76,15 +54,6 @@ const canClearContext = computed(() => {
 
       <div class="flex flex-col items-start gap-3 xl:items-end">
         <div class="flex items-center gap-2">
-          <Button
-            v-if="canClearContext"
-            size="sm"
-            variant="outline"
-            class="rounded-lg px-4"
-            @click="emit('clearTarget')"
-          >
-            {{ t('common.buttons.clearContext') }}
-          </Button>
           <Button size="sm" class="rounded-lg px-4">{{ t('console.header.agent') }}</Button>
           <Dialog>
             <DialogTrigger as-child>
@@ -102,9 +71,6 @@ const canClearContext = computed(() => {
           {{ t('console.header.plannerHint') }}
         </p>
       </div>
-    </div>
-    <div v-if="broadcastReminder" class="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-      {{ broadcastReminder }}
     </div>
   </div>
 </template>

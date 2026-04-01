@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +11,10 @@ import (
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	"github.com/momaek/tolato/internal/server/domain"
 )
+
+// ---------------------------------------------------------------------------
+// list_nodes
+// ---------------------------------------------------------------------------
 
 type listNodesTool struct {
 	source NodeSource
@@ -62,182 +65,354 @@ func (t listNodesTool) Call(ctx context.Context, call agentapi.Item) (ToolResult
 	}, nil
 }
 
-type resolveTargetNodesTool struct {
-	source NodeSource
+// ---------------------------------------------------------------------------
+// run_on_node
+// ---------------------------------------------------------------------------
+
+type contextKey string
+
+const sessionIDKey contextKey = "sessionID"
+
+// ContextWithSessionID attaches a session ID to a context for tool use.
+func ContextWithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionIDKey, sessionID)
 }
 
-func NewResolveTargetNodesTool(source NodeSource) Tool {
-	return resolveTargetNodesTool{source: source}
+func sessionIDFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(sessionIDKey).(string)
+	return v
 }
 
-func (t resolveTargetNodesTool) Name() string { return "resolve_target_nodes" }
-
-func (t resolveTargetNodesTool) Definition() agentapi.ToolSpec {
-	return resolveTargetNodesToolSpec()
+// ExecutionWaiter allows tools to block until async execution completes.
+type ExecutionWaiter interface {
+	Register(taskID string) <-chan domain.ExecutionResult
+	Remove(taskID string)
 }
 
-func (t resolveTargetNodesTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
-	if t.source == nil {
-		return ToolResult{}, fmt.Errorf("node source is not configured")
+// ExecutionResultQuerier fetches execution results after completion.
+type ExecutionResultQuerier interface {
+	ListByTask(ctx context.Context, taskID string) ([]domain.Execution, error)
+}
+
+type runOnNodeTool struct {
+	source    NodeSource
+	execution ExecutionStarter
+	waiter    ExecutionWaiter
+	results   ExecutionResultQuerier
+	tokens    *ConfirmTokenStore
+}
+
+func NewRunOnNodeTool(
+	source NodeSource,
+	execution ExecutionStarter,
+	waiter ExecutionWaiter,
+	results ExecutionResultQuerier,
+	tokens *ConfirmTokenStore,
+) Tool {
+	return &runOnNodeTool{
+		source:    source,
+		execution: execution,
+		waiter:    waiter,
+		results:   results,
+		tokens:    tokens,
+	}
+}
+
+func (t *runOnNodeTool) Name() string { return "run_on_node" }
+
+func (t *runOnNodeTool) Definition() agentapi.ToolSpec {
+	return runOnNodeToolSpec()
+}
+
+func (t *runOnNodeTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
+	if t.source == nil || t.execution == nil {
+		return ToolResult{}, fmt.Errorf("run_on_node dependencies not configured")
 	}
 
-	var req ResolveTargetNodesInput
+	var req RunOnNodeInput
 	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
 		if err := json.Unmarshal(args, &req); err != nil {
 			return ToolResult{}, err
 		}
 	}
+	if strings.TrimSpace(req.Target) == "" {
+		return ToolResult{}, fmt.Errorf("target is required")
+	}
+	if strings.TrimSpace(req.Command) == "" {
+		return ToolResult{}, fmt.Errorf("command is required")
+	}
 
+	// If a confirm token is provided, validate and execute directly.
+	if req.ConfirmToken != "" {
+		return t.executeWithToken(ctx, call, req)
+	}
+
+	// Resolve target.
 	nodes, err := t.source.ListNodes(ctx)
 	if err != nil {
 		return ToolResult{}, err
 	}
 
-	resolved := resolveTargetNodes(req, nodes)
-	payload, err := json.Marshal(resolved)
+	matched := matchTargetNodes(req.Target, nodes)
+
+	switch len(matched) {
+	case 0:
+		return t.outputResult(call, RunOnNodeOutput{
+			Status:     "no_match",
+			Candidates: nodes,
+			Message:    fmt.Sprintf("No node matching %q found. Available nodes are listed in candidates.", req.Target),
+		})
+
+	case 1:
+		// Single match — check risk.
+		risk := inferRisk(req.Command + " " + strings.Join(req.Args, " "))
+		if risk == domain.RiskLevelForbidden {
+			return ToolResult{}, fmt.Errorf("blocked by policy: operation is forbidden")
+		}
+		if risk == domain.RiskLevelLow {
+			return t.dispatchAndWait(ctx, call, req, matched)
+		}
+		// Medium/high risk — require confirmation.
+		token := t.tokens.Generate(nodeIDs(matched), req.Command, req.Args)
+		return t.outputResult(call, RunOnNodeOutput{
+			Status:       "needs_confirmation",
+			ConfirmToken: token,
+			Candidates:   matched,
+			Message:      fmt.Sprintf("Will execute %s on %s. This is a %s-risk operation. Pass confirm_token to proceed.", req.Command, matched[0].Hostname, risk),
+		})
+
+	default:
+		// Check if target is "all" — treat as multi-node with confirmation.
+		if isAllQuery(req.Target) {
+			risk := inferRisk(req.Command + " " + strings.Join(req.Args, " "))
+			if risk == domain.RiskLevelForbidden {
+				return ToolResult{}, fmt.Errorf("blocked by policy: operation is forbidden")
+			}
+			if risk == domain.RiskLevelLow {
+				return t.dispatchAndWait(ctx, call, req, matched)
+			}
+			token := t.tokens.Generate(nodeIDs(matched), req.Command, req.Args)
+			return t.outputResult(call, RunOnNodeOutput{
+				Status:       "needs_confirmation",
+				ConfirmToken: token,
+				Candidates:   matched,
+				Message:      fmt.Sprintf("Will execute %s on %d nodes. This is a %s-risk operation. Pass confirm_token to proceed.", req.Command, len(matched), risk),
+			})
+		}
+
+		return t.outputResult(call, RunOnNodeOutput{
+			Status:     "ambiguous",
+			Candidates: matched,
+			Message:    fmt.Sprintf("Multiple nodes match %q. Please specify which one.", req.Target),
+		})
+	}
+}
+
+func (t *runOnNodeTool) executeWithToken(ctx context.Context, call agentapi.Item, req RunOnNodeInput) (ToolResult, error) {
+	nodeIDList, command, args, ok := t.tokens.Validate(req.ConfirmToken)
+	if !ok {
+		return t.outputResult(call, RunOnNodeOutput{
+			Status:  "error",
+			Message: "Invalid or expired confirmation token. Please request the operation again.",
+		})
+	}
+
+	// Reconstruct matched nodes from IDs.
+	allNodes, err := t.source.ListNodes(ctx)
 	if err != nil {
 		return ToolResult{}, err
 	}
+	var matched []NodeSummary
+	nodeSet := make(map[string]bool, len(nodeIDList))
+	for _, id := range nodeIDList {
+		nodeSet[id] = true
+	}
+	for _, n := range allNodes {
+		if nodeSet[n.ID] {
+			matched = append(matched, n)
+		}
+	}
+	if len(matched) == 0 {
+		return t.outputResult(call, RunOnNodeOutput{
+			Status:  "error",
+			Message: "Confirmed nodes are no longer available.",
+		})
+	}
 
-	output := string(payload)
+	// Use the stored command/args from the token, not from the request.
+	req.Command = command
+	req.Args = args
+	return t.dispatchAndWait(ctx, call, req, matched)
+}
+
+func (t *runOnNodeTool) dispatchAndWait(ctx context.Context, call agentapi.Item, req RunOnNodeInput, matched []NodeSummary) (ToolResult, error) {
+	sessionID := sessionIDFromContext(ctx)
+	if sessionID == "" {
+		return ToolResult{}, fmt.Errorf("session ID not found in context")
+	}
+
+	ids := nodeIDs(matched)
+	displayLabel := displayLabelForNodes(matched)
+
+	// Build target context for execution service.
+	targetCtx := domain.ActiveTargetContext{
+		Status:       domain.TargetStatusConfirmed,
+		Scope:        domain.TargetScopeSingle,
+		NodeIDs:      ids,
+		DisplayLabel: displayLabel,
+		Source:       domain.TargetSourceAssistantResolved,
+	}
+	if len(ids) > 1 {
+		targetCtx.Scope = domain.TargetScopeMulti
+	}
+
+	risk := inferRisk(req.Command + " " + strings.Join(req.Args, " "))
+	if risk == domain.RiskLevelForbidden {
+		risk = domain.RiskLevelHigh
+	}
+
+	dispatchInput := appexecution.StartDispatchInput{
+		SessionID:     sessionID,
+		InputText:     req.Command,
+		Command:       req.Command,
+		CommandArgs:   req.Args,
+		TargetContext: targetCtx,
+		RiskLevel:     risk,
+	}
+
+	dispatch, err := t.execution.StartDispatch(ctx, dispatchInput)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("dispatch failed: %w", err)
+	}
+
+	// Register waiter and wait for completion.
+	var doneCh <-chan domain.ExecutionResult
+	if t.waiter != nil {
+		doneCh = t.waiter.Register(dispatch.TaskID)
+	}
+
+	timeout := 300 * time.Second
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if doneCh != nil {
+		select {
+		case result := <-doneCh:
+			return t.buildCompletedResult(ctx, call, req, matched, dispatch.TaskID, result)
+		case <-timeoutCtx.Done():
+			if t.waiter != nil {
+				t.waiter.Remove(dispatch.TaskID)
+			}
+			return t.outputResult(call, RunOnNodeOutput{
+				Status:  "error",
+				Message: fmt.Sprintf("Execution timed out after %v", timeout),
+			})
+		}
+	}
+
+	// No waiter available — return immediately with task info.
+	return t.outputResult(call, RunOnNodeOutput{
+		Status:  "completed",
+		Message: fmt.Sprintf("Dispatched %s to %d node(s). Task ID: %s", req.Command, len(matched), dispatch.TaskID),
+	})
+}
+
+func (t *runOnNodeTool) buildCompletedResult(ctx context.Context, call agentapi.Item, req RunOnNodeInput, matched []NodeSummary, taskID string, execResult domain.ExecutionResult) (ToolResult, error) {
+	results := make([]NodeExecResult, 0, len(matched))
+
+	if t.results != nil {
+		executions, err := t.results.ListByTask(ctx, taskID)
+		if err == nil {
+			hostnameByID := make(map[string]string, len(matched))
+			for _, n := range matched {
+				hostnameByID[n.ID] = n.Hostname
+			}
+			for _, exec := range executions {
+				status := "success"
+				switch exec.Status {
+				case domain.ExecutionStatusFailed:
+					status = "failed"
+				case domain.ExecutionStatusTimeout:
+					status = "timeout"
+				case domain.ExecutionStatusCancelled:
+					status = "cancelled"
+				}
+				output := exec.StdoutTail
+				if exec.StderrTail != "" {
+					if output != "" {
+						output += "\n--- stderr ---\n"
+					}
+					output += exec.StderrTail
+				}
+				exitCode := 0
+				if exec.ExitCode != nil {
+					exitCode = *exec.ExitCode
+				}
+				results = append(results, NodeExecResult{
+					NodeID:   exec.NodeID,
+					Hostname: hostnameByID[exec.NodeID],
+					Output:   output,
+					ExitCode: exitCode,
+					Status:   status,
+				})
+			}
+		}
+	}
+
+	if len(results) == 0 {
+		// Fallback: use aggregate info.
+		agg := execResult.Aggregate
+		return t.outputResult(call, RunOnNodeOutput{
+			Status:  "completed",
+			Message: fmt.Sprintf("Execution finished: %d success, %d failed, %d timeout", agg.Success, agg.Failed, agg.Timeout),
+		})
+	}
+
+	return t.outputResult(call, RunOnNodeOutput{
+		Status:  "completed",
+		Results: results,
+	})
+}
+
+func (t *runOnNodeTool) outputResult(call agentapi.Item, output RunOnNodeOutput) (ToolResult, error) {
+	payload, err := json.Marshal(output)
+	if err != nil {
+		return ToolResult{}, err
+	}
 	return ToolResult{
-		OutputItem:  agentapi.FunctionCallOutput(call.CallID, output),
-		MetaText:    fmt.Sprintf("resolved %d target candidate(s)", len(resolved.Candidates)),
+		OutputItem:  agentapi.FunctionCallOutput(call.CallID, string(payload)),
+		MetaText:    output.Message,
 		ToolMessage: payload,
 	}, nil
 }
 
-type requestTargetConfirmationTool struct{}
+// ---------------------------------------------------------------------------
+// Target matching helpers (reused from previous implementation)
+// ---------------------------------------------------------------------------
 
-func NewRequestTargetConfirmationTool() Tool {
-	return requestTargetConfirmationTool{}
-}
+func matchTargetNodes(target string, nodes []NodeSummary) []NodeSummary {
+	query := strings.ToLower(strings.TrimSpace(target))
+	if query == "" {
+		return nil
+	}
 
-func (t requestTargetConfirmationTool) Name() string { return "request_target_confirmation" }
+	if isAllQuery(query) {
+		return nodes
+	}
 
-func (t requestTargetConfirmationTool) Definition() agentapi.ToolSpec {
-	return requestTargetConfirmationToolSpec()
-}
-
-func (t requestTargetConfirmationTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
-	var req RequestTargetConfirmationInput
-	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
-		if err := json.Unmarshal(args, &req); err != nil {
-			return ToolResult{}, err
+	var matched []NodeSummary
+	for _, node := range nodes {
+		if matchBy, _ := matchNode(node, query); matchBy != "" {
+			matched = append(matched, node)
 		}
 	}
-	if req.TargetContext.Status == "" {
-		req.TargetContext.Status = domain.TargetStatusPendingConfirmation
-	}
-	if req.TargetContext.Source == "" {
-		req.TargetContext.Source = domain.TargetSourceAssistantResolved
-	}
-	payload, err := json.Marshal(RequestTargetConfirmationOutput{
-		TargetContext: req.TargetContext,
-		Message:       confirmationMessage(req.TargetContext),
-	})
-	if err != nil {
-		return ToolResult{}, err
-	}
-
-	output := string(payload)
-	return ToolResult{
-		OutputItem:           agentapi.FunctionCallOutput(call.CallID, output),
-		MetaText:             confirmationMessage(req.TargetContext),
-		ToolMessage:          payload,
-		WaitForUser:          true,
-		PendingActionType:    domain.PendingActionTypeTargetConfirmation,
-		PendingActionPayload: payload,
-	}, nil
+	return matched
 }
 
-type proposePlanTool struct{}
-
-func NewProposePlanTool() Tool {
-	return proposePlanTool{}
-}
-
-func (t proposePlanTool) Name() string { return "propose_plan" }
-
-func (t proposePlanTool) Definition() agentapi.ToolSpec {
-	return proposePlanToolSpec()
-}
-
-func (t proposePlanTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
-	var req ProposePlanInput
-	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
-		if err := json.Unmarshal(args, &req); err != nil {
-			return ToolResult{}, err
-		}
-	}
-
-	plan := buildPlan(req)
-	payload, err := json.Marshal(plan)
-	if err != nil {
-		return ToolResult{}, err
-	}
-
-	output := string(payload)
-	return ToolResult{
-		OutputItem:    agentapi.FunctionCallOutput(call.CallID, output),
-		MetaText:      plan.Summary,
-		ToolMessage:   payload,
-		AppendPlanRow: true,
-	}, nil
-}
-
-type requestApprovalTool struct{}
-
-func NewRequestApprovalTool() Tool {
-	return requestApprovalTool{}
-}
-
-func (t requestApprovalTool) Name() string { return "request_approval" }
-
-func (t requestApprovalTool) Definition() agentapi.ToolSpec {
-	return requestApprovalToolSpec()
-}
-
-func (t requestApprovalTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
-	var req RequestApprovalInput
-	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
-		if err := json.Unmarshal(args, &req); err != nil {
-			return ToolResult{}, err
-		}
-	}
-	if req.TaskID == "" {
-		return ToolResult{}, fmt.Errorf("taskId is required")
-	}
-	if req.RiskLevel == "" {
-		req.RiskLevel = domain.RiskLevelMedium
-	}
-
-	requiresApproval := true
-	if req.RequiresApproval != nil {
-		requiresApproval = *req.RequiresApproval
-	}
-	message := approvalMessage(req)
-	payload, err := json.Marshal(RequestApprovalOutput{
-		TaskID:           req.TaskID,
-		RiskLevel:        req.RiskLevel,
-		Message:          message,
-		RequiresApproval: requiresApproval,
-	})
-	if err != nil {
-		return ToolResult{}, err
-	}
-
-	output := string(payload)
-	return ToolResult{
-		OutputItem:           agentapi.FunctionCallOutput(call.CallID, output),
-		MetaText:             message,
-		ToolMessage:          payload,
-		WaitForUser:          requiresApproval,
-		PendingActionType:    domain.PendingActionTypeApproval,
-		PendingActionPayload: payload,
-		TaskID:               req.TaskID,
-		AppendApprovalRow:    requiresApproval,
-	}, nil
+func isAllQuery(query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	return q == "all" || q == "all online" || q == "all nodes" || q == "all hosts" ||
+		q == "所有" || q == "所有节点" || q == "全部" || q == "全部节点"
 }
 
 func filterNodes(nodes []NodeSummary, req ListNodesInput) []NodeSummary {
@@ -268,339 +443,6 @@ func filterNodes(nodes []NodeSummary, req ListNodesInput) []NodeSummary {
 	return out
 }
 
-func approvalMessage(req RequestApprovalInput) string {
-	if req.Message != "" {
-		return req.Message
-	}
-	reason := strings.TrimSpace(req.Reason)
-	if reason == "" {
-		reason = "potentially disruptive change"
-	}
-	return fmt.Sprintf("%s; requires explicit approval.", reason)
-}
-
-type execOnNodesTool struct {
-	execution ExecutionStarter
-}
-
-func NewExecOnNodesTool(execution ExecutionStarter) Tool {
-	return execOnNodesTool{execution: execution}
-}
-
-func (t execOnNodesTool) Name() string { return "exec_on_nodes" }
-
-func (t execOnNodesTool) Definition() agentapi.ToolSpec {
-	return execOnNodesToolSpec()
-}
-
-func (t execOnNodesTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
-	if t.execution == nil {
-		return ToolResult{}, fmt.Errorf("execution starter is not configured")
-	}
-
-	var req ExecOnNodesInput
-	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
-		if err := json.Unmarshal(args, &req); err != nil {
-			return ToolResult{}, err
-		}
-	}
-	if req.SessionID == "" || len(req.TargetContext.NodeIDs) == 0 {
-		return ToolResult{}, fmt.Errorf("sessionId and targetContext.nodeIds are required")
-	}
-	if strings.TrimSpace(req.Command) == "" {
-		return ToolResult{}, fmt.Errorf("command is required")
-	}
-	if req.RiskLevel == "" {
-		req.RiskLevel = inferRisk(req.InputText)
-	}
-	if req.RiskLevel == domain.RiskLevelForbidden {
-		return ToolResult{}, fmt.Errorf("blocked by policy")
-	}
-
-	dispatch, err := t.execution.StartDispatch(ctx, appexecution.StartDispatchInput{
-		SessionID:     req.SessionID,
-		InputText:     req.InputText,
-		Command:       req.Command,
-		CommandArgs:   req.CommandArgs,
-		TargetContext: req.TargetContext,
-		RiskLevel:     req.RiskLevel,
-	})
-	if err != nil {
-		return ToolResult{}, err
-	}
-
-	message := fmt.Sprintf("queued execution for %d node(s)", len(req.TargetContext.NodeIDs))
-	payload, err := json.Marshal(ExecOnNodesOutput{
-		TaskID:           dispatch.TaskID,
-		ExecutionGroupID: dispatch.ExecutionGroupID,
-		NodeIDs:          append([]string(nil), req.TargetContext.NodeIDs...),
-		RiskLevel:        req.RiskLevel,
-		Message:          message,
-	})
-	if err != nil {
-		return ToolResult{}, err
-	}
-
-	output := string(payload)
-	return ToolResult{
-		OutputItem:            agentapi.FunctionCallOutput(call.CallID, output),
-		MetaText:              message,
-		ToolMessage:           payload,
-		AsyncExecutionStarted: true,
-		TaskID:                dispatch.TaskID,
-		ExecutionGroupID:      dispatch.ExecutionGroupID,
-		AppendExecutionRow:    true,
-	}, nil
-}
-
-type summarizeExecutionTool struct{}
-
-func NewSummarizeExecutionTool() Tool {
-	return summarizeExecutionTool{}
-}
-
-func (t summarizeExecutionTool) Name() string { return "summarize_execution" }
-
-func (t summarizeExecutionTool) Definition() agentapi.ToolSpec {
-	return summarizeExecutionToolSpec()
-}
-
-func (t summarizeExecutionTool) Call(ctx context.Context, call agentapi.Item) (ToolResult, error) {
-	_ = ctx
-
-	var req SummarizeExecutionInput
-	if args := agentapi.ArgumentsJSON(call); len(args) > 0 {
-		if err := json.Unmarshal(args, &req); err != nil {
-			return ToolResult{}, err
-		}
-	}
-	if req.TaskID == "" {
-		return ToolResult{}, fmt.Errorf("taskId is required")
-	}
-
-	summary := executionSummary(req)
-	payload, err := json.Marshal(SummarizeExecutionOutput{
-		TaskID:    req.TaskID,
-		Status:    req.Status,
-		Aggregate: req.Aggregate,
-		Summary:   summary,
-	})
-	if err != nil {
-		return ToolResult{}, err
-	}
-
-	output := string(payload)
-	return ToolResult{
-		OutputItem:       agentapi.FunctionCallOutput(call.CallID, output),
-		MetaText:         summary,
-		ToolMessage:      payload,
-		TaskID:           req.TaskID,
-		AppendSummaryRow: true,
-	}, nil
-}
-
-func resolveTargetNodes(req ResolveTargetNodesInput, nodes []NodeSummary) ResolveTargetNodesOutput {
-	query := strings.ToLower(strings.TrimSpace(req.Query))
-	candidates := make([]domain.TargetCandidate, 0)
-	matchedNodes := make([]NodeSummary, 0)
-
-	if query == "" && req.CurrentTargetContext != nil {
-		ctxValue := cloneTargetContext(*req.CurrentTargetContext)
-		ctxValue.Status = domain.TargetStatusConfirmed
-		return ResolveTargetNodesOutput{
-			Query:         req.Query,
-			TargetContext: ctxValue,
-			Nodes:         matchedNodes,
-		}
-	}
-
-	if isAllOnlineQuery(query) {
-		for _, node := range nodes {
-			matchedNodes = append(matchedNodes, node)
-			candidates = append(candidates, candidateFromNode(node, "all_online", "matched all online nodes"))
-		}
-		return ResolveTargetNodesOutput{
-			Query: req.Query,
-			TargetContext: domain.ActiveTargetContext{
-				Status:       domain.TargetStatusPendingConfirmation,
-				Scope:        domain.TargetScopeAllOnline,
-				NodeIDs:      nodeIDs(matchedNodes),
-				DisplayLabel: "All online nodes",
-				Source:       domain.TargetSourceAssistantResolved,
-				Confidence:   0.75,
-				Candidates:   candidates,
-			},
-			Candidates: candidates,
-			Nodes:      matchedNodes,
-		}
-	}
-
-	for _, node := range nodes {
-		matchBy, reason := matchNode(node, query)
-		if matchBy == "" {
-			continue
-		}
-		matchedNodes = append(matchedNodes, node)
-		candidates = append(candidates, candidateFromNode(node, matchBy, reason))
-	}
-
-	if len(matchedNodes) == 0 {
-		for _, node := range nodes {
-			candidates = append(candidates, candidateFromNode(node, "history", "no direct match, available for manual confirmation"))
-		}
-		display := req.Query
-		if display == "" {
-			display = "unknown target"
-		}
-		return ResolveTargetNodesOutput{
-			Query: req.Query,
-			TargetContext: domain.ActiveTargetContext{
-				Status:       domain.TargetStatusPendingConfirmation,
-				Scope:        domain.TargetScopeMulti,
-				NodeIDs:      nil,
-				DisplayLabel: display,
-				Source:       domain.TargetSourceAssistantResolved,
-				Confidence:   0.1,
-				Candidates:   candidates,
-			},
-			Candidates: candidates,
-			Nodes:      matchedNodes,
-		}
-	}
-
-	scope := domain.TargetScopeSingle
-	if len(matchedNodes) > 1 {
-		scope = domain.TargetScopeMulti
-	}
-
-	confidence := 0.95
-	if len(matchedNodes) > 1 {
-		confidence = 0.75
-	}
-
-	return ResolveTargetNodesOutput{
-		Query: req.Query,
-		TargetContext: domain.ActiveTargetContext{
-			Status:       domain.TargetStatusPendingConfirmation,
-			Scope:        scope,
-			NodeIDs:      nodeIDs(matchedNodes),
-			DisplayLabel: displayLabelForNodes(matchedNodes),
-			Source:       domain.TargetSourceAssistantResolved,
-			Confidence:   confidence,
-			Candidates:   candidates,
-		},
-		Candidates: candidates,
-		Nodes:      matchedNodes,
-	}
-}
-
-func executionSummary(req SummarizeExecutionInput) string {
-	label := strings.TrimSpace(req.TargetLabel)
-	if label == "" {
-		label = "target nodes"
-	}
-	switch req.Status {
-	case domain.TaskStatusSuccess:
-		return fmt.Sprintf("execution completed successfully on %s (%d/%d succeeded)", label, req.Aggregate.Success, req.Aggregate.Total)
-	case domain.TaskStatusFailed:
-		return fmt.Sprintf("execution failed on %s (%d/%d failed)", label, req.Aggregate.Failed, req.Aggregate.Total)
-	case domain.TaskStatusTimeout:
-		return fmt.Sprintf("execution timed out on %s (%d timeout, %d succeeded)", label, req.Aggregate.Timeout, req.Aggregate.Success)
-	case domain.TaskStatusCancelled:
-		return fmt.Sprintf("execution was cancelled on %s", label)
-	default:
-		return fmt.Sprintf("execution finished on %s with mixed results (%d succeeded, %d failed, %d timed out, %d cancelled)", label, req.Aggregate.Success, req.Aggregate.Failed, req.Aggregate.Timeout, req.Aggregate.Cancelled)
-	}
-}
-
-func buildPlan(req ProposePlanInput) ProposedPlan {
-	nodes := req.TargetContext.NodeIDs
-	if len(nodes) == 0 && req.TargetContext.DisplayLabel != "" {
-		nodes = []string{req.TargetContext.DisplayLabel}
-	}
-
-	risk := req.RiskLevel
-	if risk == "" {
-		risk = inferRisk(req.InputText)
-	}
-	requiresApproval := risk == domain.RiskLevelMedium || risk == domain.RiskLevelHigh
-	if req.RequiresApproval != nil {
-		requiresApproval = *req.RequiresApproval
-	}
-
-	steps := req.Steps
-	if len(steps) == 0 {
-		steps = []PlanStep{
-			{
-				Action:           "inspect",
-				Args:             map[string]any{"input_text": req.InputText},
-				Risk:             risk,
-				TimeoutSec:       30,
-				BroadcastAllowed: req.TargetContext.Scope == domain.TargetScopeAllOnline,
-			},
-		}
-	}
-
-	return ProposedPlan{
-		TargetNodes:      nodes,
-		Summary:          summaryForPlan(req.InputText, req.TargetContext),
-		EstimatedImpact:  impactForRisk(risk),
-		RiskLevel:        risk,
-		RequiresApproval: requiresApproval,
-		Steps:            steps,
-		Metadata: map[string]any{
-			"targetScope": req.TargetContext.Scope,
-			"source":      req.TargetContext.Source,
-		},
-		CreatedAt: time.Now().UTC().Format(timeLayout),
-	}
-}
-
-func inferRisk(text string) domain.RiskLevel {
-	lower := strings.ToLower(text)
-	switch {
-	case containsAny(lower, "rm -rf /", "mkfs", "dd if=/dev/zero", "drop database", "wipe disk"):
-		return domain.RiskLevelForbidden
-	case containsAny(lower, "restart", "reboot", "delete", "drop ", "rm ", "destroy", "shutdown"):
-		return domain.RiskLevelHigh
-	case containsAny(lower, "reload", "scale", "migrate", "upgrade"):
-		return domain.RiskLevelMedium
-	default:
-		return domain.RiskLevelLow
-	}
-}
-
-func summaryForPlan(text string, ctx domain.ActiveTargetContext) string {
-	target := ctx.DisplayLabel
-	if target == "" {
-		target = "selected target"
-	}
-	if text == "" {
-		return "Plan for " + target
-	}
-	return fmt.Sprintf("Plan for %s: %s", target, text)
-}
-
-func impactForRisk(risk domain.RiskLevel) string {
-	switch risk {
-	case domain.RiskLevelHigh:
-		return "Potentially disruptive change; requires explicit approval."
-	case domain.RiskLevelMedium:
-		return "Moderate operational impact; verify carefully before proceeding."
-	case domain.RiskLevelForbidden:
-		return "Blocked by policy."
-	default:
-		return "Read-only or low-impact operation."
-	}
-}
-
-func confirmationMessage(ctx domain.ActiveTargetContext) string {
-	if ctx.DisplayLabel != "" {
-		return "confirm target: " + ctx.DisplayLabel
-	}
-	return "confirm target selection"
-}
-
 func nodeMatchesQuery(node NodeSummary, query string) bool {
 	if query == "" {
 		return true
@@ -623,7 +465,7 @@ func matchNode(node NodeSummary, query string) (string, string) {
 		return "", ""
 	}
 	if strings.EqualFold(node.ID, query) || strings.Contains(strings.ToLower(node.ID), query) {
-		return "history", "matched node id"
+		return "id", "matched node id"
 	}
 	if strings.Contains(strings.ToLower(node.Hostname), query) {
 		return "hostname", "matched hostname"
@@ -667,7 +509,6 @@ func displayLabelForNodes(nodes []NodeSummary) string {
 		for _, node := range nodes {
 			names = append(names, node.Hostname)
 		}
-		sort.Strings(names)
 		if len(names) > 3 {
 			return fmt.Sprintf("%d nodes", len(names))
 		}
@@ -675,21 +516,30 @@ func displayLabelForNodes(nodes []NodeSummary) string {
 	}
 }
 
-func candidateFromNode(node NodeSummary, matchedBy, reason string) domain.TargetCandidate {
-	return domain.TargetCandidate{
-		NodeID:    node.ID,
-		Hostname:  node.Hostname,
-		Region:    node.Region,
-		MatchedBy: matchedBy,
-		Reason:    reason,
+func inferRisk(text string) domain.RiskLevel {
+	lower := " " + strings.ToLower(text) + " "
+	switch {
+	case containsAny(lower, "rm -rf /", "mkfs", "dd if=/dev/zero", "drop database", "wipe disk"):
+		return domain.RiskLevelForbidden
+	case containsWordAny(lower, "restart", "reboot", "delete", "destroy", "shutdown") ||
+		containsAny(lower, " rm ", " drop "):
+		return domain.RiskLevelHigh
+	case containsWordAny(lower, "reload", "scale", "migrate", "upgrade"):
+		return domain.RiskLevelMedium
+	default:
+		return domain.RiskLevelLow
 	}
 }
 
-func cloneTargetContext(ctx domain.ActiveTargetContext) domain.ActiveTargetContext {
-	out := ctx
-	out.NodeIDs = append([]string(nil), ctx.NodeIDs...)
-	out.Candidates = append([]domain.TargetCandidate(nil), ctx.Candidates...)
-	return out
+func containsWordAny(text string, words ...string) bool {
+	for _, word := range words {
+		if strings.Contains(text, " "+word+" ") ||
+			strings.Contains(text, " "+word+"\t") ||
+			strings.Contains(text, " "+word+"\n") {
+			return true
+		}
+	}
+	return false
 }
 
 func containsAny(text string, needles ...string) bool {
@@ -700,10 +550,3 @@ func containsAny(text string, needles ...string) bool {
 	}
 	return false
 }
-
-func isAllOnlineQuery(query string) bool {
-	query = strings.ToLower(strings.TrimSpace(query))
-	return containsAny(query, "all online", "all nodes", "all hosts", "all")
-}
-
-const timeLayout = "2006-01-02T15:04:05Z07:00"

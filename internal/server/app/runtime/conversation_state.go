@@ -40,6 +40,23 @@ func (r *Runtime) persistConversationState(ctx context.Context, session *domain.
 	return r.bumpSession(ctx, session)
 }
 
+func (r *Runtime) rebuildConversation(ctx context.Context, sessionID string) ([]agentapi.Item, error) {
+	messages, err := r.repos.Messages.ListBySession(ctx, sessionID, domain.CursorPage{})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]agentapi.Item, 0, len(messages))
+	for _, msg := range messages {
+		switch msg.Role {
+		case domain.MessageRoleUser:
+			items = append(items, agentapi.UserMessage(msg.Content))
+		case domain.MessageRoleAssistant:
+			items = append(items, agentapi.AssistantMessage(msg.Content))
+		}
+	}
+	return items, nil
+}
+
 func firstFunctionCall(items []agentapi.Item) (agentapi.Item, bool) {
 	for _, item := range items {
 		if strings.TrimSpace(item.Type) == "function_call" {

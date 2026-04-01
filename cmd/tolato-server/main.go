@@ -9,6 +9,10 @@ import (
 	"net/http"
 	"time"
 
+	"database/sql"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	appauth "github.com/momaek/tolato/internal/server/app/auth"
 	appexecution "github.com/momaek/tolato/internal/server/app/execution"
 	"github.com/momaek/tolato/internal/server/app/history"
@@ -22,12 +26,14 @@ import (
 	"github.com/momaek/tolato/internal/server/infra"
 	"github.com/momaek/tolato/internal/server/infra/config"
 	"github.com/momaek/tolato/internal/server/infra/devseed"
+	"github.com/momaek/tolato/internal/server/infra/llm/agentsdk"
 	settingsllm "github.com/momaek/tolato/internal/server/infra/llm/settings"
 	"github.com/momaek/tolato/internal/server/infra/lock"
 	devnodes "github.com/momaek/tolato/internal/server/infra/nodes"
 	"github.com/momaek/tolato/internal/server/infra/store/memory"
 	storepostgres "github.com/momaek/tolato/internal/server/infra/store/postgres"
 	infraws "github.com/momaek/tolato/internal/server/infra/ws"
+	probeserver "github.com/momaek/tolato/internal/nodeprobe/server"
 	"github.com/momaek/tolato/internal/server/transport/ginhttp"
 	"github.com/momaek/tolato/internal/server/transport/ginws"
 	"github.com/momaek/tolato/internal/server/transport/wsagent"
@@ -102,8 +108,13 @@ func main() {
 		Subscriptions: sessionRegistry,
 	}, appsession.WithClock(clock), appsession.WithIDGenerator(ids))
 
+	waiterRegistry := agentsdk.NewWaiterRegistry()
 	execRef := &executionStarterRef{}
-	policyRegistry := policy.NewRegistry(nodeSource, policy.WithExecutionStarter(execRef))
+	policyRegistry := policy.NewRegistry(nodeSource,
+		policy.WithExecutionStarter(execRef),
+		policy.WithExecutionWaiter(waiterRegistry),
+		policy.WithExecutionResultQuerier(repos.Executions),
+	)
 	runtimeService := appruntime.NewService(appruntime.Repositories{
 		Sessions:    repos.Sessions,
 		Messages:    repos.ThreadMessages,
@@ -129,7 +140,7 @@ func main() {
 		Timelines:   repos.Timelines,
 		ToolResults: repos.ToolResults,
 		Audits:      repos.Audits,
-	}, clock, ids, appexecution.WithEventPublisher(eventPublisher), appexecution.WithDispatchPublisher(dispatchPublisher), appexecution.WithCompletionHandler(runtimeService), appexecution.WithLockManager(locks), appexecution.WithLogger(logger))
+	}, clock, ids, appexecution.WithEventPublisher(eventPublisher), appexecution.WithDispatchPublisher(dispatchPublisher), appexecution.WithLockManager(locks), appexecution.WithLogger(logger), appexecution.WithWaiterSignaler(waiterRegistry))
 	execRef.service = executionService
 
 	uiHandler := wsui.Handler{
@@ -155,12 +166,40 @@ func main() {
 		Sessions:   repos.Sessions,
 		Executions: repos.Executions,
 		Audits:     repos.Audits,
-	}, clock, ids, recovery.WithRuntimeResumer(runtimeService))
+	}, clock, ids)
 	report, err := recoveryService.Scan(context.Background())
 	if err != nil {
 		log.Fatalf("startup recovery scan: %v", err)
 	}
 	logRecoveryReport(report)
+
+	// --- Probe subsystem (optional) ---
+	var probeAPI ginhttp.ProbeAPI
+	if cfg.Probe.Enabled {
+		probeDB := openProbeDB(cfg)
+		probeStore := probeserver.NewStore(probeDB)
+
+		var notifier probeserver.Notifier
+		if cfg.Probe.Telegram.BotToken != "" && cfg.Probe.Telegram.ChatID != "" {
+			notifier = probeserver.NewTelegramNotifier(cfg.Probe.Telegram.BotToken, cfg.Probe.Telegram.ChatID)
+			log.Println("probe: telegram notifier enabled")
+		} else {
+			notifier = probeserver.NopNotifier{}
+			log.Println("probe: telegram not configured, alerts will only be logged")
+		}
+
+		probeAlertEngine := probeserver.NewAlertEngine(probeStore, cfg.Probe.AlertRules, notifier, log.Default())
+		go probeAlertEngine.RunOfflineChecker(context.Background())
+		go probeStore.RunCleanup(context.Background(), cfg.Probe.RetentionDays, log.Default())
+
+		probeAPI = &probeserver.API{
+			Store:       probeStore,
+			AlertEngine: probeAlertEngine,
+			AuthToken:   cfg.Auth.AgentToken,
+			Logger:      log.Default(),
+		}
+		log.Println("probe: subsystem enabled")
+	}
 
 	router := ginhttp.NewRouter(ginhttp.Handler{
 		Nodes:      nodeService,
@@ -169,6 +208,7 @@ func main() {
 		Auth:       authService,
 		Execution:  executionService,
 		AgentToken: cfg.Auth.AgentToken,
+		Probe:      probeAPI,
 	})
 	ginws.RegisterUIRoute(router, cfg.Server.UIWSPath, uiHandler)
 	ginws.RegisterAgentRoute(router, cfg.Server.AgentWSPath, agentHandler)
@@ -299,6 +339,21 @@ func (r *executionStarterRef) ResizeShell(ctx context.Context, input appexecutio
 		return errors.New("execution service is not configured")
 	}
 	return r.service.ResizeShell(ctx, input)
+}
+
+func openProbeDB(cfg config.Config) *sql.DB {
+	switch cfg.Store.Driver {
+	case "postgres":
+		db, err := sql.Open("pgx", cfg.Store.DSN)
+		if err != nil {
+			log.Fatalf("probe: open postgres: %v", err)
+		}
+		return db
+	default:
+		// For memory driver, open a separate postgres connection or skip
+		log.Println("probe: requires postgres store driver, probe disabled")
+		return nil
+	}
 }
 
 func logRecoveryReport(report recovery.ScanReport) {

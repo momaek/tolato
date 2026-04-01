@@ -10,17 +10,11 @@ import (
 // Ensure WaiterRegistry implements ExecutionWaiterSignaler.
 var _ execution.ExecutionWaiterSignaler = (*WaiterRegistry)(nil)
 
-// ExecutionResult carries the aggregate outcome of a completed task.
-type ExecutionResult struct {
-	TaskStatus domain.TaskStatus
-	Aggregate  domain.ExecutionAggregate
-}
-
 // executionWaiter allows a blocked tool Execute() to wait synchronously
 // until all executions in a task finish.
 type executionWaiter struct {
 	taskID   string
-	doneChan chan ExecutionResult
+	doneChan chan domain.ExecutionResult
 }
 
 // WaiterRegistry is a thread-safe registry of execution waiters.
@@ -39,12 +33,12 @@ func NewWaiterRegistry() *WaiterRegistry {
 }
 
 // Register creates a waiter for the given task and returns its done channel.
-func (r *WaiterRegistry) Register(taskID string) <-chan ExecutionResult {
+func (r *WaiterRegistry) Register(taskID string) <-chan domain.ExecutionResult {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	w := &executionWaiter{
 		taskID:   taskID,
-		doneChan: make(chan ExecutionResult, 1),
+		doneChan: make(chan domain.ExecutionResult, 1),
 	}
 	r.waiters[taskID] = w
 	return w.doneChan
@@ -63,7 +57,7 @@ func (r *WaiterRegistry) Signal(taskID string, status domain.TaskStatus, aggrega
 	if !ok {
 		return false
 	}
-	w.doneChan <- ExecutionResult{TaskStatus: status, Aggregate: aggregate}
+	w.doneChan <- domain.ExecutionResult{TaskStatus: status, Aggregate: aggregate}
 	return true
 }
 

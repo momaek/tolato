@@ -13,16 +13,12 @@ import (
 	"github.com/momaek/tolato/internal/server/domain"
 )
 
-func TestInstructionsIncludeRuntimeContext(t *testing.T) {
+func TestInstructionsIncludeSystemPrompt(t *testing.T) {
 	text := instructions(runtime.ModelTurnInput{
 		SessionID: "sess-1",
-		ActiveTargetContext: domain.ActiveTargetContext{
-			Status:       domain.TargetStatusConfirmed,
-			DisplayLabel: "jp-tokyo-01",
-		},
 	})
-	if !strings.Contains(text, "Runtime context JSON") || !strings.Contains(text, "jp-tokyo-01") {
-		t.Fatalf("instructions() = %q, want runtime context payload", text)
+	if !strings.Contains(text, "VPS fleet management assistant") {
+		t.Fatalf("instructions() = %q, want system prompt content", text)
 	}
 }
 
@@ -39,13 +35,13 @@ func TestRunTurnStreamsToolCallAndPublishesEvents(t *testing.T) {
 			"event: response.output_text.delta\n",
 			"data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"delta\":\"准备执行\"}\n\n",
 			"event: response.output_item.added\n",
-			"data: {\"type\":\"response.output_item.added\",\"response_id\":\"resp_1\",\"item\":{\"type\":\"function_call\",\"name\":\"exec_on_nodes\"}}\n\n",
+			"data: {\"type\":\"response.output_item.added\",\"response_id\":\"resp_1\",\"item\":{\"type\":\"function_call\",\"name\":\"run_on_node\"}}\n\n",
 			"event: response.function_call_arguments.delta\n",
-			"data: {\"type\":\"response.function_call_arguments.delta\",\"response_id\":\"resp_1\",\"delta\":\"{\\\"inputText\\\":\\\"ls -la ~\\\"\"}\n\n",
+			"data: {\"type\":\"response.function_call_arguments.delta\",\"response_id\":\"resp_1\",\"delta\":\"{\\\"target\\\":\\\"tokyo\\\"\"}\n\n",
 			"event: response.function_call_arguments.delta\n",
-			"data: {\"type\":\"response.function_call_arguments.delta\",\"response_id\":\"resp_1\",\"delta\":\",\\\"command\\\":\\\"bash\\\",\\\"commandArgs\\\":[\\\"-lc\\\",\\\"ls -la ~\\\"]}\"}\n\n",
+			"data: {\"type\":\"response.function_call_arguments.delta\",\"response_id\":\"resp_1\",\"delta\":\",\\\"command\\\":\\\"system_status\\\"}\"}\n\n",
 			"event: response.completed\n",
-			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"type\":\"function_call\",\"name\":\"exec_on_nodes\",\"arguments\":\"{\\\"inputText\\\":\\\"ls -la ~\\\",\\\"command\\\":\\\"bash\\\",\\\"commandArgs\\\":[\\\"-lc\\\",\\\"ls -la ~\\\"]}\"}]}}\n\n",
+			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"type\":\"function_call\",\"name\":\"run_on_node\",\"arguments\":\"{\\\"target\\\":\\\"tokyo\\\",\\\"command\\\":\\\"system_status\\\"}\"}]}}\n\n",
 			"data: [DONE]\n\n",
 		}, "")))
 	}))
@@ -58,15 +54,15 @@ func TestRunTurnStreamsToolCallAndPublishesEvents(t *testing.T) {
 		Events:   events,
 	}
 	output, err := provider.RunTurn(context.Background(), runtime.ModelTurnInput{SessionID: "sess-1"}, []agentapi.ToolSpec{
-		agentapi.NewFunctionTool("exec_on_nodes", "dispatch command execution", map[string]any{"type": "object"}),
+		agentapi.NewFunctionTool("run_on_node", "run command on node", map[string]any{"type": "object"}),
 	})
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if len(output.Items) != 1 || output.Items[0].Type != "function_call" || output.Items[0].Name != "exec_on_nodes" {
-		t.Fatalf("Items = %#v, want exec_on_nodes function_call", output.Items)
+	if len(output.Items) != 1 || output.Items[0].Type != "function_call" || output.Items[0].Name != "run_on_node" {
+		t.Fatalf("Items = %#v, want run_on_node function_call", output.Items)
 	}
-	if got := output.Items[0].Arguments; got != `{"inputText":"ls -la ~","command":"bash","commandArgs":["-lc","ls -la ~"]}` {
+	if got := output.Items[0].Arguments; got != `{"target":"tokyo","command":"system_status"}` {
 		t.Fatalf("function_call arguments = %s", got)
 	}
 	if output.Done {
@@ -78,7 +74,7 @@ func TestRunTurnStreamsToolCallAndPublishesEvents(t *testing.T) {
 	if captured.ToolChoice != "auto" || !captured.Stream || captured.ParallelToolCalls {
 		t.Fatalf("captured request = %#v, want tool_choice=auto stream=true parallel_tool_calls=false", captured)
 	}
-	if len(captured.Tools) != 1 || captured.Tools[0].Function.Name != "exec_on_nodes" || !captured.Tools[0].Function.Strict {
+	if len(captured.Tools) != 1 || captured.Tools[0].Function.Name != "run_on_node" {
 		t.Fatalf("captured tools = %#v", captured.Tools)
 	}
 	if len(events.sse) != 4 {
@@ -146,15 +142,6 @@ type stubSSE struct {
 
 func (s *stubEvents) SessionStateUpdated(context.Context, domain.Session) error { return nil }
 func (s *stubEvents) TimelineRowAppended(context.Context, domain.Session, domain.TimelineRow) error {
-	return nil
-}
-func (s *stubEvents) ThreadTargetPending(context.Context, domain.Session) error   { return nil }
-func (s *stubEvents) ThreadTargetConfirmed(context.Context, domain.Session) error { return nil }
-func (s *stubEvents) ThreadTargetCleared(context.Context, domain.Session) error   { return nil }
-func (s *stubEvents) ExecutionChunk(context.Context, string, string, domain.Execution, domain.ExecutionChunk) error {
-	return nil
-}
-func (s *stubEvents) ExecutionFinished(context.Context, string, string, domain.Execution) error {
 	return nil
 }
 func (s *stubEvents) LLMSSEEvent(_ context.Context, sessionID string, responseID string, sequenceNumber int, upstreamEventType string, rawEvent json.RawMessage) error {
