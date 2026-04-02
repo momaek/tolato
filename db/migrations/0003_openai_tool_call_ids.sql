@@ -1,5 +1,0 @@
-ALTER TABLE tool_calls
-    ADD COLUMN IF NOT EXISTS call_id TEXT;
-
-ALTER TABLE tool_results
-    ADD COLUMN IF NOT EXISTS call_id TEXT;

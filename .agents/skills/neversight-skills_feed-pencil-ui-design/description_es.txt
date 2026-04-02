@@ -1,1 +1,0 @@
-Biblioteca completa de componentes y flujo de trabajo para crear diseños de interfaz de usuario de nivel industrial utilizando Pencil MCP
