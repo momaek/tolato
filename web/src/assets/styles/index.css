@@ -1,0 +1,125 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@font-face {
+  font-family: 'Geist';
+  src: local('Geist');
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: local('Geist Mono');
+}
+
+/* Tolato is dark-only, so we define dark values at :root level */
+:root {
+  --background: #111111;
+  --foreground: #FFFFFF;
+
+  --card: #1A1A1A;
+  --card-foreground: #FFFFFF;
+
+  --popover: #1A1A1A;
+  --popover-foreground: #FFFFFF;
+
+  --primary: #FF8400;
+  --primary-foreground: #111111;
+
+  --secondary: #2E2E2E;
+  --secondary-foreground: #FFFFFF;
+
+  --muted: #2E2E2E;
+  --muted-foreground: #B8B9B6;
+
+  --accent: #2E2E2E;
+  --accent-foreground: #FFFFFF;
+
+  --destructive: #FF5C33;
+  --destructive-foreground: #FFFFFF;
+
+  --border: #2E2E2E;
+  --input: #2E2E2E;
+  --ring: #FF8400;
+
+  --color-success: #222924;
+  --color-success-foreground: #B6FFCE;
+  --color-warning: #291C0F;
+  --color-warning-foreground: #FF8400;
+  --color-error: #24100B;
+  --color-error-foreground: #FF5C33;
+
+  --sidebar: #18181b;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #FF8400;
+  --sidebar-primary-foreground: #111111;
+  --sidebar-accent: #2a2a30;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #FF8400;
+
+  --radius: 16px;
+
+  --chart-1: #FF8400;
+  --chart-2: #B6FFCE;
+  --chart-3: #FF5C33;
+  --chart-4: #B8B9B6;
+  --chart-5: #FFFFFF;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 8px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    font-family: 'Geist', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html {
+    color-scheme: dark;
+  }
+  code, pre, .font-mono {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+  }
+}

@@ -5,13 +5,15 @@
 本文档描述后端 AI Agent Loop 及其周边基础设施的实现架构。范围涵盖：
 
 - **AI Agent Engine** — 核心 Loop（LLM 调用 → streaming → tool 调度 → 敏感确认 → 循环）
-- **OpenAI Client** — 基于 `sashabaranov/go-openai` SDK 的流式调用封装
+- **LLM Client** — 基于 [llm-sdk](https://github.com/hoangvvo/llm-sdk)（`sdk-go`）的 LLM 调用层，处理 streaming 解析、tool_calls 增量拼装、多 provider 适配
 - **Node Agent Manager** — 管理 Node Agent WebSocket 连接、指令下发、结果收集
 - **WebSocket Gateway** — 前端对话 WebSocket，事件推送与用户交互
 
 ### 1.1 设计原则
 
-- **Goroutine-per-Conversation**：每个前端 WS 连接对应一个 goroutine 跑 Loop，Go 原生风格
+- **单 WebSocket 多路复用**：前端只建立一条 WS 连接，所有 conversation 的消息通过 `conversation_id` 字段区分
+- **单活跃连接**：同一时间只允许一个活跃的 WS 连接（一个浏览器 tab），新连接上线时踢掉旧连接，旧 tab 收到 `session_replaced` 事件
+- **Goroutine-per-Conversation**：每个活跃 conversation 对应一个 goroutine 跑 Loop，Go 原生风格
 - **Channel 通信**：Loop 与 WS handler 之间通过 channel 传递事件和用户输入
 - **顺序 Loop 逻辑**：Loop 内部是纯顺序代码（调 LLM → 解析 → 执行 tool → 循环），不引入状态机
 - **并行 Tool 执行**：同一轮多个 tool_calls 并行下发给 Node Agent，等全部返回后进入下一轮
@@ -21,32 +23,39 @@
 ## 2. 整体数据流
 
 ```
-Frontend Browser
-    │
-    │ WebSocket (/ws/chat)
-    ▼
-┌─────────────────────────────────────────────────┐
-│  WS Handler (per-connection goroutine)          │
-│  ├─ 读取前端消息 → 写入 inputCh                   │
-│  ├─ 从 eventCh 读取事件 → 序列化为 JSON 推送前端    │
-│  └─ 管理连接生命周期                               │
-└────────┬──────────────────────┬──────────────────┘
+Frontend Browser (Tab A)          Frontend Browser (Tab B)
+    │                                  │
+    │ WebSocket (/ws)                  │ WebSocket (/ws)
+    │ (活跃连接)                        │ → 连上后踢掉 Tab A
+    ▼                                  │   Tab A 收到 session_replaced
+┌──────────────────────────────────────────────────────┐
+│  Session Manager (全局单例)                            │
+│  ├─ 维护当前活跃 WS 连接（同一时间只有一个）              │
+│  ├─ 新连接上线 → 踢旧连接 → 替换为新连接                 │
+│  └─ 管理 conversation_id → LoopRunner 的映射          │
+├──────────────────────────────────────────────────────┤
+│  WS Handler (单连接)                                  │
+│  ├─ 读取前端消息 → 按 conversation_id 路由到对应 Loop    │
+│  ├─ 从各 Loop 的 eventCh 收事件 → 附加 conversation_id  │
+│  │   序列化为 JSON 推送前端                             │
+│  └─ 管理连接生命周期                                    │
+└────────┬──────────────────────┬───────────────────────┘
          │ inputCh              │ eventCh
          ▼                      ▲
-┌─────────────────────────────────────────────────┐
-│  Loop Runner (per-conversation goroutine)       │
-│  ├─ 构建 messages（system prompt + history）      │
-│  ├─ 调用 LLM（streaming）                         │
-│  ├─ 解析 streaming chunks → 推送 event            │
-│  ├─ 收到 tool_calls → 敏感检测 → 确认/执行          │
-│  ├─ 并行下发 tool → 收集结果                       │
-│  └─ 循环或结束                                    │
-└────────┬──────────────────────┬──────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  Loop Runner (per-conversation goroutine)            │
+│  ├─ 构建 messages（system prompt + history）           │
+│  ├─ 调用 LLM（streaming）                              │
+│  ├─ 解析 streaming chunks → 推送 event                 │
+│  ├─ 收到 tool_calls → 敏感检测 → 确认/执行               │
+│  ├─ 并行下发 tool → 收集结果                            │
+│  └─ 循环或结束                                         │
+└────────┬──────────────────────┬───────────────────────┘
          │                      │
          ▼                      ▼
 ┌──────────────────┐   ┌──────────────────────────┐
-│  OpenAI Client   │   │  Node Agent Manager      │
-│  (go-openai SDK) │   │  ├─ 连接池（agent conns） │
+│  LLM Client      │   │  Node Agent Manager      │
+│  (llm-sdk)       │   │  ├─ 连接池（agent conns） │
 │  ├─ streaming    │   │  ├─ 指令下发              │
 │  └─ tool_calls   │   │  └─ 结果收集              │
 └──────────────────┘   └───────────┬──────────────┘
@@ -59,52 +68,87 @@ Frontend Browser
 
 ## 3. 模块设计
 
-### 3.1 WS Handler (`handler/chat_ws.go`)
+### 3.1 Session Manager (`handler/session.go`)
 
-职责：管理前端 WebSocket 连接，桥接前端与 Loop Runner。
+职责：管理前端 WS 连接的唯一性，确保同一时间只有一个活跃连接。
 
 ```go
-// ChatWSHandler 管理单个前端 WebSocket 连接
+// SessionManager 管理当前活跃的前端 WS 连接（全局单例）
+type SessionManager struct {
+    mu      sync.Mutex
+    current *ChatWSHandler  // 当前活跃连接（nil 表示无连接）
+}
+
+// Replace 替换当前活跃连接，踢掉旧连接
+func (s *SessionManager) Replace(newHandler *ChatWSHandler) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    if s.current != nil {
+        // 向旧连接推送 session_replaced 事件，然后关闭
+        s.current.SendAndClose(SessionReplacedEvent{
+            Reason: "已在其他窗口打开",
+        })
+    }
+    s.current = newHandler
+}
+```
+
+### 3.2 WS Handler (`handler/chat_ws.go`)
+
+职责：管理单条前端 WebSocket 连接，复用同一连接处理所有 conversation 的消息路由。
+
+```go
+// ChatWSHandler 管理单条前端 WebSocket 连接
 type ChatWSHandler struct {
-    conn           *websocket.Conn
-    conversationID string
-    eventCh        chan Event    // Loop → 前端（带 buffer）
-    inputCh        chan Input    // 前端 → Loop
-    db             *gorm.DB
-    loopRunner     *LoopRunner
+    conn    *websocket.Conn
+    loops   map[string]*LoopRunner  // conversationID → LoopRunner
+    eventCh chan Event              // 所有 Loop 共享的事件输出 channel（带 buffer）
+    db      *gorm.DB
 }
 ```
 
 **连接生命周期**：
 
-1. 前端连接 `/ws/chat?conversation_id=xxx`
-2. 升级 WebSocket，创建 `eventCh`（buffer=64）和 `inputCh`（buffer=1）
-3. 启动两个 goroutine：
-   - **读 goroutine**：从 WS 读取前端消息，解析后写入 `inputCh`
-   - **写 goroutine**：从 `eventCh` 读取事件，序列化为 JSON 写入 WS
-4. 等待前端发送 `user_message`
-5. 收到消息后创建 `LoopRunner`，在新 goroutine 中启动 Loop
-6. Loop 结束后回到等待状态（同一连接可以多次对话）
-7. WS 断开时清理所有 goroutine 和 channel
+1. 前端连接 `/ws`（不再需要 `conversation_id` 参数）
+2. SessionManager 检查是否有旧连接 → 有则踢掉（发送 `session_replaced` 后关闭）
+3. 升级 WebSocket，创建 `eventCh`（buffer=64）
+4. 启动两个 goroutine：
+   - **读 goroutine**：从 WS 读取前端消息，按 `conversation_id` 路由到对应 Loop 的 `inputCh`
+   - **写 goroutine**：从 `eventCh` 读取事件，附加 `conversation_id` 后序列化为 JSON 写入 WS
+5. 收到 `user_message` 时，查找或创建对应 conversation 的 `LoopRunner`，启动 Loop
+6. Loop 结束后 LoopRunner 保留在 `loops` map 中（等待下一次用户消息）
+7. WS 断开时清理所有 LoopRunner 和 channel
+
+**消息路由**：
+
+前端发送的所有消息都带 `conversation_id` 字段，WS Handler 据此路由：
+- `user_message` → 查找或创建 LoopRunner，写入其 `inputCh`
+- `confirm_response` → 根据 `conversation_id` 找到对应 LoopRunner，写入其 `inputCh`
+
+Loop 推送事件到共享的 `eventCh` 时附带 `conversation_id`，写 goroutine 序列化后推给前端，前端据此分发到对应的对话 UI。
 
 **关键设计**：
-- `eventCh` 带 buffer（64），防止 Loop 被前端写入速度阻塞
-- `inputCh` buffer 为 1，因为 Loop 执行期间前端输入被禁用，只有 confirm_response 需要传入
-- WS 断开时通过 `context.Cancel` 通知 Loop 停止
+- `eventCh` 是所有 Loop 共享的，带 buffer（64），防止 Loop 被前端写入速度阻塞
+- 每个 LoopRunner 有独立的 `inputCh`（buffer=1），只接收对应 conversation 的用户输入
+- WS 断开时通过 `context.Cancel` 通知所有活跃 Loop 停止
+- 同一时间只有一个 WS 连接活跃，由 SessionManager 保证
 
-### 3.2 Loop Runner (`agent/engine.go`)
+### 3.3 Loop Runner (`agent/engine.go`)
 
 职责：核心 agentic loop，编排 LLM 调用和 Tool 执行。
 
 ```go
+import llm "github.com/hoangvvo/llm-sdk/sdk-go"
+
 // LoopRunner 执行单次对话的 agent loop
 type LoopRunner struct {
     ctx            context.Context
     conversationID string
-    messages       []openai.ChatCompletionMessage  // 累积的 messages
+    messages       []llm.Message                    // 累积的 messages（llm-sdk 统一格式）
     eventCh        chan<- Event                     // 向 WS handler 推送事件
     inputCh        <-chan Input                     // 从 WS handler 接收用户输入
-    llmClient      *LLMClient                      // OpenAI 客户端封装
+    llmClient      *LLMClient                      // llm-sdk 客户端封装
     toolExecutor   *ToolExecutor                    // Tool 执行器
     promptBuilder  *PromptBuilder                   // System Prompt 构建器
     config         LoopConfig                       // max_rounds, temperature 等
@@ -130,46 +174,38 @@ func (r *LoopRunner) Run(userMessage string) error {
     // 2. 加载历史消息（最近 N 轮）
     r.messages = r.loadHistory(r.config.ContextRounds)
 
-    // 3. 追加用户消息
-    r.messages = append(r.messages, userMsg(userMessage))
+    // 3. 追加系统消息 + 用户消息
+    r.messages = append([]llm.Message{llm.SystemMessage(systemPrompt)}, r.messages...)
+    r.messages = append(r.messages, llm.UserMessage(userMessage))
 
     // 4. 进入 loop
     for round := 0; round < r.config.MaxRounds; round++ {
-        // 4a. 调用 LLM（streaming）
-        stream, err := r.llmClient.CreateStreamingChat(r.ctx, systemPrompt, r.messages, r.config)
+        // 4a. 调用 LLM（streaming）— llm-sdk 处理 chunk 解析和 tool_calls 拼装
+        response, err := r.callLLM()
+        // callLLM 内部通过回调 emit ReasoningEvent / ContentEvent
+        // 返回的 response 包含完整的 content + 已拼装好的 tool_calls
+
         if err != nil {
-            r.emit(ErrorEvent{Message: err.Error()})
+            r.emit(ErrorEvent{ConvID: r.conversationID, Message: err.Error()})
             return err
         }
 
-        // 4b. 消费 streaming response
-        response, err := r.consumeStream(stream)
-        // consumeStream 内部：
-        //   - 每收到 reasoning delta → emit ReasoningEvent
-        //   - 每收到 content delta  → emit ContentEvent
-        //   - 累积完整 response（content + tool_calls）
-
-        if err != nil {
-            r.emit(ErrorEvent{Message: err.Error()})
-            return err
-        }
-
-        // 4c. 追加 assistant message 到 messages
+        // 4b. 追加 assistant message 到 messages（llm-sdk 统一格式）
         r.messages = append(r.messages, response.ToAssistantMessage())
 
-        // 4d. 检查是否有 tool_calls
+        // 4c. 检查是否有 tool_calls
         if len(response.ToolCalls) == 0 {
             // 没有 tool_calls → loop 结束
             break
         }
 
-        // 4e. 处理 tool_calls（可能有多个，并行执行）
+        // 4d. 处理 tool_calls（可能有多个，并行执行）
         toolResults, err := r.handleToolCalls(response.ToolCalls)
         if err != nil {
             return err
         }
 
-        // 4f. 追加 tool result messages
+        // 4e. 追加 tool result messages
         for _, result := range toolResults {
             r.messages = append(r.messages, result.ToToolMessage())
         }
@@ -178,7 +214,7 @@ func (r *LoopRunner) Run(userMessage string) error {
     }
 
     // 5. 推送 done
-    r.emit(DoneEvent{})
+    r.emit(DoneEvent{ConvID: r.conversationID})
 
     // 6. 持久化消息到数据库
     r.saveMessages()
@@ -187,7 +223,7 @@ func (r *LoopRunner) Run(userMessage string) error {
 }
 ```
 
-### 3.3 Tool 执行器 (`agent/tools.go`)
+### 3.4 Tool 执行器 (`agent/tools.go`)
 
 职责：执行 tool calls，处理敏感操作确认，与 Node Agent Manager 交互。
 
@@ -309,7 +345,7 @@ func (r *LoopRunner) waitForConfirm(toolCallID string) ConfirmResponse {
 }
 ```
 
-### 3.4 Prompt 构建器 (`agent/prompt.go`)
+### 3.5 Prompt 构建器 (`agent/prompt.go`)
 
 职责：动态构建 System Prompt。
 
@@ -337,112 +373,98 @@ func (b *PromptBuilder) Build() string {
 - node-ghi: cache-1, CentOS 9, 2C2G, IP: 9.10.11.12, 离线
 ```
 
-### 3.5 OpenAI Client (`openai/client.go`)
+### 3.6 LLM Client (`llm/client.go`)
 
-职责：封装 `sashabaranov/go-openai` SDK，提供流式调用接口。
+职责：基于 [llm-sdk](https://github.com/hoangvvo/llm-sdk)（`sdk-go` 模块）封装 LLM 调用层。
+
+**为什么用 llm-sdk 而不是 `sashabaranov/go-openai`：**
+- llm-sdk 核心仅 ~500 行，零抽象，完全可控
+- 内置 streaming 解析 + tool_calls 增量拼装，不需要手动处理 chunk 拼装的脏活
+- 统一的 Message 格式，天然支持多 provider（OpenAI、Claude、Ollama 等），切换模型无需改调用层代码
+- tool calling 的 function/tool_result 信封格式跨 provider 一致
 
 ```go
+import (
+    llm "github.com/hoangvvo/llm-sdk/sdk-go"
+)
+
 type LLMClient struct {
-    client *openai.Client
+    provider llm.Provider
 }
 
-// NewLLMClient 从 Settings 加载 API Base URL 和 API Key 创建客户端
-func NewLLMClient(apiBase, apiKey string) *LLMClient {
-    config := openai.DefaultConfig(apiKey)
-    config.BaseURL = apiBase
-    return &LLMClient{client: openai.NewClientWithConfig(config)}
+// NewLLMClient 根据 Settings 创建对应 provider
+func NewLLMClient(apiBase, apiKey, providerType string) *LLMClient {
+    var provider llm.Provider
+    switch providerType {
+    case "openai":
+        provider = llm.NewOpenAIProvider(apiKey, llm.WithBaseURL(apiBase))
+    // 后续可扩展 claude、ollama 等
+    default:
+        provider = llm.NewOpenAIProvider(apiKey, llm.WithBaseURL(apiBase))
+    }
+    return &LLMClient{provider: provider}
 }
 ```
 
 **流式调用**：
 
-```go
-// StreamResponse 封装流式响应的累积结果
-type StreamResponse struct {
-    Reasoning  string      // 完整 reasoning 文本
-    Content    string      // 完整 content 文本
-    ToolCalls  []ToolCall  // 解析后的 tool calls
-}
+llm-sdk 的 streaming 接口通过回调处理 delta，SDK 内部自动完成 tool_calls 的增量拼装：
 
-func (c *LLMClient) CreateStreamingChat(
+```go
+func (c *LLMClient) StreamChat(
     ctx context.Context,
-    systemPrompt string,
-    messages []openai.ChatCompletionMessage,
+    messages []llm.Message,
+    tools []llm.Tool,
     config LoopConfig,
-) (*openai.ChatCompletionStream, error) {
-    req := openai.ChatCompletionRequest{
+    onDelta func(delta llm.StreamDelta),  // 每个 chunk 的回调
+) (*llm.Response, error) {
+    return c.provider.ChatStream(ctx, llm.ChatRequest{
         Model:       config.Model,
-        Messages:    prependSystem(systemPrompt, messages),
+        Messages:    messages,
+        Tools:       tools,
+        Temperature: config.Temperature,
         Stream:      true,
-        Temperature: float32(config.Temperature),
-        Tools:       getToolDefinitions(),  // list_nodes, get_node_info, execute_command
-    }
-    return c.client.CreateChatCompletionStream(ctx, req)
+    }, onDelta)
+    // 返回的 Response 包含完整的 content + 已拼装好的 tool_calls
+    // 不再需要手动维护 ToolCallBuffer
 }
 ```
 
-**consumeStream 处理**：
+**LoopRunner 中的调用方式**：
 
 ```go
-func (r *LoopRunner) consumeStream(stream *openai.ChatCompletionStream) (*StreamResponse, error) {
-    defer stream.Close()
-
-    resp := &StreamResponse{}
-    // tool_calls 需要跨 chunk 拼装
-    toolCallBuffers := map[int]*ToolCallBuffer{}
-
-    for {
-        chunk, err := stream.Recv()
-        if errors.Is(err, io.EOF) {
-            break
-        }
-        if err != nil {
-            return nil, err
-        }
-
-        delta := chunk.Choices[0].Delta
-
-        // reasoning（推理模型返回）
-        // 注意：go-openai 对 reasoning_content 的支持需确认，
-        // 可能需要用 raw JSON 解析或等 SDK 更新
-        if delta.ReasoningContent != "" {
-            resp.Reasoning += delta.ReasoningContent
-            r.emit(ReasoningEvent{Delta: delta.ReasoningContent})
-        }
-
-        // content
-        if delta.Content != "" {
-            resp.Content += delta.Content
-            r.emit(ContentEvent{Delta: delta.Content})
-        }
-
-        // tool_calls（增量拼装）
-        for _, tc := range delta.ToolCalls {
-            idx := tc.Index
-            if _, ok := toolCallBuffers[*idx]; !ok {
-                toolCallBuffers[*idx] = &ToolCallBuffer{
-                    ID:   tc.ID,
-                    Name: tc.Function.Name,
-                }
+func (r *LoopRunner) callLLM() (*llm.Response, error) {
+    resp, err := r.llmClient.StreamChat(
+        r.ctx,
+        r.messages,
+        getToolDefinitions(),
+        r.config,
+        func(delta llm.StreamDelta) {
+            // SDK 回调，直接 emit 事件到前端
+            if delta.Reasoning != "" {
+                r.emit(ReasoningEvent{ConvID: r.conversationID, Delta: delta.Reasoning})
             }
-            toolCallBuffers[*idx].ArgsJSON += tc.Function.Arguments
-        }
-    }
-
-    // 解析完整的 tool calls
-    for _, buf := range toolCallBuffers {
-        tc, err := buf.Parse()
-        if err != nil {
-            return nil, fmt.Errorf("parse tool call %s: %w", buf.Name, err)
-        }
-        resp.ToolCalls = append(resp.ToolCalls, tc)
-    }
-
-    return resp, nil
+            if delta.Content != "" {
+                r.emit(ContentEvent{ConvID: r.conversationID, Delta: delta.Content})
+            }
+            // tool_calls 的增量 delta 由 SDK 内部拼装，
+            // 最终完整的 tool_calls 在 resp 中返回
+        },
+    )
+    return resp, err
 }
 ```
 
-### 3.6 Node Agent Manager (`node/manager.go`)
+**对比原方案（手动 consumeStream）的简化：**
+
+| 原方案（go-openai 手搓） | 新方案（llm-sdk） |
+|---|---|
+| 手动维护 `ToolCallBuffer` map，逐 chunk 拼装 Arguments JSON | SDK 内部处理，返回完整 ToolCalls |
+| 手动处理 `stream.Recv()` + EOF 判断 | 回调模式，SDK 管理流生命周期 |
+| reasoning_content 需要确认 SDK 支持或 raw JSON 解析 | SDK 统一抽象为 `delta.Reasoning` |
+| 切换 provider 需要换 SDK + 改调用代码 | 只换 `NewXxxProvider()`，调用代码不变 |
+
+### 3.7 Node Agent Manager (`node/manager.go`)
 
 职责：管理所有 Node Agent 的 WebSocket 连接，指令下发与结果收集。
 
@@ -574,7 +596,7 @@ func (m *NodeManager) HandleAgentConnection(conn *websocket.Conn, nodeID string)
 }
 ```
 
-### 3.7 Security Checker (`security/checker.go`)
+### 3.8 Security Checker (`security/checker.go`)
 
 职责：检测命令是否匹配敏感操作规则。
 
@@ -605,6 +627,7 @@ Loop 和 WS Handler 之间通过 channel 传递的事件类型：
 // Event 是 Loop → WS Handler 的事件接口
 type Event interface {
     EventType() string
+    ConversationID() string  // 标识事件所属的 conversation
 }
 
 // Input 是 WS Handler → Loop 的输入接口
@@ -612,21 +635,25 @@ type Input interface {
     InputType() string
 }
 
-// --- 事件类型 ---
-type ReasoningEvent struct{ Delta string }
-type ContentEvent   struct{ Delta string }
-type ToolCallEvent  struct{ ID, Tool string; Args map[string]any }
-type ToolResultEvent struct{ ID string; Result any }
-type ConfirmRequestEvent struct{ ID, Tool string; Args map[string]any }
-type DoneEvent      struct{}
-type ErrorEvent     struct{ Message string }
+// --- Loop 事件类型（带 conversation_id，推送到共享 eventCh）---
+type ReasoningEvent struct{ ConvID, Delta string }
+type ContentEvent   struct{ ConvID, Delta string }
+type ToolCallEvent  struct{ ConvID, ID, Tool string; Args map[string]any }
+type ToolResultEvent struct{ ConvID, ID string; Result any }
+type ConfirmRequestEvent struct{ ConvID, ID, Tool string; Args map[string]any }
+type DoneEvent      struct{ ConvID string }
+type ErrorEvent     struct{ ConvID, Message string }
 
-// --- 输入类型 ---
-type UserMessageInput  struct{ Content string; Model, DefaultNodeID *string }
-type ConfirmInput      struct{ ID string; Approved bool }
+// --- 连接级事件（由 SessionManager 发出，不带 conversation_id）---
+type SessionReplacedEvent struct{ Reason string }
+
+// --- 输入类型（前端消息均带 conversation_id，由 WS Handler 路由）---
+type UserMessageInput  struct{ ConvID, Content string; Model, DefaultNodeID *string }
+type ConfirmInput      struct{ ConvID, ID string; Approved bool }
 ```
 
 这些类型直接对应 `schema/go/ws.go` 中定义的 WebSocket 协议，WS Handler 负责双向转换。
+前端发送的所有消息必须包含 `conversation_id`；Server 推送的所有 Loop 事件也附带 `conversation_id`，前端据此分发到对应的对话 UI。
 
 ---
 
@@ -678,6 +705,18 @@ type ConfirmInput      struct{ ID string; Approved bool }
 - 部分 tool 失败时，成功的结果和失败的错误信息一起作为 tool results 返回给 LLM
 - LLM 会看到错误并自行决定下一步
 
+### 6.6 多 Tab 连接（踢旧连接）
+- 用户在新 tab 打开页面 → 新 WS 连接建立 → SessionManager 踢掉旧连接
+- 旧连接收到 `session_replaced` 事件后被关闭，前端显示"已在其他窗口打开"
+- 旧连接上正在运行的 Loop 会被 `context.Cancel` 终止
+- 新连接建立后，前端可通过 REST API 加载对话历史恢复 UI 状态
+
+### 6.7 前端断线重连
+- WS 断开时，所有活跃 Loop 通过 `context.Cancel` 终止，本轮未完成的消息不持久化
+- 前端自动重连后建立新 WS 连接，SessionManager 正常接纳（此时无旧连接需要踢）
+- 重连后前端通过 REST API 加载对话历史，恢复到断线前已持久化的状态
+- 断线那一轮的 Loop 结果丢失，用户可手动重新发送消息触发新一轮 Loop
+
 ---
 
 ## 7. 目录结构
@@ -690,7 +729,8 @@ server/
 │   │   └── config.go               # config.yaml 加载
 │   ├── handler/
 │   │   ├── router.go               # Gin 路由注册（REST + WS）
-│   │   ├── chat_ws.go              # 前端对话 WebSocket handler
+│   │   ├── session.go              # SessionManager：单活跃连接管理、踢旧连接
+│   │   ├── chat_ws.go              # ChatWSHandler：单 WS 连接、多 conversation 路由
 │   │   └── agent_ws.go             # Node Agent WebSocket handler
 │   ├── agent/
 │   │   ├── engine.go               # LoopRunner：核心 loop 逻辑
@@ -700,7 +740,7 @@ server/
 │   ├── node/
 │   │   └── manager.go              # NodeManager：agent 连接管理、指令下发
 │   ├── llm/
-│   │   └── client.go               # LLMClient：go-openai SDK 封装
+│   │   └── client.go               # LLMClient：llm-sdk 封装（streaming + tool_calls）
 │   ├── security/
 │   │   └── checker.go              # SecurityChecker：敏感操作检测
 │   ├── store/
@@ -725,19 +765,21 @@ main.go
   ├── config.Config
   ├── gorm.DB (SQLite/PostgreSQL)
   ├── handler.Router
-  │     ├── handler.ChatWSHandler
-  │     │     ├── agent.LoopRunner
-  │     │     │     ├── llm.LLMClient
-  │     │     │     ├── agent.ToolExecutor
-  │     │     │     │     ├── node.NodeManager
-  │     │     │     │     ├── security.SecurityChecker
-  │     │     │     │     └── store.AuditLog
-  │     │     │     └── agent.PromptBuilder
-  │     │     │           └── node.NodeManager
-  │     │     └── store.*
+  │     ├── handler.SessionManager (singleton)
+  │     │     └── handler.ChatWSHandler (当前活跃连接，0 或 1 个)
+  │     │           ├── agent.LoopRunner × N (per-conversation)
+  │     │           │     ├── llm.LLMClient
+  │     │           │     ├── agent.ToolExecutor
+  │     │           │     │     ├── node.NodeManager
+  │     │           │     │     ├── security.SecurityChecker
+  │     │           │     │     └── store.AuditLog
+  │     │           │     └── agent.PromptBuilder
+  │     │           │           └── node.NodeManager
+  │     │           └── store.*
   │     └── handler.AgentWSHandler
   │           └── node.NodeManager
   └── node.NodeManager (singleton)
 ```
 
 `NodeManager` 是全局单例，被 ChatWSHandler（通过 ToolExecutor）和 AgentWSHandler 共享。
+`SessionManager` 是全局单例，确保同一时间只有一个活跃的前端 WS 连接。

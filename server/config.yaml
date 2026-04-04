@@ -1,0 +1,23 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+
+database:
+  driver: sqlite
+  dsn: data/tolato.db
+
+security:
+  encrypt_key: "tolato-default-encrypt-key-32b!"
+  jwt_secret: "tolato-jwt-secret-change-me"
+  agent_token_expiry: 24h
+
+defaults:
+  heartbeat_interval: 30
+  command_timeout: 60
+  max_rounds: 20
+  context_rounds: 20
+  output_truncate_lines: 100
+
+auth:
+  username: admin
+  password: admin
