@@ -43,7 +43,7 @@ async function handleDelete(id: string, e: Event) {
   <div class="flex flex-col gap-1">
     <div class="flex items-center justify-between px-2 py-1">
       <span class="text-xs font-medium" style="color: var(--muted-foreground)">
-        Conversations
+        {{ $t('chat.conversations') }}
       </span>
       <Button variant="ghost" size="icon" class="h-6 w-6" @click="handleNew">
         <Plus class="h-3.5 w-3.5" />
@@ -51,7 +51,7 @@ async function handleDelete(id: string, e: Event) {
     </div>
 
     <div v-if="chatStore.loading" class="px-2 py-4 text-center text-xs" style="color: var(--muted-foreground)">
-      Loading...
+      {{ $t('common.loading') }}
     </div>
 
     <div
@@ -64,7 +64,7 @@ async function handleDelete(id: string, e: Event) {
       }"
       @click="selectConversation(conv.id)"
     >
-      <span class="flex-1 truncate">{{ conv.title || 'New Conversation' }}</span>
+      <span class="flex-1 truncate">{{ conv.title || $t('chat.newConversation') }}</span>
       <button
         class="hidden h-5 w-5 items-center justify-center rounded group-hover:flex"
         style="color: var(--muted-foreground)"
@@ -79,7 +79,7 @@ async function handleDelete(id: string, e: Event) {
       class="px-2 py-4 text-center text-xs"
       style="color: var(--muted-foreground)"
     >
-      No conversations yet
+      {{ $t('chat.noConversations') }}
     </div>
   </div>
 </template>

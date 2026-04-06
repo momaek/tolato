@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { CheckCircle, AlertCircle, Loader2 } from 'lucide-vue-next'
+import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
+import { CheckCircle, AlertCircle, Loader2, Copy, Check, Key, Trash2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,6 +16,21 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
   getLLMSettings,
   updateLLMSettings,
   verifyLLM,
@@ -23,6 +40,9 @@ import {
   updateAgentSettings,
   getChatSettings,
   updateChatSettings,
+  getAPIKeys,
+  createAPIKey,
+  deleteAPIKey,
 } from '@/services/api'
 import type {
   LLMSettings,
@@ -32,14 +52,16 @@ import type {
   VerifyLLMResponse,
 } from '@/types/api'
 
+const { t } = useI18n()
 const activeTab = ref('llm')
 
-const tabs = [
-  { id: 'llm', label: 'LLM Config' },
-  { id: 'security', label: 'Security' },
-  { id: 'agent', label: 'Node Agent' },
-  { id: 'chat', label: 'Conversation' },
-]
+const tabs = computed(() => [
+  { id: 'llm', label: t('settings.tabs.llm') },
+  { id: 'security', label: t('settings.tabs.security') },
+  { id: 'agent', label: t('settings.tabs.agent') },
+  { id: 'chat', label: t('settings.tabs.chat') },
+  { id: 'api_keys', label: t('settings.tabs.apiKeys') },
+])
 
 // LLM
 const llm = ref<LLMSettings>({
@@ -80,6 +102,14 @@ const chat = ref<ChatSettings>({
 })
 const chatSaving = ref(false)
 
+// API Keys
+const apiKeys = ref<any[]>([])
+const showCreateKeyDialog = ref(false)
+const newKeyName = ref('')
+const newKeyPermission = ref('standard')
+const createdKey = ref<string | null>(null)
+const keyCopied = ref(false)
+
 onMounted(async () => {
   try {
     const [llmData, secData, agentData, chatData] = await Promise.all([
@@ -92,8 +122,9 @@ onMounted(async () => {
     security.value = secData
     agent.value = agentData
     chat.value = chatData
+    apiKeys.value = await getAPIKeys().catch(() => [])
   } catch {
-    // TODO: toast error
+    toast.error(t('settings.failedToLoad'))
   }
 })
 
@@ -107,7 +138,7 @@ async function handleVerifyLLM() {
       availableModels.value = res.models
     }
   } catch {
-    verifyResult.value = { success: false, error: 'Connection failed' }
+    verifyResult.value = { success: false, error: t('settings.llm.connectionFailed') }
   } finally {
     verifying.value = false
   }
@@ -118,7 +149,7 @@ async function saveLLM() {
   try {
     await updateLLMSettings(llm.value)
   } catch {
-    // TODO: toast
+    toast.error(t('settings.saveFailed'))
   } finally {
     llmSaving.value = false
   }
@@ -153,7 +184,7 @@ async function saveSecurity() {
   try {
     await updateSecuritySettings(security.value)
   } catch {
-    // TODO: toast
+    toast.error(t('settings.saveFailed'))
   } finally {
     secSaving.value = false
   }
@@ -164,7 +195,7 @@ async function saveAgent() {
   try {
     await updateAgentSettings(agent.value)
   } catch {
-    // TODO: toast
+    toast.error(t('settings.saveFailed'))
   } finally {
     agentSaving.value = false
   }
@@ -175,10 +206,48 @@ async function saveChat() {
   try {
     await updateChatSettings(chat.value)
   } catch {
-    // TODO: toast
+    toast.error(t('settings.saveFailed'))
   } finally {
     chatSaving.value = false
   }
+}
+
+async function handleCreateKey() {
+  if (!newKeyName.value.trim()) return
+  try {
+    const res = await createAPIKey({
+      name: newKeyName.value.trim(),
+      permission: newKeyPermission.value,
+    })
+    createdKey.value = res.key
+    apiKeys.value = await getAPIKeys()
+    newKeyName.value = ''
+    newKeyPermission.value = 'standard'
+  } catch {
+    toast.error(t('settings.saveFailed'))
+  }
+}
+
+async function handleRevokeKey(id: string) {
+  try {
+    await deleteAPIKey(id)
+    apiKeys.value = await getAPIKeys()
+  } catch {
+    toast.error(t('settings.saveFailed'))
+  }
+}
+
+function copyKey() {
+  if (createdKey.value) {
+    navigator.clipboard.writeText(createdKey.value)
+    keyCopied.value = true
+    setTimeout(() => { keyCopied.value = false }, 2000)
+  }
+}
+
+function closeCreateDialog() {
+  showCreateKeyDialog.value = false
+  createdKey.value = null
 }
 </script>
 
@@ -186,7 +255,7 @@ async function saveChat() {
   <div class="flex h-full" style="background-color: var(--background)">
     <!-- Left tabs -->
     <div class="flex w-[220px] flex-col border-r px-3 py-6">
-      <h1 class="mb-4 px-3 text-lg font-semibold">Settings</h1>
+      <h1 class="mb-4 px-3 text-lg font-semibold">{{ $t('settings.title') }}</h1>
       <nav class="flex flex-col gap-1">
         <button
           v-for="tab in tabs"
@@ -208,9 +277,9 @@ async function saveChat() {
       <!-- LLM Config -->
       <div v-if="activeTab === 'llm'" class="max-w-2xl space-y-6">
         <div>
-          <h2 class="text-base font-semibold">LLM Configuration</h2>
+          <h2 class="text-base font-semibold">{{ $t('settings.llm.title') }}</h2>
           <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
-            Configure the AI model provider for your assistant.
+            {{ $t('settings.llm.description') }}
           </p>
         </div>
 
@@ -218,23 +287,23 @@ async function saveChat() {
 
         <div class="space-y-4">
           <div class="space-y-2">
-            <label class="text-sm font-medium">API Base URL</label>
+            <label class="text-sm font-medium">{{ $t('settings.llm.apiBaseUrl') }}</label>
             <Input v-model="llm.api_base_url" placeholder="https://api.openai.com/v1" />
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">API Key</label>
+            <label class="text-sm font-medium">{{ $t('settings.llm.apiKey') }}</label>
             <div class="flex gap-2">
               <Input v-model="llm.api_key" type="password" placeholder="sk-..." class="flex-1" />
               <Button variant="outline" :disabled="verifying" @click="handleVerifyLLM">
                 <Loader2 v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
-                Verify
+                {{ $t('common.verify') }}
               </Button>
             </div>
             <div v-if="verifyResult" class="flex items-center gap-2 text-sm">
               <template v-if="verifyResult.success">
                 <CheckCircle class="h-4 w-4" style="color: var(--color-success-foreground)" />
-                <span style="color: var(--color-success-foreground)">Connection verified</span>
+                <span style="color: var(--color-success-foreground)">{{ $t('settings.llm.connectionVerified') }}</span>
               </template>
               <template v-else>
                 <AlertCircle class="h-4 w-4" style="color: var(--color-error-foreground)" />
@@ -244,10 +313,10 @@ async function saveChat() {
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Default Model</label>
+            <label class="text-sm font-medium">{{ $t('settings.llm.defaultModel') }}</label>
             <Select v-model="llm.default_model">
               <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
+                <SelectValue :placeholder="$t('settings.llm.selectModel')" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem
@@ -263,27 +332,27 @@ async function saveChat() {
 
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-2">
-              <label class="text-sm font-medium">Max Rounds</label>
+              <label class="text-sm font-medium">{{ $t('settings.llm.maxRounds') }}</label>
               <Input v-model.number="llm.max_rounds" type="number" :min="1" :max="50" />
             </div>
             <div class="space-y-2">
-              <label class="text-sm font-medium">Temperature</label>
+              <label class="text-sm font-medium">{{ $t('settings.llm.temperature') }}</label>
               <Input v-model.number="llm.temperature" type="number" :min="0" :max="2" step="0.1" />
             </div>
           </div>
         </div>
 
         <Button :disabled="llmSaving" @click="saveLLM">
-          {{ llmSaving ? 'Saving...' : 'Save Changes' }}
+          {{ llmSaving ? $t('common.saving') : $t('common.save') }}
         </Button>
       </div>
 
       <!-- Security -->
       <div v-if="activeTab === 'security'" class="max-w-2xl space-y-6">
         <div>
-          <h2 class="text-base font-semibold">Security Settings</h2>
+          <h2 class="text-base font-semibold">{{ $t('settings.security.title') }}</h2>
           <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
-            Configure confirmation requirements and command restrictions.
+            {{ $t('settings.security.description') }}
           </p>
         </div>
 
@@ -292,9 +361,9 @@ async function saveChat() {
         <div class="space-y-6">
           <div class="flex items-center justify-between">
             <div>
-              <label class="text-sm font-medium">Require Confirmation</label>
+              <label class="text-sm font-medium">{{ $t('settings.security.requireConfirmation') }}</label>
               <p class="text-sm" style="color: var(--muted-foreground)">
-                Ask for confirmation before executing sensitive commands.
+                {{ $t('settings.security.confirmDescription') }}
               </p>
             </div>
             <button
@@ -312,15 +381,15 @@ async function saveChat() {
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Sensitive Keywords</label>
+            <label class="text-sm font-medium">{{ $t('settings.security.sensitiveKeywords') }}</label>
             <div class="flex gap-2">
               <Input
                 v-model="keywordInput"
-                placeholder="Add keyword..."
+                :placeholder="$t('settings.security.addKeyword')"
                 class="flex-1"
                 @keyup.enter="addKeyword"
               />
-              <Button variant="outline" @click="addKeyword">Add</Button>
+              <Button variant="outline" @click="addKeyword">{{ $t('common.add') }}</Button>
             </div>
             <div class="flex flex-wrap gap-2">
               <Badge
@@ -336,15 +405,15 @@ async function saveChat() {
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Command Blacklist</label>
+            <label class="text-sm font-medium">{{ $t('settings.security.commandBlacklist') }}</label>
             <div class="flex gap-2">
               <Input
                 v-model="blacklistInput"
-                placeholder="Add command..."
+                :placeholder="$t('settings.security.addCommand')"
                 class="flex-1"
                 @keyup.enter="addBlacklist"
               />
-              <Button variant="outline" @click="addBlacklist">Add</Button>
+              <Button variant="outline" @click="addBlacklist">{{ $t('common.add') }}</Button>
             </div>
             <div class="flex flex-wrap gap-2">
               <Badge
@@ -361,16 +430,16 @@ async function saveChat() {
         </div>
 
         <Button :disabled="secSaving" @click="saveSecurity">
-          {{ secSaving ? 'Saving...' : 'Save Changes' }}
+          {{ secSaving ? $t('common.saving') : $t('common.save') }}
         </Button>
       </div>
 
       <!-- Node Agent -->
       <div v-if="activeTab === 'agent'" class="max-w-2xl space-y-6">
         <div>
-          <h2 class="text-base font-semibold">Node Agent Settings</h2>
+          <h2 class="text-base font-semibold">{{ $t('settings.agent.title') }}</h2>
           <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
-            Configure agent behavior on managed nodes.
+            {{ $t('settings.agent.description') }}
           </p>
         </div>
 
@@ -378,32 +447,32 @@ async function saveChat() {
 
         <div class="space-y-4">
           <div class="space-y-2">
-            <label class="text-sm font-medium">Heartbeat Interval (seconds)</label>
+            <label class="text-sm font-medium">{{ $t('settings.agent.heartbeatInterval') }}</label>
             <Input v-model.number="agent.heartbeat_interval" type="number" :min="5" :max="300" />
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Command Timeout (seconds)</label>
+            <label class="text-sm font-medium">{{ $t('settings.agent.commandTimeout') }}</label>
             <Input v-model.number="agent.command_timeout" type="number" :min="5" :max="600" />
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Output Max Lines</label>
+            <label class="text-sm font-medium">{{ $t('settings.agent.outputMaxLines') }}</label>
             <Input v-model.number="agent.output_max_lines" type="number" :min="100" :max="10000" />
           </div>
         </div>
 
         <Button :disabled="agentSaving" @click="saveAgent">
-          {{ agentSaving ? 'Saving...' : 'Save Changes' }}
+          {{ agentSaving ? $t('common.saving') : $t('common.save') }}
         </Button>
       </div>
 
       <!-- Conversation -->
       <div v-if="activeTab === 'chat'" class="max-w-2xl space-y-6">
         <div>
-          <h2 class="text-base font-semibold">Conversation Settings</h2>
+          <h2 class="text-base font-semibold">{{ $t('settings.conversation.title') }}</h2>
           <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
-            Configure chat behavior and system prompt.
+            {{ $t('settings.conversation.description') }}
           </p>
         </div>
 
@@ -411,32 +480,156 @@ async function saveChat() {
 
         <div class="space-y-4">
           <div class="space-y-2">
-            <label class="text-sm font-medium">Context Rounds</label>
+            <label class="text-sm font-medium">{{ $t('settings.conversation.contextRounds') }}</label>
             <Input v-model.number="chat.context_rounds" type="number" :min="1" :max="50" />
             <p class="text-xs" style="color: var(--muted-foreground)">
-              Number of previous message rounds to include as context.
+              {{ $t('settings.conversation.contextRoundsHelp') }}
             </p>
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Output Truncate Lines</label>
+            <label class="text-sm font-medium">{{ $t('settings.conversation.outputTruncateLines') }}</label>
             <Input v-model.number="chat.output_truncate_lines" type="number" :min="50" :max="5000" />
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Custom System Prompt</label>
+            <label class="text-sm font-medium">{{ $t('settings.conversation.customSystemPrompt') }}</label>
             <Textarea
               v-model="chat.custom_system_prompt"
-              placeholder="Enter a custom system prompt for the AI assistant..."
+              :placeholder="$t('settings.conversation.systemPromptPlaceholder')"
               :rows="6"
             />
           </div>
         </div>
 
         <Button :disabled="chatSaving" @click="saveChat">
-          {{ chatSaving ? 'Saving...' : 'Save Changes' }}
+          {{ chatSaving ? $t('common.saving') : $t('common.save') }}
         </Button>
       </div>
+
+      <!-- API Keys -->
+      <div v-if="activeTab === 'api_keys'" class="max-w-3xl space-y-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-semibold">{{ $t('settings.apiKeys.title') }}</h2>
+            <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+              {{ $t('settings.apiKeys.description') }}
+            </p>
+          </div>
+          <Button @click="showCreateKeyDialog = true">
+            <Key class="mr-2 h-4 w-4" />
+            {{ $t('settings.apiKeys.createKey') }}
+          </Button>
+        </div>
+
+        <Separator />
+
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{{ $t('common.name') }}</TableHead>
+              <TableHead>{{ $t('settings.apiKeys.key') }}</TableHead>
+              <TableHead>{{ $t('settings.apiKeys.permission') }}</TableHead>
+              <TableHead>{{ $t('common.status') }}</TableHead>
+              <TableHead>{{ $t('settings.apiKeys.lastUsed') }}</TableHead>
+              <TableHead>{{ $t('common.actions') }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="key in apiKeys" :key="key.id">
+              <TableCell class="font-medium">{{ key.name }}</TableCell>
+              <TableCell class="font-mono text-xs">{{ key.key_prefix }}...</TableCell>
+              <TableCell><Badge variant="secondary">{{ key.permission }}</Badge></TableCell>
+              <TableCell>
+                <Badge :variant="key.status === 'active' ? 'default' : 'secondary'">
+                  {{ key.status }}
+                </Badge>
+              </TableCell>
+              <TableCell class="text-xs" style="color: var(--muted-foreground)">
+                {{ key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : $t('common.never') }}
+              </TableCell>
+              <TableCell>
+                <Button
+                  v-if="key.status === 'active'"
+                  size="icon-sm"
+                  variant="ghost"
+                  @click="handleRevokeKey(key.id)"
+                >
+                  <Trash2 class="h-3.5 w-3.5" style="color: var(--color-error-foreground)" />
+                </Button>
+              </TableCell>
+            </TableRow>
+            <TableRow v-if="apiKeys.length === 0">
+              <TableCell :colspan="6" class="text-center py-8 text-sm" style="color: var(--muted-foreground)">
+                {{ $t('settings.apiKeys.noKeys') }}
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
+
+      <!-- Create API Key Dialog -->
+      <Dialog :open="showCreateKeyDialog" @update:open="closeCreateDialog">
+        <DialogContent class="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{{ createdKey ? $t('settings.apiKeys.keyCreated') : $t('settings.apiKeys.createKey') }}</DialogTitle>
+          </DialogHeader>
+
+          <template v-if="!createdKey">
+            <div class="space-y-4 py-4">
+              <div class="space-y-2">
+                <label class="text-sm font-medium">{{ $t('common.name') }}</label>
+                <Input v-model="newKeyName" :placeholder="$t('settings.apiKeys.namePlaceholder')" />
+              </div>
+              <div class="space-y-2">
+                <label class="text-sm font-medium">{{ $t('settings.apiKeys.permission') }}</label>
+                <Select v-model="newKeyPermission">
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="readonly">{{ $t('settings.apiKeys.readonly') }}</SelectItem>
+                    <SelectItem value="standard">{{ $t('settings.apiKeys.standard') }}</SelectItem>
+                    <SelectItem value="admin">{{ $t('settings.apiKeys.admin') }}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p class="text-xs" style="color: var(--muted-foreground)">
+                  {{ $t('settings.apiKeys.permissionHelp') }}
+                </p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" @click="closeCreateDialog">{{ $t('common.cancel') }}</Button>
+              <Button :disabled="!newKeyName.trim()" @click="handleCreateKey">{{ $t('common.create') }}</Button>
+            </DialogFooter>
+          </template>
+
+          <template v-else>
+            <div class="space-y-4 py-4">
+              <div
+                class="rounded-lg p-4"
+                style="background-color: var(--color-warning); border: 1px solid var(--color-warning-foreground)"
+              >
+                <p class="text-sm font-medium mb-2" style="color: var(--color-warning-foreground)">
+                  {{ $t('settings.apiKeys.copyWarning') }}
+                </p>
+                <div class="flex items-center gap-2">
+                  <code class="flex-1 rounded p-2 text-xs font-mono break-all" style="background-color: var(--secondary)">
+                    {{ createdKey }}
+                  </code>
+                  <Button size="icon" variant="outline" @click="copyKey">
+                    <Check v-if="keyCopied" class="h-4 w-4" style="color: var(--color-success-foreground)" />
+                    <Copy v-else class="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button @click="closeCreateDialog">{{ $t('common.done') }}</Button>
+            </DialogFooter>
+          </template>
+        </DialogContent>
+      </Dialog>
     </div>
   </div>
 </template>

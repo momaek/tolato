@@ -12,8 +12,57 @@
   src: local('Geist Mono');
 }
 
-/* Tolato is dark-only, so we define dark values at :root level */
-:root {
+/* Light theme */
+:root.light {
+  --background: #FFFFFF;
+  --foreground: #111111;
+
+  --card: #F5F5F5;
+  --card-foreground: #111111;
+
+  --popover: #FFFFFF;
+  --popover-foreground: #111111;
+
+  --primary: #FF8400;
+  --primary-foreground: #FFFFFF;
+
+  --secondary: #F0F0F0;
+  --secondary-foreground: #111111;
+
+  --muted: #F0F0F0;
+  --muted-foreground: #6B7280;
+
+  --accent: #F0F0F0;
+  --accent-foreground: #111111;
+
+  --destructive: #FF5C33;
+  --destructive-foreground: #FFFFFF;
+
+  --border: #E5E5E5;
+  --input: #E5E5E5;
+  --ring: #FF8400;
+
+  --color-success: #ECFDF5;
+  --color-success-foreground: #059669;
+  --color-warning: #FFF7ED;
+  --color-warning-foreground: #EA580C;
+  --color-error: #FEF2F2;
+  --color-error-foreground: #DC2626;
+
+  --sidebar: #FAFAFA;
+  --sidebar-foreground: #111111;
+  --sidebar-primary: #FF8400;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F0F0F0;
+  --sidebar-accent-foreground: #111111;
+  --sidebar-border: #E5E5E5;
+  --sidebar-ring: #FF8400;
+
+  color-scheme: light;
+}
+
+/* Dark theme (default) */
+:root, :root.dark {
   --background: #111111;
   --foreground: #FFFFFF;
 
@@ -118,6 +167,9 @@
   }
   html {
     color-scheme: dark;
+  }
+  :root.light html, html:has(:root.light) {
+    color-scheme: light;
   }
   code, pre, .font-mono {
     font-family: 'Geist Mono', ui-monospace, monospace;

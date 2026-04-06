@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus, Search, Copy, Check } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,6 +32,7 @@ import {
 import { useNodesStore } from '@/stores/nodes'
 import type { CreateNodeResponse } from '@/types/api'
 
+const { t } = useI18n()
 const nodesStore = useNodesStore()
 
 const searchQuery = ref('')
@@ -101,7 +103,7 @@ function formatTime(iso?: string) {
 }
 
 async function handleDeleteNode(id: string) {
-  if (!confirm('Are you sure you want to remove this node?')) return
+  if (!confirm(t('nodes.confirmRemove'))) return
   try {
     await nodesStore.removeNode(id)
   } catch {
@@ -114,49 +116,49 @@ async function handleDeleteNode(id: string) {
   <div class="flex h-full flex-col" style="background-color: var(--background)">
     <!-- Header -->
     <div class="flex items-center gap-3 border-b px-6 py-4">
-      <h1 class="text-lg font-semibold">Nodes</h1>
+      <h1 class="text-lg font-semibold">{{ $t('nodes.title') }}</h1>
       <Badge variant="secondary">{{ nodesStore.nodes.length }}</Badge>
       <div class="flex-1" />
       <div class="relative w-64">
         <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" style="color: var(--muted-foreground)" />
         <Input
           v-model="searchQuery"
-          placeholder="Search nodes..."
+          :placeholder="$t('nodes.searchPlaceholder')"
           class="pl-9"
         />
       </div>
       <Select v-model="statusFilter">
         <SelectTrigger class="w-[130px]">
-          <SelectValue placeholder="Status" />
+          <SelectValue :placeholder="$t('common.status')" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">All Status</SelectItem>
-          <SelectItem value="online">Online</SelectItem>
-          <SelectItem value="offline">Offline</SelectItem>
+          <SelectItem value="all">{{ $t('common.allStatus') }}</SelectItem>
+          <SelectItem value="online">{{ $t('common.online') }}</SelectItem>
+          <SelectItem value="offline">{{ $t('common.offline') }}</SelectItem>
         </SelectContent>
       </Select>
       <Dialog v-model:open="dialogOpen" @update:open="resetDialog">
         <DialogTrigger as-child>
           <Button>
             <Plus class="mr-2 h-4 w-4" />
-            Add Node
+            {{ $t('nodes.addNode') }}
           </Button>
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add Node</DialogTitle>
+            <DialogTitle>{{ $t('nodes.addNode') }}</DialogTitle>
             <DialogDescription>
-              Enter an alias for the node, then run the install command on your server.
+              {{ $t('nodes.addNodeDesc') }}
             </DialogDescription>
           </DialogHeader>
 
           <template v-if="!createdNode">
             <div class="space-y-4 py-4">
-              <Input v-model="nodeAlias" placeholder="Node alias (optional)" />
+              <Input v-model="nodeAlias" :placeholder="$t('nodes.aliasPlaceholder')" />
             </div>
             <DialogFooter>
               <Button :disabled="addingNode" @click="handleAddNode">
-                {{ addingNode ? 'Creating...' : 'Generate Install Command' }}
+                {{ addingNode ? $t('nodes.creating') : $t('nodes.generateCommand') }}
               </Button>
             </DialogFooter>
           </template>
@@ -164,7 +166,7 @@ async function handleDeleteNode(id: string) {
           <template v-else>
             <div class="space-y-4 py-4">
               <p class="text-sm" style="color: var(--muted-foreground)">
-                Run this command on your server to install the agent:
+                {{ $t('nodes.installInstruction') }}
               </p>
               <div
                 class="relative rounded-lg p-3 font-mono text-sm"
@@ -182,11 +184,11 @@ async function handleDeleteNode(id: string) {
                 </Button>
               </div>
               <p class="text-xs" style="color: var(--muted-foreground)">
-                Token expires: {{ formatTime(createdNode.token_expiry) }}
+                {{ $t('nodes.tokenExpires', { expiry: createdNode.token_expiry }) }}
               </p>
             </div>
             <DialogFooter>
-              <Button variant="secondary" @click="dialogOpen = false">Done</Button>
+              <Button variant="secondary" @click="dialogOpen = false">{{ $t('common.done') }}</Button>
             </DialogFooter>
           </template>
         </DialogContent>
@@ -198,15 +200,15 @@ async function handleDeleteNode(id: string) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>IP</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>OS</TableHead>
-            <TableHead>CPU</TableHead>
-            <TableHead>Memory</TableHead>
-            <TableHead>Disk</TableHead>
-            <TableHead>Last Heartbeat</TableHead>
-            <TableHead class="w-[80px]">Actions</TableHead>
+            <TableHead>{{ $t('common.name') }}</TableHead>
+            <TableHead>{{ $t('nodes.ip') }}</TableHead>
+            <TableHead>{{ $t('common.status') }}</TableHead>
+            <TableHead>{{ $t('nodes.os') }}</TableHead>
+            <TableHead>{{ $t('nodes.cpu') }}</TableHead>
+            <TableHead>{{ $t('nodes.memory') }}</TableHead>
+            <TableHead>{{ $t('nodes.disk') }}</TableHead>
+            <TableHead>{{ $t('nodes.lastHeartbeat') }}</TableHead>
+            <TableHead class="w-[80px]">{{ $t('common.actions') }}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -222,7 +224,7 @@ async function handleDeleteNode(id: string) {
                   color: node.status === 'online' ? 'var(--color-success-foreground)' : 'var(--color-error-foreground)',
                 }"
               >
-                {{ node.status }}
+                {{ node.status === 'online' ? $t('common.online') : $t('common.offline') }}
               </Badge>
             </TableCell>
             <TableCell>{{ node.os || '-' }}</TableCell>
@@ -237,13 +239,13 @@ async function handleDeleteNode(id: string) {
                 class="text-destructive"
                 @click="handleDeleteNode(node.id)"
               >
-                Remove
+                {{ $t('common.remove') }}
               </Button>
             </TableCell>
           </TableRow>
           <TableRow v-if="filteredNodes.length === 0">
             <TableCell :colspan="9" class="py-8 text-center" style="color: var(--muted-foreground)">
-              {{ nodesStore.loading ? 'Loading...' : 'No nodes found' }}
+              {{ nodesStore.loading ? $t('common.loading') : $t('nodes.noNodes') }}
             </TableCell>
           </TableRow>
         </TableBody>

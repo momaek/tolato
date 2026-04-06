@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageSquare, Server, FileText, Settings, Zap } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+import { MessageSquare, Server, FileText, Settings, Zap, Activity, AlertTriangle, Sun, Moon, Languages } from 'lucide-vue-next'
+import { useTheme } from '@/composables/useTheme'
+import { setLocale, getLocale } from '@/i18n'
+
+const { t } = useI18n()
+const { theme, toggleTheme } = useTheme()
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import ConversationList from './ConversationList.vue'
@@ -9,16 +15,24 @@ import ConversationList from './ConversationList.vue'
 const route = useRoute()
 const router = useRouter()
 
-const navItems = [
-  { label: 'Chat', icon: MessageSquare, path: '/chat' },
-  { label: 'Nodes', icon: Server, path: '/nodes' },
-  { label: 'Audit Log', icon: FileText, path: '/audit' },
-  { label: 'Settings', icon: Settings, path: '/settings' },
-]
+const navItems = computed(() => [
+  { label: t('sidebar.chat'), icon: MessageSquare, path: '/chat' },
+  { label: t('sidebar.nodes'), icon: Server, path: '/nodes' },
+  { label: t('sidebar.monitor'), icon: Activity, path: '/monitor' },
+  { label: t('sidebar.alerts'), icon: AlertTriangle, path: '/alerts' },
+  { label: t('sidebar.auditLog'), icon: FileText, path: '/audit' },
+  { label: t('sidebar.settings'), icon: Settings, path: '/settings' },
+])
 
 const isActive = (path: string) => {
   if (path === '/chat') {
     return route.path === '/chat' || route.path.startsWith('/chat/')
+  }
+  if (path === '/monitor') {
+    return route.path === '/monitor' || route.path.startsWith('/monitor/')
+  }
+  if (path === '/nodes') {
+    return route.path === '/nodes' || route.path.startsWith('/nodes/')
   }
   return route.path === path
 }
@@ -27,6 +41,11 @@ const isChatRoute = computed(() => route.path === '/chat' || route.path.startsWi
 
 function navigate(path: string) {
   router.push(path)
+}
+
+function toggleLocale() {
+  const current = getLocale()
+  setLocale(current === 'en' ? 'zh-CN' : 'en')
 }
 </script>
 
@@ -74,8 +93,29 @@ function navigate(path: string) {
     <Separator class="my-3 mx-3" style="background-color: var(--sidebar-border)" />
 
     <!-- Conversation list (only on chat routes) -->
-    <ScrollArea v-if="isChatRoute" class="flex-1 px-3">
+    <ScrollArea v-show="isChatRoute" class="flex-1 px-3">
       <ConversationList />
     </ScrollArea>
+
+    <!-- Bottom controls -->
+    <div class="mt-auto px-3 pb-4 space-y-1">
+      <button
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+        style="color: var(--sidebar-foreground); opacity: 0.7"
+        @click="toggleLocale"
+      >
+        <Languages class="h-4 w-4" />
+        {{ getLocale() === 'en' ? '中文' : 'English' }}
+      </button>
+      <button
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+        style="color: var(--sidebar-foreground); opacity: 0.7"
+        @click="toggleTheme"
+      >
+        <Sun v-if="theme === 'dark'" class="h-4 w-4" />
+        <Moon v-else class="h-4 w-4" />
+        {{ theme === 'dark' ? $t('sidebar.lightMode') : $t('sidebar.darkMode') }}
+      </button>
+    </div>
   </aside>
 </template>

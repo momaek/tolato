@@ -3,11 +3,9 @@ package store
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/momaek/tolato/server/internal/model"
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -17,28 +15,11 @@ var DB *gorm.DB
 
 // InitDB initializes the database connection and runs migrations.
 func InitDB(dsn string) error {
-	// Ensure the directory exists
-	dir := filepath.Dir(dsn)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("create database directory: %w", err)
-		}
-	}
-
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
-	}
-
-	// Enable WAL mode for better concurrent performance
-	sqlDB, err := db.DB()
-	if err != nil {
-		return fmt.Errorf("get underlying sql.DB: %w", err)
-	}
-	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return fmt.Errorf("set WAL mode: %w", err)
 	}
 
 	// Auto-migrate all models

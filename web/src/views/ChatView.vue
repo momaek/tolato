@@ -1,93 +1,100 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { Bot, ChevronDown } from 'lucide-vue-next'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { ref, watch, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Separator } from '@/components/ui/separator'
-import EmptyState from '@/components/chat/EmptyState.vue'
+import ChatTopBar from '@/components/chat/ChatTopBar.vue'
+import ChatMessages from '@/components/chat/ChatMessages.vue'
+import ChatInput from '@/components/chat/ChatInput.vue'
 import { useChatStore } from '@/stores/chat'
+import { useAppStore } from '@/stores/app'
+import { wsService } from '@/services/ws'
 
 const route = useRoute()
+const router = useRouter()
 const chatStore = useChatStore()
+const appStore = useAppStore()
+const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
 
-const messageInput = ref('')
-const selectedModel = ref('gpt-4o')
-const selectedNode = ref('')
-
+// Connect WebSocket on mount
 onMounted(() => {
+  if (appStore.token) {
+    wsService.connect(appStore.token)
+    chatStore.initWSHandlers()
+  }
+
   const convId = route.params.conversationId as string
   if (convId) {
     chatStore.setActive(convId)
+    chatStore.loadConversation(convId)
   }
 })
 
+// Watch route changes
+watch(
+  () => route.params.conversationId,
+  (newId) => {
+    const id = newId as string
+    if (id) {
+      chatStore.setActive(id)
+      chatStore.loadConversation(id)
+    } else {
+      chatStore.setActive(null)
+    }
+  }
+)
+
+async function handleSend(content: string) {
+  // If no active conversation, create one first
+  if (!chatStore.activeConversationId) {
+    const conv = await chatStore.addConversation({
+      title: content.slice(0, 30),
+      model: 'gpt-4o',
+    })
+    chatStore.setActive(conv.id)
+    router.push(`/chat/${conv.id}`)
+    // Small delay to let state sync
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  chatStore.sendMessage(content)
+}
+
 function handleQuickAction(text: string) {
-  messageInput.value = text
+  if (chatInputRef.value) {
+    chatInputRef.value.fillInput(text)
+  }
+}
+
+function handleConfirm(id: string, approved: boolean) {
+  chatStore.confirmAction(id, approved)
 }
 </script>
 
 <template>
   <div class="flex h-full flex-col" style="background-color: var(--background)">
-    <!-- Top bar -->
-    <div class="flex items-center gap-3 border-b px-5 py-3">
-      <div class="flex items-center gap-2">
-        <Bot class="h-4 w-4" style="color: var(--muted-foreground)" />
-        <span class="text-sm font-medium">New Conversation</span>
-      </div>
-      <div class="flex-1" />
-      <Select v-model="selectedModel">
-        <SelectTrigger class="w-[160px]">
-          <SelectValue placeholder="Select model" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-          <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-          <SelectItem value="claude-3.5-sonnet">Claude 3.5 Sonnet</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select v-model="selectedNode">
-        <SelectTrigger class="w-[160px]">
-          <SelectValue placeholder="Select node" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Nodes</SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
+    <ChatTopBar
+      :conversation-id="chatStore.activeConversationId || undefined"
+      :title="chatStore.activeState?.title || ''"
+      :model="chatStore.activeState?.model || 'gpt-4o'"
+      :default-node-id="chatStore.activeState?.defaultNodeId"
+      @update:model="(v) => chatStore.activeState && (chatStore.activeState.model = v)"
+      @update:default-node-id="(v) => chatStore.activeState && (chatStore.activeState.defaultNodeId = v)"
+    />
 
-    <!-- Messages area -->
-    <div class="flex flex-1 flex-col overflow-y-auto">
-      <EmptyState @quick-action="handleQuickAction" />
-    </div>
+    <ChatMessages
+      :messages="chatStore.activeState?.messages || []"
+      :streaming="chatStore.activeState?.streaming || null"
+      :status="chatStore.activeState?.status || 'idle'"
+      :confirm-request="chatStore.activeState?.confirmRequest || null"
+      @quick-action="handleQuickAction"
+      @confirm="handleConfirm"
+    />
 
     <Separator />
 
-    <!-- Input area -->
-    <div class="px-5 py-4">
-      <div class="relative">
-        <Textarea
-          v-model="messageInput"
-          placeholder="Send a message..."
-          disabled
-          class="min-h-[52px] resize-none pr-14"
-          :rows="1"
-        />
-        <Button
-          size="icon"
-          class="absolute bottom-2 right-2 h-8 w-8 rounded-full"
-          disabled
-        >
-          <ChevronDown class="h-4 w-4 rotate-[-90deg]" />
-        </Button>
-      </div>
-    </div>
+    <ChatInput
+      ref="chatInputRef"
+      :status="chatStore.activeState?.status || 'idle'"
+      @send="handleSend"
+    />
   </div>
 </template>

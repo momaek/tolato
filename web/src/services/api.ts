@@ -19,6 +19,8 @@ import type {
   AuditLogQuery,
   AuditLogItem,
   PaginatedResponse,
+  PaginationQuery,
+  NodeCommandItem,
 } from '@/types/api'
 import router from '@/router'
 
@@ -155,6 +157,32 @@ export async function updateChatSettings(data: Partial<ChatSettings>): Promise<v
 
 export async function getAuditLogs(query: AuditLogQuery): Promise<PaginatedResponse<AuditLogItem>> {
   const res = await api.get<PaginatedResponse<AuditLogItem>>('/audit-logs', { params: query })
+  return res.data
+}
+
+// --- API Keys ---
+
+export async function getAPIKeys(): Promise<any[]> {
+  const res = await api.get('/api-keys')
+  return res.data
+}
+
+export async function createAPIKey(data: { name: string; permission: string }): Promise<any> {
+  const res = await api.post('/api-keys', data)
+  return res.data
+}
+
+export async function deleteAPIKey(id: string): Promise<void> {
+  await api.delete(`/api-keys/${id}`)
+}
+
+// --- Node Commands ---
+
+export async function getNodeCommands(
+  nodeId: string,
+  query: PaginationQuery = {}
+): Promise<PaginatedResponse<NodeCommandItem>> {
+  const res = await api.get<PaginatedResponse<NodeCommandItem>>(`/nodes/${nodeId}/commands`, { params: query })
   return res.data
 }
 

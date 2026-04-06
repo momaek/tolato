@@ -6,6 +6,7 @@
 
 export interface WSMessage<T = unknown> {
   type: string
+  conversation_id?: string
   payload?: T
 }
 
@@ -63,7 +64,7 @@ export interface WSConfirmRequestEvent {
   args: Record<string, unknown>
 }
 
-// WSTypeEone has no payload
+// WSDoneEvent has no payload
 export type WSDoneEvent = Record<string, never>
 
 export interface WSErrorEvent {

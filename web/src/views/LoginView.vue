@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Zap } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/stores/app'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 const router = useRouter()
 
@@ -16,7 +18,7 @@ const error = ref('')
 
 async function handleLogin() {
   if (!username.value || !password.value) {
-    error.value = 'Please enter username and password'
+    error.value = t('login.errorRequired')
     return
   }
 
@@ -32,9 +34,9 @@ async function handleLogin() {
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'response' in err) {
       const axiosErr = err as { response?: { data?: { message?: string } } }
-      error.value = axiosErr.response?.data?.message || 'Login failed'
+      error.value = axiosErr.response?.data?.message || t('login.errorFailed')
     } else {
-      error.value = 'Network error'
+      error.value = t('login.errorNetwork')
     }
   } finally {
     loading.value = false
@@ -53,9 +55,9 @@ async function handleLogin() {
         >
           <Zap class="h-6 w-6" style="color: var(--primary-foreground)" />
         </div>
-        <h1 class="text-2xl font-semibold" style="color: var(--foreground)">Tolato</h1>
+        <h1 class="text-2xl font-semibold" style="color: var(--foreground)">{{ $t('login.title') }}</h1>
         <p class="text-sm" style="color: var(--muted-foreground)">
-          AI-powered VPS management
+          {{ $t('login.subtitle') }}
         </p>
       </div>
 
@@ -65,7 +67,7 @@ async function handleLogin() {
           <Input
             v-model="username"
             type="text"
-            placeholder="Username"
+            :placeholder="$t('login.username')"
             autocomplete="username"
           />
         </div>
@@ -73,7 +75,7 @@ async function handleLogin() {
           <Input
             v-model="password"
             type="password"
-            placeholder="Password"
+            :placeholder="$t('login.password')"
             autocomplete="current-password"
           />
         </div>
@@ -87,7 +89,7 @@ async function handleLogin() {
         </div>
 
         <Button type="submit" class="w-full" :disabled="loading">
-          {{ loading ? 'Signing in...' : 'Sign in' }}
+          {{ loading ? $t('login.signingIn') : $t('login.signIn') }}
         </Button>
       </form>
     </div>

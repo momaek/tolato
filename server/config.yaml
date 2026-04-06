@@ -3,8 +3,8 @@ server:
   port: 8080
 
 database:
-  driver: sqlite
-  dsn: data/tolato.db
+  driver: postgres
+  dsn: host=localhost user=tolato password=tolato dbname=tolato port=5432 sslmode=disable
 
 security:
   encrypt_key: "tolato-default-encrypt-key-32b!"

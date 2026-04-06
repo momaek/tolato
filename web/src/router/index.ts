@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useAppStore } from '@/stores/app'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -30,6 +29,11 @@ const router = createRouter({
           component: () => import('@/views/NodesView.vue'),
         },
         {
+          path: 'nodes/:nodeId',
+          name: 'node-detail',
+          component: () => import('@/views/NodeDetailView.vue'),
+        },
+        {
           path: 'audit',
           name: 'audit',
           component: () => import('@/views/AuditLogView.vue'),
@@ -39,12 +43,28 @@ const router = createRouter({
           name: 'settings',
           component: () => import('@/views/SettingsView.vue'),
         },
+        {
+          path: 'monitor',
+          name: 'monitor',
+          component: () => import('@/views/MonitorView.vue'),
+        },
+        {
+          path: 'monitor/:linkId',
+          name: 'link-detail',
+          component: () => import('@/views/LinkDetailView.vue'),
+        },
+        {
+          path: 'alerts',
+          name: 'alerts',
+          component: () => import('@/views/AlertsView.vue'),
+        },
       ],
     },
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
+  const { useAppStore } = await import('@/stores/app')
   const appStore = useAppStore()
   if (to.path !== '/login' && !appStore.isAuthenticated) {
     return '/login'

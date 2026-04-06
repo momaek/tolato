@@ -2,15 +2,30 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/momaek/tolato/server/internal/config"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/node"
+	"github.com/momaek/tolato/server/internal/probe"
 )
 
 // Deps holds shared dependencies for all handlers.
 type Deps struct {
-	Config      *config.Config
-	NodeManager *node.NodeManager
+	Config         *config.Config
+	NodeManager    *node.NodeManager
+	SessionManager *SessionManager
+}
+
+// ValidateToken validates a JWT token string and returns the claims.
+func (d *Deps) ValidateToken(tokenString string) (*middleware.Claims, error) {
+	claims := &middleware.Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
+		return []byte(middleware.JWTSecret), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, err
+	}
+	return claims, nil
 }
 
 // SetupRouter creates and configures the Gin router with all routes.
@@ -56,10 +71,51 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	// Audit Logs
 	protected.GET("/audit-logs", ListAuditLogs(deps))
 
+	// Node command history
+	protected.GET("/nodes/:id/commands", ListNodeCommands(deps))
+
+	// LLM verify
+	protected.POST("/settings/llm/verify", VerifyLLMSettings(deps))
+
+	// API Keys management
+	protected.POST("/api-keys", CreateAPIKey(deps))
+	protected.GET("/api-keys", ListAPIKeys(deps))
+	protected.DELETE("/api-keys/:id", DeleteAPIKey(deps))
+
+	// External API (API Key auth)
+	v1 := r.Group("/api/v1")
+	v1.Use(middleware.APIKeyAuth())
+	v1.GET("/nodes", ExternalListNodes(deps))
+	v1.GET("/nodes/:id", ExternalGetNode(deps))
+	v1.POST("/nodes/:id/execute", ExternalExecuteCommand(deps))
+
 	// WebSocket: Agent connection (token-based auth, not JWT)
 	r.GET("/ws/agent", AgentWSHandler(deps))
 
+	// WebSocket: Frontend chat connection (JWT via query param)
+	r.GET("/ws/chat", ChatWSHandler(deps))
+
 	return r
+}
+
+// SetupProbeRoutes registers NodeProbe API routes on the given engine.
+func SetupProbeRoutes(r *gin.Engine, deps *Deps, probeStore *probe.Store, alertEngine *probe.AlertEngine) {
+	probeAPI := r.Group("/api/v1/probe")
+
+	// Agent report (no JWT, uses agent token auth - simplified to open for now)
+	probeAPI.POST("/report", ProbeReportHandler(deps, probeStore, alertEngine))
+
+	// Protected probe routes
+	probeProtected := probeAPI.Group("")
+	probeProtected.Use(middleware.JWTAuth())
+
+	probeProtected.GET("/nodes", ProbeListNodes(deps))
+	probeProtected.PUT("/nodes/:id", ProbeUpdateNodePosition(deps, probeStore))
+	probeProtected.GET("/links", ProbeListLinks(deps, probeStore))
+	probeProtected.POST("/links", ProbeCreateLink(deps, probeStore))
+	probeProtected.DELETE("/links/:id", ProbeDeleteLink(deps, probeStore))
+	probeProtected.GET("/links/:id/metrics", ProbeGetLinkMetrics(deps, probeStore))
+	probeProtected.GET("/alerts", ProbeListAlerts(deps, probeStore))
 }
 
 func corsMiddleware() gin.HandlerFunc {

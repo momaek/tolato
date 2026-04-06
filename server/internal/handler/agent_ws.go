@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -97,6 +98,9 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			log.Printf("Agent reconnected: node=%s", existingNode.ID)
 			_ = store.UpdateHeartbeat(existingNode.ID)
 
+			// Push probe config
+			pushProbeConfig(deps, existingNode.ID, conn)
+
 			agentReadLoop(deps, existingNode.ID, conn)
 			return
 		}
@@ -162,6 +166,9 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			}()
 
 			log.Printf("Agent registered: node=%s hostname=%s os=%s ip=%s", node.ID, reg.Hostname, reg.OS, reg.IP)
+
+			// Push probe config if available
+			pushProbeConfig(deps, node.ID, conn)
 
 			// Enter normal read loop
 			agentReadLoop(deps, node.ID, conn)
@@ -240,4 +247,56 @@ func handleAgentHeartbeat(deps *Deps, nodeID string, payload any) {
 		Uptime:  hb.Uptime,
 		LoadAvg: hb.LoadAvg,
 	})
+}
+
+// pushProbeConfig sends the current probe configuration to an agent.
+// This is called after agent registration/reconnection.
+func pushProbeConfig(deps *Deps, nodeID string, conn *websocket.Conn) {
+	if !deps.Config.Probe.Enabled {
+		return
+	}
+
+	// Build probe targets from links where this node is the source
+	// For simplicity, read all links and filter
+	probeStore := store.DB
+	var links []model.ProbeLink
+	probeStore.Where("source_id = ?", nodeID).Preload("Target").Find(&links)
+
+	if len(links) == 0 {
+		return
+	}
+
+	targets := make([]model.ProbeTargetConfig, 0, len(links))
+	for _, link := range links {
+		if link.Target == nil {
+			continue
+		}
+		targets = append(targets, model.ProbeTargetConfig{
+			ID:        link.TargetID,
+			Name:      link.Target.Name,
+			Host:      link.Target.IP,
+			PingCount: 10,
+			TCPPort:   443,
+		})
+	}
+
+	serverAddr := fmt.Sprintf("http://%s:%d", deps.Config.Server.Host, deps.Config.Server.Port)
+	if deps.Config.Server.Host == "0.0.0.0" {
+		serverAddr = fmt.Sprintf("http://127.0.0.1:%d", deps.Config.Server.Port)
+	}
+
+	msg := model.WSMessage{
+		Type: model.AgentTypeProbeConfig,
+		Payload: model.AgentProbeConfigPayload{
+			Enabled:   true,
+			ReportURL: serverAddr + "/api/v1/probe/report",
+			Targets:   targets,
+		},
+	}
+
+	if err := conn.WriteJSON(msg); err != nil {
+		log.Printf("Failed to push probe_config to node %s: %v", nodeID, err)
+	} else {
+		log.Printf("Pushed probe_config to node %s (%d targets)", nodeID, len(targets))
+	}
 }

@@ -8,8 +8,9 @@ package model
 
 // WSMessage is the envelope for all WebSocket messages.
 type WSMessage struct {
-	Type    string `json:"type"`
-	Payload any    `json:"payload,omitempty"`
+	Type           string `json:"type"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	Payload        any    `json:"payload,omitempty"`
 }
 
 // Server -> Frontend event types
