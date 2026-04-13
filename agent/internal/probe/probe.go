@@ -53,6 +53,7 @@ type TargetMetric struct {
 // Scheduler manages periodic probe execution and reporting.
 type Scheduler struct {
 	nodeID    string
+	secret    string // agent secret for authentication
 	config    ProbeConfig
 	client    *http.Client
 	mu        sync.Mutex
@@ -61,9 +62,10 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a new Scheduler.
-func NewScheduler(nodeID string) *Scheduler {
+func NewScheduler(nodeID, secret string) *Scheduler {
 	return &Scheduler{
 		nodeID: nodeID,
+		secret: secret,
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
@@ -202,7 +204,15 @@ func (s *Scheduler) sendReport(reportURL string, report MetricReport) {
 		return
 	}
 
-	resp, err := s.client.Post(reportURL, "application/json", bytes.NewReader(data))
+	req, err := http.NewRequest("POST", reportURL, bytes.NewReader(data))
+	if err != nil {
+		log.Printf("[probe] create request failed: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s:%s", s.nodeID, s.secret))
+
+	resp, err := s.client.Do(req)
 	if err != nil {
 		log.Printf("[probe] report failed: %v", err)
 		return

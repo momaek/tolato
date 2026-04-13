@@ -39,8 +39,9 @@ type AlertRulesConfig struct {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host           string   `yaml:"host"`
+	Port           int      `yaml:"port"`
+	AllowedOrigins []string `yaml:"allowed_origins"` // WebSocket & CORS allowed origins, empty = same-origin only
 }
 
 type DatabaseConfig struct {

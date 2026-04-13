@@ -365,10 +365,12 @@ func (c *Client) handleProbeConfig(msg WSMessage) {
 
 	if c.probeScheduler == nil {
 		nodeID := ""
+		secret := ""
 		if c.ident != nil {
 			nodeID = c.ident.NodeID
+			secret = c.ident.Secret
 		}
-		c.probeScheduler = probe.NewScheduler(nodeID)
+		c.probeScheduler = probe.NewScheduler(nodeID, secret)
 	}
 
 	c.probeScheduler.UpdateConfig(config)

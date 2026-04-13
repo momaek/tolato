@@ -12,6 +12,7 @@ class WebSocketService {
   private backoff = 1000
   private maxBackoff = 30000
   private shouldReconnect = true
+  private token: string = ''
   private _state: ConnectionState = 'disconnected'
 
   get state(): ConnectionState {
@@ -20,8 +21,9 @@ class WebSocketService {
 
   connect(token: string) {
     this.shouldReconnect = true
+    this.token = token
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    this.url = `${protocol}//${window.location.host}/ws/chat?token=${token}`
+    this.url = `${protocol}//${window.location.host}/ws/chat`
     this.doConnect()
   }
 
@@ -67,13 +69,24 @@ class WebSocketService {
     this.ws = new WebSocket(this.url)
 
     this.ws.onopen = () => {
-      this.setState('connected')
-      this.backoff = 1000
+      // Send auth message as the first message (token is NOT in the URL)
+      this.ws?.send(JSON.stringify({
+        type: 'auth',
+        payload: { token: this.token }
+      }))
+      // Connection state will be set to 'connected' when we receive 'auth_ok'
     }
 
     this.ws.onmessage = (event) => {
       try {
         const msg: WSMessage = JSON.parse(event.data)
+
+        // Handle auth success
+        if (msg.type === 'auth_ok') {
+          this.setState('connected')
+          this.backoff = 1000
+          return
+        }
 
         // Handle session replaced
         if (msg.type === 'session_replaced') {

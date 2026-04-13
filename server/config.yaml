@@ -1,6 +1,10 @@
 server:
   host: 0.0.0.0
   port: 8080
+  # WebSocket & CORS allowed origins. Empty = same-origin only.
+  # Use ["*"] to allow all origins (development only).
+  # Examples: ["http://localhost:5173", "https://tolato.example.com"]
+  allowed_origins: []
 
 database:
   driver: postgres

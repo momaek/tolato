@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/momaek/tolato/server/internal/config"
@@ -32,8 +34,8 @@ func (d *Deps) ValidateToken(tokenString string) (*middleware.Claims, error) {
 func SetupRouter(deps *Deps) *gin.Engine {
 	r := gin.Default()
 
-	// CORS middleware
-	r.Use(corsMiddleware())
+	// CORS middleware with origin whitelist
+	r.Use(corsMiddleware(deps.Config.Server.AllowedOrigins))
 
 	api := r.Group("/api")
 
@@ -102,8 +104,8 @@ func SetupRouter(deps *Deps) *gin.Engine {
 func SetupProbeRoutes(r *gin.Engine, deps *Deps, probeStore *probe.Store, alertEngine *probe.AlertEngine) {
 	probeAPI := r.Group("/api/v1/probe")
 
-	// Agent report (no JWT, uses agent token auth - simplified to open for now)
-	probeAPI.POST("/report", ProbeReportHandler(deps, probeStore, alertEngine))
+	// Agent report (authenticated via node_id:secret)
+	probeAPI.POST("/report", middleware.AgentTokenAuth(), ProbeReportHandler(deps, probeStore, alertEngine))
 
 	// Protected probe routes
 	probeProtected := probeAPI.Group("")
@@ -118,9 +120,35 @@ func SetupProbeRoutes(r *gin.Engine, deps *Deps, probeStore *probe.Store, alertE
 	probeProtected.GET("/alerts", ProbeListAlerts(deps, probeStore))
 }
 
-func corsMiddleware() gin.HandlerFunc {
+func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		if origin != "" {
+			allowed := false
+
+			// Check wildcard
+			if len(allowedOrigins) == 1 && allowedOrigins[0] == "*" {
+				allowed = true
+			} else {
+				// Same-origin: always allowed
+				if strings.Contains(origin, c.Request.Host) {
+					allowed = true
+				}
+				// Check whitelist
+				for _, o := range allowedOrigins {
+					if strings.TrimRight(o, "/") == strings.TrimRight(origin, "/") {
+						allowed = true
+						break
+					}
+				}
+			}
+
+			if allowed {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Credentials", "true")
+			}
+		}
+
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
 

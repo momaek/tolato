@@ -26,6 +26,7 @@ const (
 
 // Frontend -> Server event types
 const (
+	WSTypeAuth            = "auth"             // first message: JWT authentication
 	WSTypeUserMessage     = "user_message"     // user sends a chat message
 	WSTypeConfirmResponse = "confirm_response" // user confirms/rejects sensitive operation
 )

@@ -44,6 +44,9 @@ func main() {
 		SessionManager: sm,
 	}
 
+	// Initialize WebSocket upgraders with origin checking
+	handler.InitUpgraders(cfg.Server.AllowedOrigins)
+
 	// Setup router
 	r := handler.SetupRouter(deps)
 

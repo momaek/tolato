@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -16,40 +16,70 @@ import (
 	"github.com/momaek/tolato/server/internal/store"
 )
 
-var chatUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
+// chatUpgrader is initialized by InitUpgraders with origin checking.
+var chatUpgrader = websocket.Upgrader{}
 
 // ChatWSHandler handles the frontend chat WebSocket connection at /ws/chat.
+// Authentication is performed via the first message after connection upgrade:
+//
+//	{ "type": "auth", "payload": { "token": "<jwt>" } }
+//
+// The client must send this within 10 seconds, otherwise the connection is closed.
 func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Authenticate via query param token
-		token := c.Query("token")
-		if token == "" {
-			c.JSON(http.StatusUnauthorized, model.ErrorResponse{
-				Error:   "unauthorized",
-				Message: "Missing token query parameter",
-			})
-			return
-		}
-
-		// Validate JWT token
-		claims, err := deps.ValidateToken(token)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, model.ErrorResponse{
-				Error:   "unauthorized",
-				Message: "Invalid token",
-			})
-			return
-		}
-		_ = claims
-
-		// Upgrade to WebSocket
+		// Upgrade to WebSocket first (no auth required yet)
 		conn, err := chatUpgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			log.Printf("[chat_ws] upgrade failed: %v", err)
 			return
 		}
+
+		// Wait for auth message with a deadline
+		_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			log.Printf("[chat_ws] auth read timeout or error: %v", err)
+			_ = conn.WriteJSON(model.WSMessage{
+				Type:    model.WSTypeError,
+				Payload: model.WSErrorEvent{Message: "authentication timeout"},
+			})
+			conn.Close()
+			return
+		}
+
+		var authMsg struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Token string `json:"token"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(raw, &authMsg); err != nil || authMsg.Type != "auth" || authMsg.Payload.Token == "" {
+			log.Printf("[chat_ws] invalid auth message")
+			_ = conn.WriteJSON(model.WSMessage{
+				Type:    model.WSTypeError,
+				Payload: model.WSErrorEvent{Message: "invalid auth message, expected {type: 'auth', payload: {token: '...'}}"},
+			})
+			conn.Close()
+			return
+		}
+
+		// Validate JWT token
+		if _, err := deps.ValidateToken(authMsg.Payload.Token); err != nil {
+			log.Printf("[chat_ws] invalid token")
+			_ = conn.WriteJSON(model.WSMessage{
+				Type:    model.WSTypeError,
+				Payload: model.WSErrorEvent{Message: "invalid or expired token"},
+			})
+			conn.Close()
+			return
+		}
+
+		// Clear the read deadline for normal operation
+		_ = conn.SetReadDeadline(time.Time{})
+
+		// Send auth success
+		_ = conn.WriteJSON(model.WSMessage{Type: "auth_ok"})
 
 		// Register with session manager (kicks old connection)
 		deps.SessionManager.Replace(conn)

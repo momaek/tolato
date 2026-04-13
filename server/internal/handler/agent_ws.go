@@ -13,9 +13,12 @@ import (
 	"github.com/momaek/tolato/server/internal/store"
 )
 
-var upgrader = websocket.Upgrader{
+// agentUpgrader is initialized by InitUpgraders with origin checking.
+var agentUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for agent connections
+		// Agent connections have no Origin header (non-browser), allow by default.
+		// This will be overridden by InitUpgraders.
+		return r.Header.Get("Origin") == ""
 	},
 }
 
@@ -67,7 +70,7 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 		}
 
 		// Upgrade to WebSocket
-		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		conn, err := agentUpgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			log.Printf("WebSocket upgrade failed: %v", err)
 			return
