@@ -1,5 +1,46 @@
-# Vue 3 + TypeScript + Vite
+# Tolato Web
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Vue 3 + Vite + TypeScript frontend. Talks to the Go server via REST + WebSocket.
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+See the [root README](../README.md) for the full stack.
+
+## Stack
+
+- Vue 3 (`<script setup>`) + TypeScript
+- Vite 8
+- Pinia (stores: `app`, `chat`, `nodes`, `monitor`, `settings`)
+- Vue Router + auth guard
+- shadcn-vue (Radix + Tailwind v4) — components in [src/components/ui](src/components/ui)
+- markstream-vue + Shiki — streaming Markdown in chat
+- Chart.js — probe metric charts
+- vue-sonner — toasts
+- vue-i18n
+
+## Scripts
+
+```sh
+pnpm install
+pnpm dev      # vite dev server on :5173
+pnpm build    # vue-tsc + vite build
+pnpm preview  # preview production build
+```
+
+Dev server expects the Go server on `:8080`. See [vite.config.ts](vite.config.ts) for proxy config.
+
+## Layout
+
+```
+src/
+├── components/
+│   ├── chat/      # chat UI (message types, tool cards, confirm card)
+│   ├── layout/    # app shell + sidebar + conversation list
+│   ├── monitor/   # topology canvas, node cards, metric charts
+│   └── ui/        # shadcn-vue primitives
+├── composables/   # useAutoScroll, useTheme, etc.
+├── services/      # api.ts (REST), ws.ts (chat WS client)
+├── stores/        # Pinia
+├── views/         # route-level pages
+├── router/
+├── i18n/
+└── types/         # API + WS type definitions
+```
