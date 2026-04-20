@@ -10,13 +10,24 @@ import (
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/probe"
+	"github.com/momaek/tolato/server/internal/settings"
+	"github.com/momaek/tolato/server/internal/webui"
 )
 
 // Deps holds shared dependencies for all handlers.
+//
+// Handlers should reach for data through these injected collaborators rather
+// than the package-level `store.*` globals where practical — it keeps the
+// dependency graph explicit and the seam available for tests.
 type Deps struct {
 	Config         *config.Config
 	NodeManager    *node.NodeManager
 	SessionManager *SessionManager
+	Settings       *settings.Cache
+	// Probe is nil when Probe.Enabled=false in config. Handlers that need it
+	// (pushProbeConfig, probe REST routes) are only wired up in that case, so
+	// a nil-check isn't necessary at the call site.
+	Probe *probe.Store
 }
 
 // ValidateToken validates a JWT token string and returns the claims.
@@ -77,8 +88,9 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	// Node command history
 	protected.GET("/nodes/:id/commands", ListNodeCommands(deps))
 
-	// LLM verify
+	// LLM verify + cached models
 	protected.POST("/settings/llm/verify", VerifyLLMSettings(deps))
+	protected.GET("/settings/llm/models", GetLLMModels(deps))
 
 	// API Keys management
 	protected.POST("/api-keys", CreateAPIKey(deps))
@@ -111,6 +123,11 @@ func SetupRouter(deps *Deps) *gin.Engine {
 
 	// WebSocket: Frontend interactive terminal (JWT via first-message auth)
 	r.GET("/ws/terminal", TerminalWSHandler(deps))
+
+	// Embedded SPA — falls through as NoRoute so API/WS paths aren't shadowed.
+	if err := webui.Register(r); err != nil {
+		panic(err)
+	}
 
 	return r
 }

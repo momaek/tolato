@@ -6,22 +6,16 @@ import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import { useChatStore } from '@/stores/chat'
-import { useAppStore } from '@/stores/app'
-import { wsService } from '@/services/ws'
 
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
-const appStore = useAppStore()
 const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
+// Holds the topbar's model selection before a conversation exists.
+const pendingModel = ref('')
+const pendingNodeId = ref<string | undefined>(undefined)
 
-// Connect WebSocket on mount
 onMounted(() => {
-  if (appStore.token) {
-    wsService.connect(appStore.token)
-    chatStore.initWSHandlers()
-  }
-
   const convId = route.params.conversationId as string
   if (convId) {
     chatStore.setActive(convId)
@@ -48,7 +42,8 @@ async function handleSend(content: string) {
   if (!chatStore.activeConversationId) {
     const conv = await chatStore.addConversation({
       title: content.slice(0, 30),
-      model: 'gpt-4o',
+      model: pendingModel.value,
+      default_node_id: pendingNodeId.value,
     })
     chatStore.setActive(conv.id)
     router.push(`/chat/${conv.id}`)
@@ -74,10 +69,16 @@ function handleConfirm(id: string, approved: boolean) {
     <ChatTopBar
       :conversation-id="chatStore.activeConversationId || undefined"
       :title="chatStore.activeState?.title || ''"
-      :model="chatStore.activeState?.model || 'gpt-4o'"
-      :default-node-id="chatStore.activeState?.defaultNodeId"
-      @update:model="(v) => chatStore.activeState && (chatStore.activeState.model = v)"
-      @update:default-node-id="(v) => chatStore.activeState && (chatStore.activeState.defaultNodeId = v)"
+      :model="chatStore.activeState?.model || pendingModel"
+      :default-node-id="chatStore.activeState?.defaultNodeId ?? pendingNodeId"
+      @update:model="(v) => {
+        if (chatStore.activeState) chatStore.activeState.model = v
+        else pendingModel = v
+      }"
+      @update:default-node-id="(v) => {
+        if (chatStore.activeState) chatStore.activeState.defaultNodeId = v
+        else pendingNodeId = v
+      }"
     />
 
     <ChatMessages

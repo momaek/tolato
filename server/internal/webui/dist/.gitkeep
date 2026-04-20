@@ -1,0 +1,1 @@
+placeholder so //go:embed all:dist compiles when web/dist hasn't been built

@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { updateConversation, getNodes } from '@/services/api'
+import { updateConversation, getNodes, getLLMSettings, getLLMModels } from '@/services/api'
 import type { NodeListItem } from '@/types/api'
 
 const props = defineProps<{
@@ -27,18 +27,42 @@ const emit = defineEmits<{
 
 const isEditing = ref(false)
 const editTitle = ref(props.title)
-const selectedModel = ref(props.model || 'gpt-4o')
+const selectedModel = ref(props.model || '')
 const selectedNode = ref(props.defaultNodeId || 'all')
 const nodes = ref<NodeListItem[]>([])
+const models = ref<string[]>([])
+const defaultModel = ref('')
 
 watch(() => props.title, (v) => { editTitle.value = v })
-watch(() => props.model, (v) => { selectedModel.value = v || 'gpt-4o' })
+watch(() => props.model, (v) => { selectedModel.value = v || defaultModel.value })
 watch(() => props.defaultNodeId, (v) => { selectedNode.value = v || 'all' })
 
 const validNodes = computed(() => nodes.value.filter(x => x.id))
 
+// Ensure the currently selected model is always renderable in the dropdown,
+// even if it's not in the fetched list (e.g. stale config or fetch failed).
+const modelOptions = computed(() => {
+  const set = new Set(models.value)
+  if (selectedModel.value) set.add(selectedModel.value)
+  if (defaultModel.value) set.add(defaultModel.value)
+  return Array.from(set)
+})
+
 // Load nodes for selector
 getNodes().then((n) => { nodes.value = Array.isArray(n) ? n : [] }).catch(() => {})
+
+// Load configured default model + available models from the LLM API.
+getLLMSettings().then((s) => {
+  defaultModel.value = s.default_model || ''
+  if (!selectedModel.value && defaultModel.value) {
+    selectedModel.value = defaultModel.value
+    emit('update:model', defaultModel.value)
+  }
+}).catch(() => {})
+
+// Read the cached model list (populated by SettingsView's verify action).
+// Avoids hitting the upstream LLM API on every chat page open.
+getLLMModels().then((list) => { models.value = list }).catch(() => {})
 
 async function saveTitle() {
   if (props.conversationId && editTitle.value !== props.title) {
@@ -94,10 +118,7 @@ function onNodeChange(val: any) {
         <SelectValue :placeholder="$t('chat.selectModel')" />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-        <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-        <SelectItem value="o4-mini">o4-mini</SelectItem>
-        <SelectItem value="claude-3.5-sonnet">Claude 3.5 Sonnet</SelectItem>
+        <SelectItem v-for="m in modelOptions" :key="m" :value="m">{{ m }}</SelectItem>
       </SelectContent>
     </Select>
     <Select :model-value="selectedNode" @update:model-value="onNodeChange">

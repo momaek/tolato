@@ -27,10 +27,30 @@ import (
 //     registers callbacks for unsolicited agent messages
 // ============================================================================
 
-// SystemHandlers collects callbacks for unsolicited agent messages.
+// AgentFrame is a message decoded off the agent's socket. Payload is kept as
+// raw JSON so each handler can unmarshal it into its own typed struct via
+// Decode() — no generic `map[string]any` round-trip, no double-marshal.
+type AgentFrame struct {
+	Type    string          `json:"type"`
+	ID      string          `json:"id,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+// Decode unmarshals the frame's payload into `out`. Safe to call with empty
+// payloads (no-op).
+func (f *AgentFrame) Decode(out any) error {
+	if len(f.Payload) == 0 {
+		return nil
+	}
+	return json.Unmarshal(f.Payload, out)
+}
+
+// SystemHandlers collects callbacks for unsolicited agent messages. The raw
+// payload bytes are handed through so each handler unmarshals into its own
+// typed struct.
 type SystemHandlers struct {
-	OnHeartbeat  func(payload any)
-	OnReRegister func(payload any)
+	OnHeartbeat  func(payload json.RawMessage)
+	OnReRegister func(payload json.RawMessage)
 }
 
 // AgentConn represents a connected agent with a message router.
@@ -42,8 +62,8 @@ type AgentConn struct {
 	writeMu sync.Mutex
 
 	mu       sync.Mutex
-	pending  map[string]chan *model.WSMessage // one-shot request id → reply
-	streams  map[string]chan *model.WSMessage // long-lived stream id → frames
+	pending  map[string]chan *AgentFrame // one-shot request id → reply
+	streams  map[string]chan *AgentFrame // long-lived stream id → frames
 	handlers SystemHandlers
 
 	done      chan struct{}
@@ -73,10 +93,10 @@ func (ac *AgentConn) SetSystemHandlers(h SystemHandlers) {
 // Request performs a one-shot request/response over the agent WS.
 // A new request ID is generated; the returned message is the first agent-sent
 // message with a matching ID.
-func (ac *AgentConn) Request(ctx context.Context, msgType string, payload any, timeout time.Duration) (*model.WSMessage, error) {
+func (ac *AgentConn) Request(ctx context.Context, msgType string, payload any, timeout time.Duration) (*AgentFrame, error) {
 	id := uuid.New().String()
 
-	ch := make(chan *model.WSMessage, 1)
+	ch := make(chan *AgentFrame, 1)
 	ac.mu.Lock()
 	ac.pending[id] = ch
 	ac.mu.Unlock()
@@ -115,7 +135,7 @@ func (ac *AgentConn) Request(ctx context.Context, msgType string, payload any, t
 // Stream represents a long-lived subscription to agent messages keyed by ID.
 type Stream struct {
 	ID   string
-	Ch   <-chan *model.WSMessage
+	Ch   <-chan *AgentFrame
 	conn *AgentConn
 }
 
@@ -143,7 +163,7 @@ func (s *Stream) Close() {
 // returned channel. The caller is responsible for calling Close() on the stream.
 func (ac *AgentConn) OpenStream(openType string, payload any) (*Stream, error) {
 	id := uuid.New().String()
-	ch := make(chan *model.WSMessage, 64)
+	ch := make(chan *AgentFrame, 64)
 
 	ac.mu.Lock()
 	ac.streams[id] = ch
@@ -189,7 +209,7 @@ func (ac *AgentConn) run() {
 			return
 		}
 
-		var msg model.WSMessage
+		var msg AgentFrame
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			log.Printf("[agent_router] node=%s parse error: %v", ac.NodeID, err)
 			continue
@@ -199,7 +219,7 @@ func (ac *AgentConn) run() {
 	}
 }
 
-func (ac *AgentConn) dispatch(msg *model.WSMessage) {
+func (ac *AgentConn) dispatch(msg *AgentFrame) {
 	// ID-keyed messages: prefer stream match, then pending.
 	if msg.ID != "" {
 		ac.mu.Lock()
@@ -263,8 +283,8 @@ func (m *NodeManager) RegisterConn(nodeID string, conn *websocket.Conn) *AgentCo
 	ac := &AgentConn{
 		NodeID:  nodeID,
 		Conn:    conn,
-		pending: make(map[string]chan *model.WSMessage),
-		streams: make(map[string]chan *model.WSMessage),
+		pending: make(map[string]chan *AgentFrame),
+		streams: make(map[string]chan *AgentFrame),
 		done:    make(chan struct{}),
 	}
 
@@ -353,13 +373,9 @@ func (m *NodeManager) ExecuteCommand(ctx context.Context, nodeID, command string
 		return nil, fmt.Errorf("unexpected reply type: %s", reply.Type)
 	}
 
-	payloadBytes, err := json.Marshal(reply.Payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal payload: %w", err)
-	}
 	var result model.AgentCommandResultPayload
-	if err := json.Unmarshal(payloadBytes, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal payload: %w", err)
+	if err := reply.Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode payload: %w", err)
 	}
 	return &result, nil
 }

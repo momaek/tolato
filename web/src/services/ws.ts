@@ -20,6 +20,25 @@ class WebSocketService {
   }
 
   connect(token: string) {
+    // Idempotent: if we already have a live/pending socket with the same token,
+    // don't open a second one. Callers (e.g. route remounts) can safely call this
+    // on every mount without leaking sockets.
+    if (this.ws && this.token === token) {
+      const rs = this.ws.readyState
+      if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) {
+        this.shouldReconnect = true
+        return
+      }
+    }
+    // Token changed or no live socket — tear down any existing one first.
+    if (this.ws) {
+      try { this.ws.close() } catch {}
+      this.ws = null
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     this.shouldReconnect = true
     this.token = token
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -65,6 +84,10 @@ class WebSocketService {
   }
 
   private doConnect() {
+    if (this.ws) {
+      try { this.ws.close() } catch {}
+      this.ws = null
+    }
     this.setState('connecting')
     this.ws = new WebSocket(this.url)
 

@@ -14,6 +14,15 @@ import (
 	"github.com/momaek/tolato/server/internal/store"
 )
 
+// termInbound is the wire shape for a frame read from /ws/terminal. Payload is
+// kept as RawMessage so each switch arm unmarshals into its own typed struct
+// without a marshal→unmarshal detour via `Payload any`.
+type termInbound struct {
+	Type    string          `json:"type"`
+	ID      string          `json:"id,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
 // TerminalWSHandler handles /ws/terminal connections from the browser.
 // Lifecycle:
 //   1. Upgrade
@@ -132,16 +141,14 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 			for frame := range ptyStream.Ch {
 				switch frame.Type {
 				case model.AgentTypePTYOutput:
-					payloadBytes, _ := json.Marshal(frame.Payload)
 					var out model.AgentPTYOutputPayload
-					_ = json.Unmarshal(payloadBytes, &out)
+					_ = frame.Decode(&out)
 					if err := writeToBrowser(model.WSTermTypeOutput, model.WSTermOutputPayload{Data: out.Data}); err != nil {
 						return
 					}
 				case model.AgentTypePTYExit:
-					payloadBytes, _ := json.Marshal(frame.Payload)
 					var ex model.AgentPTYExitPayload
-					_ = json.Unmarshal(payloadBytes, &ex)
+					_ = frame.Decode(&ex)
 					exitCode = ex.ExitCode
 					exitSeen = true
 					_ = writeToBrowser(model.WSTermTypeExit, model.WSTermExitPayload{ExitCode: ex.ExitCode, Error: ex.Error})
@@ -157,21 +164,19 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 				if err != nil {
 					return
 				}
-				var msg model.WSMessage
+				var msg termInbound
 				if err := json.Unmarshal(raw, &msg); err != nil {
 					continue
 				}
 				switch msg.Type {
 				case model.WSTermTypeInput:
 					var p model.WSTermInputPayload
-					payloadBytes, _ := json.Marshal(msg.Payload)
-					_ = json.Unmarshal(payloadBytes, &p)
+					_ = json.Unmarshal(msg.Payload, &p)
 					_ = ptyStream.Send(model.AgentTypePTYInput, model.AgentPTYInputPayload{Data: p.Data})
 
 				case model.WSTermTypeResize:
 					var p model.WSTermResizePayload
-					payloadBytes, _ := json.Marshal(msg.Payload)
-					_ = json.Unmarshal(payloadBytes, &p)
+					_ = json.Unmarshal(msg.Payload, &p)
 					_ = ptyStream.Send(model.AgentTypePTYResize, model.AgentPTYResizePayload{Cols: p.Cols, Rows: p.Rows})
 
 				case model.WSTermTypeClose:
@@ -180,8 +185,7 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 
 				case model.WSTermTypeFileOp:
 					var p model.WSTermFileOpPayload
-					payloadBytes, _ := json.Marshal(msg.Payload)
-					_ = json.Unmarshal(payloadBytes, &p)
+					_ = json.Unmarshal(msg.Payload, &p)
 					go handleFileOp(ac, &p, writeToBrowser)
 				}
 			}
@@ -244,9 +248,8 @@ func handleFileOp(ac *node.AgentConn, p *model.WSTermFileOpPayload, writeToBrows
 		})
 		return
 	}
-	payloadBytes, _ := json.Marshal(reply.Payload)
 	var res model.AgentFileResultPayload
-	_ = json.Unmarshal(payloadBytes, &res)
+	_ = reply.Decode(&res)
 	_ = writeToBrowser(model.WSTermTypeFileResult, model.WSTermFileResultPayload{
 		ReqID:  p.ReqID,
 		Result: res,

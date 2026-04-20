@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -131,6 +133,16 @@ func (lr *loopRegistry) remove(convID string) {
 	delete(lr.runners, convID)
 }
 
+// chatInbound is the wire shape for a frame read from /ws/chat. Payload is
+// kept as RawMessage so we can unmarshal it into the right typed struct once
+// we know Type, without the marshal→unmarshal dance that `Payload any` forces.
+type chatInbound struct {
+	Type           string          `json:"type"`
+	ID             string          `json:"id,omitempty"`
+	ConversationID string          `json:"conversation_id,omitempty"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+}
+
 func chatReadLoop(ctx context.Context, conn *websocket.Conn, deps *Deps, loops *loopRegistry, eventCh chan any) {
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -139,7 +151,7 @@ func chatReadLoop(ctx context.Context, conn *websocket.Conn, deps *Deps, loops *
 			return
 		}
 
-		var msg model.WSMessage
+		var msg chatInbound
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			log.Printf("[chat_ws] unmarshal error: %v", err)
 			continue
@@ -147,58 +159,46 @@ func chatReadLoop(ctx context.Context, conn *websocket.Conn, deps *Deps, loops *
 
 		switch msg.Type {
 		case model.WSTypeUserMessage:
-			handleUserMessage(ctx, deps, loops, eventCh, msg.Payload)
+			var evt model.WSUserMessageEvent
+			if err := json.Unmarshal(msg.Payload, &evt); err != nil {
+				log.Printf("[chat_ws] bad user_message payload: %v", err)
+				continue
+			}
+			handleUserMessage(ctx, deps, loops, eventCh, msg.ConversationID, evt)
 		case model.WSTypeConfirmResponse:
-			handleConfirmResponse(loops, msg.Payload)
+			var evt model.WSConfirmResponseEvent
+			if err := json.Unmarshal(msg.Payload, &evt); err != nil {
+				log.Printf("[chat_ws] bad confirm_response payload: %v", err)
+				continue
+			}
+			handleConfirmResponse(loops, msg.ConversationID, evt)
 		default:
 			log.Printf("[chat_ws] unknown message type: %s", msg.Type)
 		}
 	}
 }
 
-func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eventCh chan any, payload any) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	var evt model.WSUserMessageEvent
-	if err := json.Unmarshal(data, &evt); err != nil {
-		return
-	}
-
-	// Determine conversation ID from the message
-	// The frontend sends conversation_id in the WSMessage envelope
-	// For now, parse it from the payload or use the event
-	var wsMsg struct {
-		ConversationID string `json:"conversation_id"`
-	}
-	json.Unmarshal(data, &wsMsg)
-	convID := wsMsg.ConversationID
-
+func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eventCh chan any, convID string, evt model.WSUserMessageEvent) {
 	if convID == "" {
 		log.Printf("[chat_ws] user_message missing conversation_id")
 		return
 	}
 
-	// Load settings
-	llmSettings := loadLLMSettings()
-	chatSettings := loadChatSettings()
+	llmSettings := deps.Settings.LLM()
+	chatSettings := deps.Settings.Chat()
 
-	// Build LLM client
 	llmCfg := llm.ClientConfig{
-		APIBaseURL:  llmSettings.APIBaseURL,
+		APIBaseURL:  normalizeLLMBaseURL(llmSettings.APIBaseURL),
 		APIKey:      llmSettings.APIKey,
 		Model:       llmSettings.DefaultModel,
 		Temperature: llmSettings.Temperature,
 	}
-
-	// Override model if specified in message
 	if evt.Model != nil && *evt.Model != "" {
 		llmCfg.Model = *evt.Model
 	}
 
 	llmClient := llm.NewClient(llmCfg, agent.ToolDefs())
-	secChecker := security.NewChecker()
+	secChecker := security.NewChecker(deps.Settings)
 	toolExec := agent.NewToolExecutor(deps.NodeManager, secChecker, chatSettings.OutputTruncateLines)
 	promptBuilder := agent.NewPromptBuilder()
 
@@ -214,7 +214,7 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 			return getNodeInfos(deps)
 		},
 		GetCustomPrompt: func() string {
-			cs := loadChatSettings()
+			cs := deps.Settings.Chat()
 			if cs.CustomSystemPrompt != nil {
 				return *cs.CustomSystemPrompt
 			}
@@ -237,26 +237,11 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 	}()
 }
 
-func handleConfirmResponse(loops *loopRegistry, payload any) {
-	data, err := json.Marshal(payload)
-	if err != nil {
+func handleConfirmResponse(loops *loopRegistry, convID string, evt model.WSConfirmResponseEvent) {
+	if convID == "" {
 		return
 	}
-	var evt model.WSConfirmResponseEvent
-	if err := json.Unmarshal(data, &evt); err != nil {
-		return
-	}
-
-	// Find conversation ID from existing loops
-	// The confirm response includes an ID (tool call ID)
-	// We need to figure out which conversation this belongs to
-	// For simplicity, broadcast to all loops (only one should be waiting)
-	var wsMsg struct {
-		ConversationID string `json:"conversation_id"`
-	}
-	json.Unmarshal(data, &wsMsg)
-
-	if runner := loops.get(wsMsg.ConversationID); runner != nil {
+	if runner := loops.get(convID); runner != nil {
 		runner.ReceiveConfirm(evt.Approved)
 	}
 }
@@ -354,46 +339,18 @@ func getNodeInfos(deps *Deps) []agent.NodeInfo {
 	return infos
 }
 
-func loadLLMSettings() model.LLMSettings {
-	settings := model.LLMSettings{
-		MaxRounds:   20,
-		Temperature: 0.7,
+// normalizeLLMBaseURL trims trailing slashes and appends `/v1` when the URL
+// doesn't already carry an OpenAI-style version segment. The OpenAI SDK and the
+// /models endpoint both expect the URL to point at the version root.
+func normalizeLLMBaseURL(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, "/")
+	if s == "" {
+		return s
 	}
-	if s, err := store.GetSetting("llm.api_base_url"); err == nil {
-		json.Unmarshal([]byte(s.Value), &settings.APIBaseURL)
+	if matched, _ := regexp.MatchString(`/v\d+(/|$)`, s); matched {
+		return s
 	}
-	if s, err := store.GetSetting("llm.api_key"); err == nil {
-		json.Unmarshal([]byte(s.Value), &settings.APIKey)
-	}
-	if s, err := store.GetSetting("llm.default_model"); err == nil {
-		json.Unmarshal([]byte(s.Value), &settings.DefaultModel)
-	}
-	if s, err := store.GetSetting("llm.max_rounds"); err == nil {
-		json.Unmarshal([]byte(s.Value), &settings.MaxRounds)
-	}
-	if s, err := store.GetSetting("llm.temperature"); err == nil {
-		json.Unmarshal([]byte(s.Value), &settings.Temperature)
-	}
-	return settings
+	return s + "/v1"
 }
 
-func loadChatSettings() model.ChatSettings {
-	settings := model.ChatSettings{
-		ContextRounds:       20,
-		OutputTruncateLines: 100,
-	}
-	if s, err := store.GetSetting("chat.context_rounds"); err == nil {
-		json.Unmarshal([]byte(s.Value), &settings.ContextRounds)
-	}
-	if s, err := store.GetSetting("chat.output_truncate_lines"); err == nil {
-		json.Unmarshal([]byte(s.Value), &settings.OutputTruncateLines)
-	}
-	if s, err := store.GetSetting("chat.custom_system_prompt"); err == nil {
-		var prompt string
-		json.Unmarshal([]byte(s.Value), &prompt)
-		if prompt != "" {
-			settings.CustomSystemPrompt = &prompt
-		}
-	}
-	return settings
-}

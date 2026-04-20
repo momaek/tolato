@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -110,7 +111,7 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 		}
 
 		// Check sensitive operation
-		checker := security.NewChecker()
+		checker := security.NewChecker(deps.Settings)
 		if permission != "admin" && checker.IsSensitive(req.Command) && !req.Confirm {
 			c.JSON(http.StatusConflict, model.ErrorResponse{
 				Error:   "sensitive_operation",
@@ -185,10 +186,29 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 }
 
 // VerifyLLMSettings verifies LLM API configuration and returns available models.
+// Accepts an optional body {api_base_url, api_key} so the user can verify form values
+// before saving. Empty fields fall back to stored settings, which lets the UI omit
+// the masked api_key when it hasn't been edited.
 func VerifyLLMSettings(deps *Deps) gin.HandlerFunc {
+	type verifyReq struct {
+		APIBaseURL string `json:"api_base_url"`
+		APIKey     string `json:"api_key"`
+	}
 	return func(c *gin.Context) {
-		settings := loadLLMSettings()
-		if settings.APIBaseURL == "" || settings.APIKey == "" {
+		var req verifyReq
+		_ = c.ShouldBindJSON(&req)
+
+		stored := deps.Settings.LLM()
+		baseURL := strings.TrimSpace(req.APIBaseURL)
+		if baseURL == "" {
+			baseURL = stored.APIBaseURL
+		}
+		apiKey := strings.TrimSpace(req.APIKey)
+		if apiKey == "" {
+			apiKey = stored.APIKey
+		}
+
+		if baseURL == "" || apiKey == "" {
 			c.JSON(http.StatusBadRequest, model.ErrorResponse{
 				Error:   "incomplete_config",
 				Message: "API base URL and API key are required",
@@ -196,22 +216,19 @@ func VerifyLLMSettings(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
-		// Try to fetch models from the API
-		// Simple HTTP request to /v1/models endpoint
-		client := &http.Client{Timeout: 10 * time.Second}
-		baseURL := settings.APIBaseURL
-		if baseURL[len(baseURL)-1] == '/' {
-			baseURL = baseURL[:len(baseURL)-1]
-		}
+		// Normalize so users can paste the URL with or without `/v1`. The chat
+		// client applies the same normalization at llm.ClientConfig build time.
+		baseURL = normalizeLLMBaseURL(baseURL)
 
-		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", baseURL+"/v1/models", nil)
+		client := &http.Client{Timeout: 10 * time.Second}
+		httpReq, err := http.NewRequestWithContext(c.Request.Context(), "GET", baseURL+"/models", nil)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: "invalid_url", Message: err.Error()})
 			return
 		}
-		req.Header.Set("Authorization", "Bearer "+settings.APIKey)
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(httpReq)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, model.ErrorResponse{
 				Error:   "connection_failed",
@@ -235,7 +252,12 @@ func VerifyLLMSettings(deps *Deps) gin.HandlerFunc {
 			} `json:"data"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			c.JSON(http.StatusOK, gin.H{"valid": true, "models": []string{}})
+			// 200 with non-JSON (likely the wrong endpoint hit a SPA / 404 page).
+			// Don't claim success.
+			c.JSON(http.StatusBadGateway, model.ErrorResponse{
+				Error:   "invalid_response",
+				Message: "LLM API returned non-JSON response",
+			})
 			return
 		}
 
@@ -244,7 +266,25 @@ func VerifyLLMSettings(deps *Deps) gin.HandlerFunc {
 			models = append(models, m.ID)
 		}
 
-		c.JSON(http.StatusOK, gin.H{"valid": true, "models": models})
+		// Cache the model list so the chat UI can populate the dropdown without
+		// hitting the upstream API on every page open.
+		if b, err := json.Marshal(models); err == nil {
+			_ = store.SetSetting("llm.cached_models", string(b))
+		}
+
+		// Field name `success` matches the frontend VerifyLLMResponse type.
+		c.JSON(http.StatusOK, gin.H{"success": true, "models": models})
+	}
+}
+
+// GetLLMModels returns the cached list of models from the last successful verify.
+func GetLLMModels(deps *Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		models := []string{}
+		if s, err := store.GetSetting("llm.cached_models"); err == nil {
+			_ = json.Unmarshal([]byte(s.Value), &models)
+		}
+		c.JSON(http.StatusOK, gin.H{"models": models})
 	}
 }
 

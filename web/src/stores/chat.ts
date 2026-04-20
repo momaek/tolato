@@ -45,12 +45,9 @@ export const useChatStore = defineStore('chat', () => {
     return conversationStates.value.get(activeConversationId.value) || null
   })
 
-  // Initialize WS event handlers (guarded against double registration)
-  let wsInitialized = false
-  function initWSHandlers() {
-    if (wsInitialized) return
-    wsInitialized = true
-
+  // Register WS event handlers exactly once (store is a Pinia singleton, so this
+  // runs on first useChatStore() call — no view needs to trigger it).
+  function registerWSHandlers() {
     wsService.on(WS_TYPE.REASONING, (msg: WSMessage) => {
       const convId = msg.conversation_id
       if (!convId || !msg.payload) return
@@ -149,6 +146,33 @@ export const useChatStore = defineStore('chat', () => {
       state.streaming = null
     })
   }
+
+  // On reconnect, any in-flight streaming on the old socket is dead: the server
+  // may have finished (or errored) during the outage and we missed the events.
+  // Clear stale streaming state and re-fetch the active conversation from the
+  // server, which has the authoritative final messages.
+  let wasConnected = false
+  function watchConnectionRecovery() {
+    wsService.onStateChange((s) => {
+      if (s === 'connected') {
+        if (wasConnected) {
+          // reconnect — recover
+          for (const st of conversationStates.value.values()) {
+            if (st.streaming || st.status === 'streaming' || st.status === 'tool_exec') {
+              st.streaming = null
+              st.confirmRequest = null
+              st.status = 'idle'
+              loadConversation(st.id)
+            }
+          }
+        }
+        wasConnected = true
+      }
+    })
+  }
+
+  registerWSHandlers()
+  watchConnectionRecovery()
 
   function getOrCreateState(convId: string): ConversationState {
     let state = conversationStates.value.get(convId)
@@ -275,6 +299,5 @@ export const useChatStore = defineStore('chat', () => {
     setActive,
     sendMessage,
     confirmAction,
-    initWSHandlers,
   }
 })

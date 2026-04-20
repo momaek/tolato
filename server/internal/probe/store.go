@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -27,6 +28,14 @@ func (s *Store) CreateLink(link *model.ProbeLink) error {
 func (s *Store) ListLinks() ([]model.ProbeLink, error) {
 	var links []model.ProbeLink
 	err := s.db.Preload("Source").Preload("Target").Find(&links).Error
+	return links, err
+}
+
+// ListLinksBySource returns all probe links whose Source is the given node,
+// with Target preloaded. Used by pushProbeConfig when an agent reconnects.
+func (s *Store) ListLinksBySource(sourceID string) ([]model.ProbeLink, error) {
+	var links []model.ProbeLink
+	err := s.db.Where("source_id = ?", sourceID).Preload("Target").Find(&links).Error
 	return links, err
 }
 
@@ -121,16 +130,22 @@ func (s *Store) CleanupResolvedAlerts() error {
 }
 
 // StartCleanupScheduler runs a periodic cleanup task for old metrics and resolved alerts.
-func StartCleanupScheduler(s *Store, retentionDays int) {
+// Returns when ctx is cancelled, so main can block on graceful shutdown.
+func StartCleanupScheduler(ctx context.Context, s *Store, retentionDays int) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if err := s.CleanupOldMetrics(retentionDays); err != nil {
-			log.Printf("[probe] cleanup old metrics failed: %v", err)
-		}
-		if err := s.CleanupResolvedAlerts(); err != nil {
-			log.Printf("[probe] cleanup resolved alerts failed: %v", err)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.CleanupOldMetrics(retentionDays); err != nil {
+				log.Printf("[probe] cleanup old metrics failed: %v", err)
+			}
+			if err := s.CleanupResolvedAlerts(); err != nil {
+				log.Printf("[probe] cleanup resolved alerts failed: %v", err)
+			}
 		}
 	}
 }

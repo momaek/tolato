@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 
@@ -121,7 +120,7 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				return
 			}
 
-			var msg model.WSMessage
+			var msg node.AgentFrame
 			if err := json.Unmarshal(raw, &msg); err != nil {
 				log.Printf("Failed to parse agent message: %v", err)
 				continue
@@ -132,10 +131,8 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				continue
 			}
 
-			// Parse register payload
-			payloadBytes, _ := json.Marshal(msg.Payload)
 			var reg model.AgentRegisterPayload
-			if err := json.Unmarshal(payloadBytes, &reg); err != nil {
+			if err := msg.Decode(&reg); err != nil {
 				log.Printf("Failed to parse register payload: %v", err)
 				continue
 			}
@@ -189,19 +186,18 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 // NodeManager.RegisterConn.
 func installSystemHandlers(deps *Deps, nodeID string, ac *node.AgentConn) {
 	ac.SetSystemHandlers(node.SystemHandlers{
-		OnHeartbeat: func(payload any) {
+		OnHeartbeat: func(payload json.RawMessage) {
 			handleAgentHeartbeat(deps, nodeID, payload)
 		},
-		OnReRegister: func(payload any) {
+		OnReRegister: func(payload json.RawMessage) {
 			handleAgentReRegister(nodeID, payload)
 		},
 	})
 }
 
-func handleAgentReRegister(nodeID string, payload any) {
-	payloadBytes, _ := json.Marshal(payload)
+func handleAgentReRegister(nodeID string, payload json.RawMessage) {
 	var reg model.AgentRegisterPayload
-	if err := json.Unmarshal(payloadBytes, &reg); err != nil {
+	if err := json.Unmarshal(payload, &reg); err != nil {
 		return
 	}
 	// Update node info (hostname, os, etc. may have changed)
@@ -218,10 +214,9 @@ func handleAgentReRegister(nodeID string, payload any) {
 	})
 }
 
-func handleAgentHeartbeat(deps *Deps, nodeID string, payload any) {
-	payloadBytes, _ := json.Marshal(payload)
+func handleAgentHeartbeat(deps *Deps, nodeID string, payload json.RawMessage) {
 	var hb model.AgentHeartbeatPayload
-	if err := json.Unmarshal(payloadBytes, &hb); err != nil {
+	if err := json.Unmarshal(payload, &hb); err != nil {
 		log.Printf("Failed to unmarshal heartbeat payload: %v", err)
 		return
 	}
@@ -242,16 +237,15 @@ func handleAgentHeartbeat(deps *Deps, nodeID string, payload any) {
 // pushProbeConfig sends the current probe configuration to an agent.
 // This is called after agent registration/reconnection.
 func pushProbeConfig(deps *Deps, nodeID string, ac *node.AgentConn) {
-	if !deps.Config.Probe.Enabled {
+	if !deps.Config.Probe.Enabled || deps.Probe == nil {
 		return
 	}
 
-	// Build probe targets from links where this node is the source
-	// For simplicity, read all links and filter
-	probeStore := store.DB
-	var links []model.ProbeLink
-	probeStore.Where("source_id = ?", nodeID).Preload("Target").Find(&links)
-
+	links, err := deps.Probe.ListLinksBySource(nodeID)
+	if err != nil {
+		log.Printf("[probe] list links for %s failed: %v", nodeID, err)
+		return
+	}
 	if len(links) == 0 {
 		return
 	}
@@ -270,16 +264,15 @@ func pushProbeConfig(deps *Deps, nodeID string, ac *node.AgentConn) {
 		})
 	}
 
-	serverAddr := fmt.Sprintf("http://%s:%d", deps.Config.Server.Host, deps.Config.Server.Port)
-	if deps.Config.Server.Host == "0.0.0.0" {
-		serverAddr = fmt.Sprintf("http://127.0.0.1:%d", deps.Config.Server.Port)
-	}
+	// Agents may be remote; prefer PublicAddress (what install.sh / the web UI use).
+	// Fall back to host:port only for same-host / dev setups.
+	curlURL, _ := publicServerURLs(deps.Config)
 
 	msg := model.WSMessage{
 		Type: model.AgentTypeProbeConfig,
 		Payload: model.AgentProbeConfigPayload{
 			Enabled:   true,
-			ReportURL: serverAddr + "/api/v1/probe/report",
+			ReportURL: curlURL + "/api/v1/probe/report",
 			Targets:   targets,
 		},
 	}

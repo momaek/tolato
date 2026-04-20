@@ -63,8 +63,8 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
 // --- Conversations ---
 
 export async function getConversations(): Promise<ConversationSummary[]> {
-  const res = await api.get<ConversationSummary[]>('/conversations')
-  return res.data
+  const res = await api.get<PaginatedResponse<ConversationSummary>>('/conversations')
+  return res.data.items ?? []
 }
 
 export async function getConversation(id: string): Promise<ConversationDetail> {
@@ -88,8 +88,8 @@ export async function deleteConversation(id: string): Promise<void> {
 // --- Nodes ---
 
 export async function getNodes(): Promise<NodeListItem[]> {
-  const res = await api.get<NodeListItem[]>('/nodes')
-  return res.data
+  const res = await api.get<PaginatedResponse<NodeListItem>>('/nodes')
+  return res.data.items ?? []
 }
 
 export async function getNode(id: string): Promise<NodeDetail> {
@@ -121,9 +121,16 @@ export async function updateLLMSettings(data: Partial<LLMSettings>): Promise<voi
   await api.put('/settings/llm', data)
 }
 
-export async function verifyLLM(): Promise<VerifyLLMResponse> {
-  const res = await api.post<VerifyLLMResponse>('/settings/llm/verify')
+export async function verifyLLM(
+  payload?: { api_base_url?: string; api_key?: string }
+): Promise<VerifyLLMResponse> {
+  const res = await api.post<VerifyLLMResponse>('/settings/llm/verify', payload ?? {})
   return res.data
+}
+
+export async function getLLMModels(): Promise<string[]> {
+  const res = await api.get<{ models: string[] }>('/settings/llm/models')
+  return res.data.models || []
 }
 
 export async function getSecuritySettings(): Promise<SecuritySettings> {

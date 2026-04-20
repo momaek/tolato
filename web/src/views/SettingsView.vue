@@ -132,7 +132,13 @@ async function handleVerifyLLM() {
   verifying.value = true
   verifyResult.value = null
   try {
-    const res = await verifyLLM()
+    // GET returns api_key masked as "abcd****wxyz" — only send it if the user
+    // edited the field, otherwise let the backend use the stored value.
+    const isMasked = /\*{4}/.test(llm.value.api_key || '')
+    const res = await verifyLLM({
+      api_base_url: llm.value.api_base_url,
+      api_key: isMasked ? undefined : llm.value.api_key,
+    })
     verifyResult.value = res
     if (res.models) {
       availableModels.value = res.models

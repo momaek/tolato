@@ -10,8 +10,7 @@ export const useNodesStore = defineStore('nodes', () => {
   async function fetchNodes() {
     loading.value = true
     try {
-      const res = await getNodes()
-      nodes.value = Array.isArray(res) ? res : []
+      nodes.value = await getNodes()
     } catch {
       // silently fail for now
     } finally {
