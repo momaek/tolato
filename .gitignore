@@ -1,5 +1,6 @@
 bin/
 .tolato/
+.tolato-dev/
 *.log
 tolato-server
 # local config overrides + built binaries (not meant to be committed)
