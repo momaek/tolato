@@ -184,7 +184,9 @@ async function handleDeleteNode(id: string) {
                 </Button>
               </div>
               <p class="text-xs" style="color: var(--muted-foreground)">
-                {{ $t('nodes.tokenExpires', { expiry: createdNode.token_expiry }) }}
+                {{ createdNode.token_expiry
+                  ? $t('nodes.tokenExpires', { expiry: createdNode.token_expiry })
+                  : $t('nodes.tokenNeverExpires') }}
               </p>
             </div>
             <DialogFooter>

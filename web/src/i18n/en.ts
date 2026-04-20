@@ -90,6 +90,7 @@ export default {
     generateCommand: 'Generate Install Command',
     installInstruction: 'Run this command on your server to install the agent:',
     tokenExpires: 'Token expires: {expiry}',
+    tokenNeverExpires: 'Token never expires',
     confirmRemove: 'Are you sure you want to remove this node?',
     noNodes: 'No nodes found',
     ip: 'IP',

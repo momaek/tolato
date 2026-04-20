@@ -90,6 +90,7 @@ export default {
     generateCommand: '生成安装命令',
     installInstruction: '在服务器上运行以下命令来安装 agent：',
     tokenExpires: 'Token 过期时间：{expiry}',
+    tokenNeverExpires: 'Token 永不过期',
     confirmRemove: '确定要移除此节点吗？',
     noNodes: '未找到节点',
     ip: 'IP',

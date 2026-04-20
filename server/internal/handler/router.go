@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -91,11 +92,25 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	v1.GET("/nodes/:id", ExternalGetNode(deps))
 	v1.POST("/nodes/:id/execute", ExternalExecuteCommand(deps))
 
+	// Agent install script: 302 → GitHub raw (configurable via server.install_script_url).
+	// curl -fsSL follows the redirect transparently.
+	r.GET("/install.sh", func(c *gin.Context) {
+		url := deps.Config.Server.InstallScriptURL
+		if url == "" {
+			c.String(http.StatusNotFound, "install script url not configured")
+			return
+		}
+		c.Redirect(http.StatusFound, url)
+	})
+
 	// WebSocket: Agent connection (token-based auth, not JWT)
 	r.GET("/ws/agent", AgentWSHandler(deps))
 
 	// WebSocket: Frontend chat connection (JWT via query param)
 	r.GET("/ws/chat", ChatWSHandler(deps))
+
+	// WebSocket: Frontend interactive terminal (JWT via first-message auth)
+	r.GET("/ws/terminal", TerminalWSHandler(deps))
 
 	return r
 }

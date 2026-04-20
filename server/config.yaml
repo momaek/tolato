@@ -5,6 +5,12 @@ server:
   # Use ["*"] to allow all origins (development only).
   # Examples: ["http://localhost:5173", "https://tolato.example.com"]
   allowed_origins: []
+  # /install.sh 会 302 重定向到这个 URL（默认指向本仓库 main 分支的 scripts/install.sh）
+  install_script_url: https://raw.githubusercontent.com/momaek/tolato/main/scripts/install.sh
+  # 外部可访问的地址（经 caddy / nginx 反代后的域名）。
+  # 用于生成安装命令和 agent 的 ws 连接地址；为空时 fallback 到 host:port（仅同机有效）。
+  # 示例：https://tolato.example.com
+  public_address: ""
 
 database:
   driver: postgres
@@ -13,7 +19,7 @@ database:
 security:
   encrypt_key: "tolato-default-encrypt-key-32b!"
   jwt_secret: "tolato-jwt-secret-change-me"
-  agent_token_expiry: 24h
+  agent_token_expiry: 0s # 0 = never expires
 
 defaults:
   heartbeat_interval: 30

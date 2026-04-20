@@ -10,11 +10,19 @@ import (
 // --- Registration Tokens ---
 
 // CreateRegistrationToken creates a reusable registration token with expiry.
+// A non-positive expiry means the token never expires.
 func CreateRegistrationToken(aliasPrefix *string, expiry time.Duration) (*model.RegistrationToken, error) {
+	var expiresAt time.Time
+	if expiry > 0 {
+		expiresAt = time.Now().Add(expiry)
+	} else {
+		// Far-future sentinel so the existing "expires_at > now" check still passes.
+		expiresAt = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
+	}
 	token := &model.RegistrationToken{
 		ID:          uuid.New().String(),
 		AliasPrefix: aliasPrefix,
-		ExpiresAt:   time.Now().Add(expiry),
+		ExpiresAt:   expiresAt,
 	}
 	if err := DB.Create(token).Error; err != nil {
 		return nil, err
