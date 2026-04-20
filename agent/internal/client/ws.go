@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,8 +15,10 @@ import (
 
 	"github.com/momaek/tolato/agent/internal/collector"
 	"github.com/momaek/tolato/agent/internal/executor"
+	"github.com/momaek/tolato/agent/internal/files"
 	"github.com/momaek/tolato/agent/internal/identity"
 	"github.com/momaek/tolato/agent/internal/probe"
+	"github.com/momaek/tolato/agent/internal/terminal"
 )
 
 const (
@@ -77,6 +80,42 @@ type RegisterAckPayload struct {
 	Secret string `json:"secret"`
 }
 
+// --- PTY / File op payloads (agent side) ---
+
+type PTYOpenPayload struct {
+	Cols  uint16 `json:"cols"`
+	Rows  uint16 `json:"rows"`
+	Shell string `json:"shell,omitempty"`
+	Cwd   string `json:"cwd,omitempty"`
+}
+
+type PTYInputPayload struct {
+	Data string `json:"data"` // base64
+}
+
+type PTYResizePayload struct {
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+}
+
+type PTYOutputPayload struct {
+	Data string `json:"data"` // base64
+}
+
+type PTYExitPayload struct {
+	ExitCode int    `json:"exit_code"`
+	Error    string `json:"error,omitempty"`
+}
+
+type FileOpPayload struct {
+	Op     string `json:"op"`
+	Path   string `json:"path"`
+	Data   string `json:"data,omitempty"`
+	Mode   uint32 `json:"mode,omitempty"`
+	Offset int64  `json:"offset,omitempty"`
+	Length int64  `json:"length,omitempty"`
+}
+
 // ---- Client ----
 
 // Client manages the WebSocket connection to the server.
@@ -94,6 +133,9 @@ type Client struct {
 	conn   *websocket.Conn
 	connMu sync.Mutex // protects conn writes
 
+	ptyMu       sync.Mutex
+	ptySessions map[string]*terminal.Session // streamID -> session
+
 	done   chan struct{}
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -109,6 +151,7 @@ func NewClient(serverURL, token string, store *identity.Store, ident *identity.I
 		ident:         ident,
 		collector:     col,
 		executor:      exec,
+		ptySessions:   make(map[string]*terminal.Session),
 		done:          make(chan struct{}),
 		ctx:           ctx,
 		cancel:        cancel,
@@ -294,6 +337,16 @@ func (c *Client) readLoop() error {
 			go c.handleCommand(msg)
 		case "probe_config":
 			c.handleProbeConfig(msg)
+		case "pty_open":
+			go c.handlePTYOpen(msg)
+		case "pty_input":
+			c.handlePTYInput(msg)
+		case "pty_resize":
+			c.handlePTYResize(msg)
+		case "pty_close":
+			c.handlePTYClose(msg)
+		case "file_op":
+			go c.handleFileOp(msg)
 		default:
 			log.Printf("[ws] unknown message type: %s", msg.Type)
 		}
@@ -400,4 +453,118 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// ============================================================================
+// PTY + file op handlers
+// ============================================================================
+
+func (c *Client) handlePTYOpen(msg WSMessage) {
+	var p PTYOpenPayload
+	if err := json.Unmarshal(msg.Payload, &p); err != nil {
+		log.Printf("[ws] pty_open parse: %v", err)
+		return
+	}
+
+	sess, err := terminal.Start(p.Shell, p.Cwd, p.Cols, p.Rows)
+	if err != nil {
+		log.Printf("[ws] pty_open start: %v", err)
+		_ = c.sendMessage("pty_exit", msg.ID, PTYExitPayload{ExitCode: -1, Error: err.Error()})
+		return
+	}
+
+	c.ptyMu.Lock()
+	// If a session already exists for this stream ID, kill it first.
+	if old, ok := c.ptySessions[msg.ID]; ok {
+		old.Close()
+	}
+	c.ptySessions[msg.ID] = sess
+	c.ptyMu.Unlock()
+
+	streamID := msg.ID
+
+	// Output pump: read PTY bytes and emit pty_output frames to the server.
+	go func() {
+		for chunk := range sess.Output() {
+			payload := PTYOutputPayload{Data: base64.StdEncoding.EncodeToString(chunk)}
+			if err := c.sendMessage("pty_output", streamID, payload); err != nil {
+				log.Printf("[ws] pty_output send: %v", err)
+				return
+			}
+		}
+		// Output channel closed → session ended.
+		<-sess.Closed()
+
+		c.ptyMu.Lock()
+		delete(c.ptySessions, streamID)
+		c.ptyMu.Unlock()
+
+		exitErr := ""
+		if e := sess.ExitError(); e != nil {
+			exitErr = e.Error()
+		}
+		_ = c.sendMessage("pty_exit", streamID, PTYExitPayload{
+			ExitCode: sess.ExitCode(),
+			Error:    exitErr,
+		})
+	}()
+}
+
+func (c *Client) handlePTYInput(msg WSMessage) {
+	var p PTYInputPayload
+	if err := json.Unmarshal(msg.Payload, &p); err != nil {
+		return
+	}
+	c.ptyMu.Lock()
+	sess := c.ptySessions[msg.ID]
+	c.ptyMu.Unlock()
+	if sess == nil {
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(p.Data)
+	if err != nil {
+		return
+	}
+	_, _ = sess.Write(raw)
+}
+
+func (c *Client) handlePTYResize(msg WSMessage) {
+	var p PTYResizePayload
+	if err := json.Unmarshal(msg.Payload, &p); err != nil {
+		return
+	}
+	c.ptyMu.Lock()
+	sess := c.ptySessions[msg.ID]
+	c.ptyMu.Unlock()
+	if sess == nil {
+		return
+	}
+	_ = sess.Resize(p.Cols, p.Rows)
+}
+
+func (c *Client) handlePTYClose(msg WSMessage) {
+	c.ptyMu.Lock()
+	sess := c.ptySessions[msg.ID]
+	delete(c.ptySessions, msg.ID)
+	c.ptyMu.Unlock()
+	if sess != nil {
+		sess.Close()
+	}
+}
+
+func (c *Client) handleFileOp(msg WSMessage) {
+	var p FileOpPayload
+	if err := json.Unmarshal(msg.Payload, &p); err != nil {
+		_ = c.sendMessage("file_result", msg.ID, files.Response{OK: false, Error: "invalid payload"})
+		return
+	}
+	resp := files.Handle(files.Request{
+		Op:     p.Op,
+		Path:   p.Path,
+		Data:   p.Data,
+		Mode:   p.Mode,
+		Offset: p.Offset,
+		Length: p.Length,
+	})
+	_ = c.sendMessage("file_result", msg.ID, resp)
 }

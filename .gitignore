@@ -2,3 +2,6 @@ bin/
 .tolato/
 *.log
 tolato-server
+# local config overrides + built binaries (not meant to be committed)
+server/config.local.yaml
+agent/agent

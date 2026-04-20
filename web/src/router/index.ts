@@ -34,6 +34,11 @@ const router = createRouter({
           component: () => import('@/views/NodeDetailView.vue'),
         },
         {
+          path: 'nodes/:nodeId/terminal',
+          name: 'node-terminal',
+          component: () => import('@/views/NodeTerminalView.vue'),
+        },
+        {
           path: 'audit',
           name: 'audit',
           component: () => import('@/views/AuditLogView.vue'),

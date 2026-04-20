@@ -5,27 +5,241 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/momaek/tolato/server/internal/model"
 )
 
-// AgentConn represents a connected agent.
+// ============================================================================
+// AgentConn — owns the underlying WebSocket connection for a single agent and
+// multiplexes messages between many concurrent senders / receivers.
+//
+// Only ONE goroutine (started by run()) ever calls conn.ReadMessage(). All
+// writes go through WriteJSON() which holds writeMu. Callers interact via:
+//
+//   - Request(msgType, payload, timeout)  → one-shot request/response
+//   - OpenStream(openType, payload)       → long-lived stream (e.g. PTY)
+//   - SetSystemHandlers(onHB, onReRegister)
+//     registers callbacks for unsolicited agent messages
+// ============================================================================
+
+// SystemHandlers collects callbacks for unsolicited agent messages.
+type SystemHandlers struct {
+	OnHeartbeat  func(payload any)
+	OnReRegister func(payload any)
+}
+
+// AgentConn represents a connected agent with a message router.
 type AgentConn struct {
 	NodeID  string
 	Conn    *websocket.Conn
 	Metrics *model.NodeMetrics // cached metrics from last heartbeat
-	mu      sync.Mutex
+
+	writeMu sync.Mutex
+
+	mu       sync.Mutex
+	pending  map[string]chan *model.WSMessage // one-shot request id → reply
+	streams  map[string]chan *model.WSMessage // long-lived stream id → frames
+	handlers SystemHandlers
+
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // WriteJSON sends a JSON message to the agent, thread-safe.
 func (ac *AgentConn) WriteJSON(v any) error {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
+	ac.writeMu.Lock()
+	defer ac.writeMu.Unlock()
 	return ac.Conn.WriteJSON(v)
 }
+
+// Done returns a channel that is closed when the connection terminates.
+func (ac *AgentConn) Done() <-chan struct{} {
+	return ac.done
+}
+
+// SetSystemHandlers registers callbacks for heartbeat / re-register messages.
+// Safe to call once after RegisterConn, before run() starts consuming.
+func (ac *AgentConn) SetSystemHandlers(h SystemHandlers) {
+	ac.mu.Lock()
+	ac.handlers = h
+	ac.mu.Unlock()
+}
+
+// Request performs a one-shot request/response over the agent WS.
+// A new request ID is generated; the returned message is the first agent-sent
+// message with a matching ID.
+func (ac *AgentConn) Request(ctx context.Context, msgType string, payload any, timeout time.Duration) (*model.WSMessage, error) {
+	id := uuid.New().String()
+
+	ch := make(chan *model.WSMessage, 1)
+	ac.mu.Lock()
+	ac.pending[id] = ch
+	ac.mu.Unlock()
+
+	defer func() {
+		ac.mu.Lock()
+		delete(ac.pending, id)
+		ac.mu.Unlock()
+	}()
+
+	msg := map[string]any{
+		"type":    msgType,
+		"id":      id,
+		"payload": payload,
+	}
+	if err := ac.WriteJSON(msg); err != nil {
+		return nil, fmt.Errorf("send %s: %w", msgType, err)
+	}
+
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+
+	select {
+	case reply := <-ch:
+		return reply, nil
+	case <-time.After(timeout):
+		return nil, errors.New("request timed out")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-ac.done:
+		return nil, errors.New("agent disconnected")
+	}
+}
+
+// Stream represents a long-lived subscription to agent messages keyed by ID.
+type Stream struct {
+	ID   string
+	Ch   <-chan *model.WSMessage
+	conn *AgentConn
+}
+
+// Send forwards a message to the agent with this stream's ID.
+func (s *Stream) Send(msgType string, payload any) error {
+	return s.conn.WriteJSON(map[string]any{
+		"type":    msgType,
+		"id":      s.ID,
+		"payload": payload,
+	})
+}
+
+// Close unregisters the stream; the underlying channel is closed.
+func (s *Stream) Close() {
+	s.conn.mu.Lock()
+	if ch, ok := s.conn.streams[s.ID]; ok {
+		delete(s.conn.streams, s.ID)
+		close(ch)
+	}
+	s.conn.mu.Unlock()
+}
+
+// OpenStream allocates a new stream and sends the `openType` message with its
+// ID to the agent. Agent replies carrying the same ID are delivered on the
+// returned channel. The caller is responsible for calling Close() on the stream.
+func (ac *AgentConn) OpenStream(openType string, payload any) (*Stream, error) {
+	id := uuid.New().String()
+	ch := make(chan *model.WSMessage, 64)
+
+	ac.mu.Lock()
+	ac.streams[id] = ch
+	ac.mu.Unlock()
+
+	msg := map[string]any{
+		"type":    openType,
+		"id":      id,
+		"payload": payload,
+	}
+	if err := ac.WriteJSON(msg); err != nil {
+		ac.mu.Lock()
+		delete(ac.streams, id)
+		ac.mu.Unlock()
+		close(ch)
+		return nil, fmt.Errorf("send %s: %w", openType, err)
+	}
+
+	return &Stream{ID: id, Ch: ch, conn: ac}, nil
+}
+
+// run is the single owner of conn.ReadMessage(). It demultiplexes incoming
+// messages onto pending requests, streams, or system handlers.
+func (ac *AgentConn) run() {
+	defer ac.closeOnce.Do(func() {
+		close(ac.done)
+		// Flush any waiters / subscribers.
+		ac.mu.Lock()
+		for id, ch := range ac.streams {
+			close(ch)
+			delete(ac.streams, id)
+		}
+		// Pending one-shots will observe ac.done and bail.
+		ac.mu.Unlock()
+	})
+
+	for {
+		_, raw, err := ac.Conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.Printf("[agent_router] node=%s read error: %v", ac.NodeID, err)
+			}
+			return
+		}
+
+		var msg model.WSMessage
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			log.Printf("[agent_router] node=%s parse error: %v", ac.NodeID, err)
+			continue
+		}
+
+		ac.dispatch(&msg)
+	}
+}
+
+func (ac *AgentConn) dispatch(msg *model.WSMessage) {
+	// ID-keyed messages: prefer stream match, then pending.
+	if msg.ID != "" {
+		ac.mu.Lock()
+		if ch, ok := ac.streams[msg.ID]; ok {
+			ac.mu.Unlock()
+			select {
+			case ch <- msg:
+			default:
+				log.Printf("[agent_router] node=%s stream=%s chan full, dropping frame", ac.NodeID, msg.ID)
+			}
+			return
+		}
+		if ch, ok := ac.pending[msg.ID]; ok {
+			delete(ac.pending, msg.ID)
+			ac.mu.Unlock()
+			ch <- msg
+			return
+		}
+		ac.mu.Unlock()
+		// Fallthrough: untagged-by-handler message with an unknown ID — dispatch by type.
+	}
+
+	// Unsolicited messages: dispatch by type.
+	switch msg.Type {
+	case model.AgentTypeHeartbeat:
+		if ac.handlers.OnHeartbeat != nil {
+			ac.handlers.OnHeartbeat(msg.Payload)
+		}
+	case model.AgentTypeRegister:
+		if ac.handlers.OnReRegister != nil {
+			ac.handlers.OnReRegister(msg.Payload)
+		}
+	default:
+		log.Printf("[agent_router] node=%s dropped message type=%s id=%q", ac.NodeID, msg.Type, msg.ID)
+	}
+}
+
+// ============================================================================
+// NodeManager — tracks AgentConn per nodeID.
+// ============================================================================
 
 // NodeManager manages active agent WebSocket connections.
 type NodeManager struct {
@@ -40,28 +254,38 @@ func NewNodeManager() *NodeManager {
 	}
 }
 
-// RegisterConn registers a new agent connection.
+// RegisterConn registers a new agent connection and starts its read loop.
+// Any existing connection for the same node is closed first.
 func (m *NodeManager) RegisterConn(nodeID string, conn *websocket.Conn) *AgentConn {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	ac := &AgentConn{
-		NodeID: nodeID,
-		Conn:   conn,
+		NodeID:  nodeID,
+		Conn:    conn,
+		pending: make(map[string]chan *model.WSMessage),
+		streams: make(map[string]chan *model.WSMessage),
+		done:    make(chan struct{}),
 	}
-	// If there's an existing connection, close it
+
 	if old, ok := m.conns[nodeID]; ok {
-		old.Conn.Close()
+		_ = old.Conn.Close()
 	}
 	m.conns[nodeID] = ac
+
+	go ac.run()
 	return ac
 }
 
-// RemoveConn removes an agent connection.
+// RemoveConn removes an agent connection (called after run() returns).
 func (m *NodeManager) RemoveConn(nodeID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.conns, nodeID)
+	if ac, ok := m.conns[nodeID]; ok {
+		// Ensure run() has terminated / resources released.
+		_ = ac.Conn.Close()
+		delete(m.conns, nodeID)
+	}
 }
 
 // GetConn returns the agent connection for a node.
@@ -102,74 +326,40 @@ func (m *NodeManager) UpdateMetrics(nodeID string, metrics *model.NodeMetrics) {
 	}
 }
 
-// ExecuteCommand sends a command to an agent and waits for the result.
+// ExecuteCommand sends an execute_command to an agent and waits for the result.
+// It delegates to the AgentConn's request router so it plays nicely with other
+// concurrent traffic (PTY streams, file ops, heartbeats).
 func (m *NodeManager) ExecuteCommand(ctx context.Context, nodeID, command string, timeout int) (*model.AgentCommandResultPayload, error) {
 	ac, ok := m.GetConn(nodeID)
 	if !ok {
 		return nil, errors.New("node is not online")
 	}
 
-	// Send command to agent
-	msg := model.WSMessage{
-		Type: model.AgentTypeCommand,
-		Payload: model.AgentCommandPayload{
-			Action:  "execute_command",
-			Command: command,
-			Timeout: timeout,
-		},
-	}
-
-	if err := ac.WriteJSON(msg); err != nil {
-		return nil, fmt.Errorf("send command: %w", err)
-	}
-
-	// Wait for result with timeout
 	timeoutDuration := time.Duration(timeout) * time.Second
-	if timeoutDuration == 0 {
+	if timeoutDuration <= 0 {
 		timeoutDuration = 60 * time.Second
 	}
 
-	resultCh := make(chan *model.AgentCommandResultPayload, 1)
-	errCh := make(chan error, 1)
-
-	go func() {
-		for {
-			_, raw, err := ac.Conn.ReadMessage()
-			if err != nil {
-				errCh <- err
-				return
-			}
-
-			var wsMsg model.WSMessage
-			if err := json.Unmarshal(raw, &wsMsg); err != nil {
-				continue
-			}
-
-			if wsMsg.Type == model.AgentTypeCommandResult {
-				payloadBytes, err := json.Marshal(wsMsg.Payload)
-				if err != nil {
-					errCh <- err
-					return
-				}
-				var result model.AgentCommandResultPayload
-				if err := json.Unmarshal(payloadBytes, &result); err != nil {
-					errCh <- err
-					return
-				}
-				resultCh <- &result
-				return
-			}
-		}
-	}()
-
-	select {
-	case result := <-resultCh:
-		return result, nil
-	case err := <-errCh:
+	reply, err := ac.Request(ctx, model.AgentTypeCommand, model.AgentCommandPayload{
+		Action:  "execute_command",
+		Command: command,
+		Timeout: timeout,
+	}, timeoutDuration+10*time.Second) // router timeout > command timeout
+	if err != nil {
 		return nil, err
-	case <-time.After(timeoutDuration):
-		return nil, errors.New("command execution timed out")
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	}
+
+	if reply.Type != model.AgentTypeCommandResult {
+		return nil, fmt.Errorf("unexpected reply type: %s", reply.Type)
+	}
+
+	payloadBytes, err := json.Marshal(reply.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+	var result model.AgentCommandResultPayload
+	if err := json.Unmarshal(payloadBytes, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal payload: %w", err)
+	}
+	return &result, nil
 }

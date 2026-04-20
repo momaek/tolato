@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/momaek/tolato/server/internal/model"
+	"github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/store"
 )
 
@@ -91,7 +92,8 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				return
 			}
 
-			deps.NodeManager.RegisterConn(existingNode.ID, conn)
+			ac := deps.NodeManager.RegisterConn(existingNode.ID, conn)
+			installSystemHandlers(deps, existingNode.ID, ac)
 			defer func() {
 				deps.NodeManager.RemoveConn(existingNode.ID)
 				_ = store.SetNodeStatus(existingNode.ID, "offline")
@@ -102,9 +104,10 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			_ = store.UpdateHeartbeat(existingNode.ID)
 
 			// Push probe config
-			pushProbeConfig(deps, existingNode.ID, conn)
+			pushProbeConfig(deps, existingNode.ID, ac)
 
-			agentReadLoop(deps, existingNode.ID, conn)
+			// Block until the router goroutine finishes.
+			<-ac.Done()
 			return
 		}
 
@@ -161,7 +164,8 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			}
 
 			// Register connection
-			deps.NodeManager.RegisterConn(node.ID, conn)
+			ac := deps.NodeManager.RegisterConn(node.ID, conn)
+			installSystemHandlers(deps, node.ID, ac)
 			defer func() {
 				deps.NodeManager.RemoveConn(node.ID)
 				_ = store.SetNodeStatus(node.ID, "offline")
@@ -171,44 +175,27 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			log.Printf("Agent registered: node=%s hostname=%s os=%s ip=%s", node.ID, reg.Hostname, reg.OS, reg.IP)
 
 			// Push probe config if available
-			pushProbeConfig(deps, node.ID, conn)
+			pushProbeConfig(deps, node.ID, ac)
 
-			// Enter normal read loop
-			agentReadLoop(deps, node.ID, conn)
+			// Block until the router goroutine finishes.
+			<-ac.Done()
 			return
 		}
 	}
 }
 
-// agentReadLoop handles ongoing heartbeat and command messages from a connected agent.
-func agentReadLoop(deps *Deps, nodeID string, conn *websocket.Conn) {
-	for {
-		_, raw, err := conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.Printf("Agent WebSocket error: %v", err)
-			}
-			break
-		}
-
-		var msg model.WSMessage
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			log.Printf("Failed to parse agent message: %v", err)
-			continue
-		}
-
-		switch msg.Type {
-		case model.AgentTypeRegister:
-			// Already registered, update info
-			handleAgentReRegister(nodeID, msg.Payload)
-
-		case model.AgentTypeHeartbeat:
-			handleAgentHeartbeat(deps, nodeID, msg.Payload)
-
-		default:
-			log.Printf("Unknown agent message type: %s", msg.Type)
-		}
-	}
+// installSystemHandlers wires heartbeat / re-register callbacks on the AgentConn
+// router. All message reading is owned by the router goroutine started by
+// NodeManager.RegisterConn.
+func installSystemHandlers(deps *Deps, nodeID string, ac *node.AgentConn) {
+	ac.SetSystemHandlers(node.SystemHandlers{
+		OnHeartbeat: func(payload any) {
+			handleAgentHeartbeat(deps, nodeID, payload)
+		},
+		OnReRegister: func(payload any) {
+			handleAgentReRegister(nodeID, payload)
+		},
+	})
 }
 
 func handleAgentReRegister(nodeID string, payload any) {
@@ -254,7 +241,7 @@ func handleAgentHeartbeat(deps *Deps, nodeID string, payload any) {
 
 // pushProbeConfig sends the current probe configuration to an agent.
 // This is called after agent registration/reconnection.
-func pushProbeConfig(deps *Deps, nodeID string, conn *websocket.Conn) {
+func pushProbeConfig(deps *Deps, nodeID string, ac *node.AgentConn) {
 	if !deps.Config.Probe.Enabled {
 		return
 	}
@@ -297,7 +284,7 @@ func pushProbeConfig(deps *Deps, nodeID string, conn *websocket.Conn) {
 		},
 	}
 
-	if err := conn.WriteJSON(msg); err != nil {
+	if err := ac.WriteJSON(msg); err != nil {
 		log.Printf("Failed to push probe_config to node %s: %v", nodeID, err)
 	} else {
 		log.Printf("Pushed probe_config to node %s (%d targets)", nodeID, len(targets))

@@ -251,7 +251,7 @@ func refreshProbeConfigForNode(deps *Deps, nodeID string) {
 	if !ok {
 		return
 	}
-	pushProbeConfig(deps, nodeID, conn.Conn)
+	pushProbeConfig(deps, nodeID, conn)
 }
 
 // ProbeUpdateNodePosition updates node canvas position.

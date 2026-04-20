@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Server, Cpu, HardDrive, Activity } from 'lucide-vue-next'
+import { ArrowLeft, Server, Cpu, HardDrive, Activity, Terminal as TerminalIcon } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -56,6 +56,17 @@ function formatTime(ts: string) {
       <Badge v-if="node" :variant="node.status === 'online' ? 'default' : 'secondary'">
         {{ node.status === 'online' ? $t('common.online') : $t('common.offline') }}
       </Badge>
+      <div class="flex-1" />
+      <Button
+        v-if="node"
+        variant="outline"
+        size="sm"
+        :disabled="node.status !== 'online'"
+        @click="router.push(`/nodes/${nodeId}/terminal`)"
+      >
+        <TerminalIcon class="h-4 w-4 mr-1" />
+        Open Terminal
+      </Button>
     </div>
 
     <div v-if="node" class="space-y-6">
