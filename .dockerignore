@@ -1,0 +1,25 @@
+.git
+.github
+.claude
+.cursor
+.idea
+.vscode
+
+**/.DS_Store
+**/node_modules
+
+# Not needed for the server image
+agent
+docs
+scripts
+docker-compose.yaml
+README.md
+**/*.md
+
+# Build outputs & local state
+web/dist
+web/.vite
+server/data
+server/.tolato-dev
+server/server
+server/config.local.yaml
