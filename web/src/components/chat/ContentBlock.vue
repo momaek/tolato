@@ -9,6 +9,6 @@ defineProps<{
 
 <template>
   <div class="prose prose-invert max-w-none text-sm leading-relaxed">
-    <MarkdownRender :text="content" />
+    <MarkdownRender :content="content" />
   </div>
 </template>

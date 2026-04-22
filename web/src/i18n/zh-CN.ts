@@ -68,11 +68,13 @@ export default {
     },
     emptyState: {
       greeting: '我能帮你管理服务器吗？',
+      subtitle: 'Tolato 通过 agent 在你的节点上执行命令。告诉我你想做什么。',
       checkNginx: '检查 nginx 状态',
       viewDisk: '查看磁盘使用情况',
       updatePackages: '更新软件包',
     },
     thinking: '思考中',
+    thoughtForAMoment: '已完成思考',
     aiThinking: 'AI 正在思考...',
     executing: '执行中...',
     sensitiveOperation: '敏感操作',

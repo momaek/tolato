@@ -1,11 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Brain, ChevronRight } from 'lucide-vue-next'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
 
 defineProps<{
   reasoning: string
@@ -15,25 +10,27 @@ const isOpen = ref(false)
 </script>
 
 <template>
-  <Collapsible v-model:open="isOpen" class="mb-2">
-    <CollapsibleTrigger
-      class="flex items-center gap-1.5 text-xs cursor-pointer opacity-70 hover:opacity-100"
+  <div>
+    <button
+      type="button"
+      class="inline-flex w-fit cursor-pointer items-center gap-1.5 text-[11px] transition-opacity hover:opacity-100"
+      :class="isOpen ? 'opacity-100' : 'opacity-70'"
       style="color: var(--muted-foreground)"
+      @click="isOpen = !isOpen"
     >
-      <Brain class="h-3.5 w-3.5" />
-      <span>{{ $t('chat.thinking') }}</span>
+      <Brain class="h-3 w-3" />
+      <span>{{ isOpen ? $t('chat.thoughtForAMoment') : $t('chat.thinking') }}</span>
       <ChevronRight
         class="h-3 w-3 transition-transform"
         :class="{ 'rotate-90': isOpen }"
       />
-    </CollapsibleTrigger>
-    <CollapsibleContent>
-      <div
-        class="mt-2 rounded-lg p-3 text-xs whitespace-pre-wrap leading-relaxed"
-        style="background-color: var(--secondary); color: var(--muted-foreground)"
-      >
-        {{ reasoning }}
-      </div>
-    </CollapsibleContent>
-  </Collapsible>
+    </button>
+    <div
+      v-if="isOpen"
+      class="mt-1.5 whitespace-pre-wrap p-3 text-xs italic leading-relaxed"
+      style="border-left: 2px solid var(--secondary); color: var(--muted-foreground)"
+    >
+      {{ reasoning }}
+    </div>
+  </div>
 </template>

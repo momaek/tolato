@@ -68,6 +68,7 @@ func (lr *LoopRunner) ReceiveConfirm(approved bool) {
 // Run executes the agent loop for a user message.
 func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 	convID := lr.conversationID
+	log.Printf("[loop] start conv=%s content_len=%d model=%s", convID, len(input.Content), lr.llmClient.Model())
 
 	// Build system prompt
 	nodes := lr.getNodeInfos()
@@ -121,9 +122,13 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 		})
 
 		if err != nil {
+			log.Printf("[loop] conv=%s round=%d LLM error: %v", convID, round, err)
 			lr.emitError("LLM error: " + err.Error())
 			return
 		}
+
+		log.Printf("[loop] conv=%s round=%d llm_result content_len=%d reasoning_len=%d tool_calls=%d",
+			convID, round, len(result.Content), len(result.Reasoning), len(result.ToolCalls))
 
 		// No tool calls → final response, done
 		if len(result.ToolCalls) == 0 {
@@ -276,6 +281,7 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 	}
 
 	// Emit done
+	log.Printf("[loop] done conv=%s new_messages=%d", convID, len(newMessages))
 	lr.eventCh <- DoneEvent{ConversationID: convID}
 }
 

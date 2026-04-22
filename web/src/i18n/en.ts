@@ -68,11 +68,13 @@ export default {
     },
     emptyState: {
       greeting: 'How can I help you manage your servers?',
+      subtitle: 'Tolato runs commands on your nodes via an agent. Describe what you want done.',
       checkNginx: 'Check nginx status',
       viewDisk: 'View disk usage',
       updatePackages: 'Update packages',
     },
     thinking: 'Thinking',
+    thoughtForAMoment: 'Thought for a moment',
     aiThinking: 'AI is thinking...',
     executing: 'Executing...',
     sensitiveOperation: 'Sensitive Operation',

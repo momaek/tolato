@@ -41,7 +41,7 @@ const commandStr = computed(() => {
 const borderClass = 'border-l-[3px]'
 
 const borderColor = computed(() => {
-  if (status.value === 'executing') return 'var(--color-warning-foreground)'
+  if (status.value === 'executing') return 'var(--primary)'
   if (status.value === 'error') return 'var(--color-error-foreground)'
   return 'var(--border)'
 })
@@ -57,7 +57,7 @@ const borderColor = computed(() => {
         backgroundColor: 'var(--card)',
       }"
     >
-      <Loader2 v-if="status === 'executing'" class="h-3.5 w-3.5 animate-spin" style="color: var(--color-warning-foreground)" />
+      <Loader2 v-if="status === 'executing'" class="h-3.5 w-3.5 animate-spin" style="color: var(--primary)" />
       <CheckCircle v-else-if="status === 'success'" class="h-3.5 w-3.5" style="color: var(--color-success-foreground)" />
       <XCircle v-else class="h-3.5 w-3.5" style="color: var(--color-error-foreground)" />
 

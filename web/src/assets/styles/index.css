@@ -12,51 +12,58 @@
   src: local('Geist Mono');
 }
 
-/* Light theme */
+/* Light theme — warm off-white; dark is canonical, light is supported alt.
+   Orange darkens to #D66E00 to hit WCAG AA on light surfaces. */
 :root.light {
-  --background: #FFFFFF;
-  --foreground: #111111;
+  --background: #FAFAF7;
+  --foreground: #18181B;
 
-  --card: #F5F5F5;
-  --card-foreground: #111111;
+  --card: #F2F0EA;
+  --card-foreground: #18181B;
 
   --popover: #FFFFFF;
-  --popover-foreground: #111111;
+  --popover-foreground: #18181B;
 
-  --primary: #FF8400;
+  --primary: #D66E00;
   --primary-foreground: #FFFFFF;
 
-  --secondary: #F0F0F0;
-  --secondary-foreground: #111111;
+  --secondary: #EDEBE5;
+  --secondary-foreground: #18181B;
 
-  --muted: #F0F0F0;
-  --muted-foreground: #6B7280;
+  --muted: #EDEBE5;
+  --muted-foreground: #6B6A63;
 
-  --accent: #F0F0F0;
-  --accent-foreground: #111111;
+  --accent: #EDEBE5;
+  --accent-foreground: #18181B;
 
-  --destructive: #FF5C33;
+  --destructive: #DC2626;
   --destructive-foreground: #FFFFFF;
 
-  --border: #E5E5E5;
-  --input: #E5E5E5;
-  --ring: #FF8400;
+  --border: #E3E0D8;
+  --input: #E3E0D8;
+  --ring: #D66E00;
 
   --color-success: #ECFDF5;
-  --color-success-foreground: #059669;
-  --color-warning: #FFF7ED;
-  --color-warning-foreground: #EA580C;
+  --color-success-foreground: #047857;
+  --color-warning: #FFF4E6;
+  --color-warning-foreground: #C2410C;
   --color-error: #FEF2F2;
-  --color-error-foreground: #DC2626;
+  --color-error-foreground: #B91C1C;
 
-  --sidebar: #FAFAFA;
-  --sidebar-foreground: #111111;
-  --sidebar-primary: #FF8400;
+  --sidebar: #F2F0EA;
+  --sidebar-foreground: #18181B;
+  --sidebar-primary: #D66E00;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #F0F0F0;
-  --sidebar-accent-foreground: #111111;
-  --sidebar-border: #E5E5E5;
-  --sidebar-ring: #FF8400;
+  --sidebar-accent: #E3E0D8;
+  --sidebar-accent-foreground: #18181B;
+  --sidebar-border: rgba(24, 24, 27, 0.08);
+  --sidebar-ring: #D66E00;
+
+  --chart-1: #D66E00;
+  --chart-2: #047857;
+  --chart-3: #B91C1C;
+  --chart-4: #6B6A63;
+  --chart-5: #18181B;
 
   color-scheme: light;
 }
@@ -114,6 +121,8 @@
   --chart-3: #FF5C33;
   --chart-4: #B8B9B6;
   --chart-5: #FFFFFF;
+
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -164,12 +173,6 @@
     font-family: 'Geist', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-  }
-  html {
-    color-scheme: dark;
-  }
-  :root.light html, html:has(:root.light) {
-    color-scheme: light;
   }
   code, pre, .font-mono {
     font-family: 'Geist Mono', ui-monospace, monospace;

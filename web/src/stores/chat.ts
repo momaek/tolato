@@ -2,16 +2,27 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getConversations, getConversation, createConversation, deleteConversation } from '@/services/api'
 import { wsService } from '@/services/ws'
-import type { ConversationSummary, CreateConversationRequest, MessageItem, ToolCallItem } from '@/types/api'
+import type { ConversationSummary, CreateConversationRequest, MessageItem, MessageSegment } from '@/types/api'
 import type { WSMessage, WSReasoningEvent, WSContentEvent, WSToolCallEvent, WSToolResultEvent, WSConfirmRequestEvent, WSErrorEvent } from '@/types/ws'
 import { WS_TYPE } from '@/types/ws'
 
 export type ConversationStatus = 'idle' | 'streaming' | 'tool_exec' | 'confirming' | 'error'
 
 export interface StreamingAssistant {
+  /**
+   * Stable id reused when the streaming turn is committed to `messages`. Lets
+   * the renderer key the same AssistantMessage instance across the handoff so
+   * markdown isn't re-parsed (no flash of re-hydrated content).
+   */
+  id: string
   reasoning: string
-  content: string
-  toolCalls: ToolCallItem[]
+  /**
+   * Segments in the order events arrived on the wire. A single agent turn may
+   * span multiple LLM rounds (content → tool_call → content → …), so we can't
+   * flatten into separate `content` and `toolCalls` buckets without losing
+   * the interleaving.
+   */
+  segments: MessageSegment[]
 }
 
 export interface ConfirmRequest {
@@ -53,10 +64,8 @@ export const useChatStore = defineStore('chat', () => {
       if (!convId || !msg.payload) return
       const payload = msg.payload as WSReasoningEvent
       const state = getOrCreateState(convId)
-      if (!state.streaming) {
-        state.streaming = { reasoning: '', content: '', toolCalls: [] }
-      }
-      state.streaming.reasoning += payload.delta
+      ensureStreaming(state)
+      state.streaming!.reasoning += payload.delta
       state.status = 'streaming'
     })
 
@@ -65,10 +74,16 @@ export const useChatStore = defineStore('chat', () => {
       if (!convId || !msg.payload) return
       const payload = msg.payload as WSContentEvent
       const state = getOrCreateState(convId)
-      if (!state.streaming) {
-        state.streaming = { reasoning: '', content: '', toolCalls: [] }
+      ensureStreaming(state)
+      const segs = state.streaming!.segments
+      const last = segs[segs.length - 1]
+      // Coalesce consecutive content deltas into the last content segment so
+      // markdown parses as one block; start a fresh segment after a tool_call.
+      if (last && last.type === 'content') {
+        last.text += payload.delta
+      } else {
+        segs.push({ type: 'content', text: payload.delta })
       }
-      state.streaming.content += payload.delta
       state.status = 'streaming'
     })
 
@@ -77,13 +92,10 @@ export const useChatStore = defineStore('chat', () => {
       if (!convId || !msg.payload) return
       const payload = msg.payload as WSToolCallEvent
       const state = getOrCreateState(convId)
-      if (!state.streaming) {
-        state.streaming = { reasoning: '', content: '', toolCalls: [] }
-      }
-      state.streaming.toolCalls.push({
-        id: payload.id,
-        tool: payload.tool,
-        args: payload.args,
+      ensureStreaming(state)
+      state.streaming!.segments.push({
+        type: 'tool_call',
+        toolCall: { id: payload.id, tool: payload.tool, args: payload.args },
       })
       state.status = 'tool_exec'
     })
@@ -93,10 +105,11 @@ export const useChatStore = defineStore('chat', () => {
       if (!convId || !msg.payload) return
       const payload = msg.payload as WSToolResultEvent
       const state = getOrCreateState(convId)
-      if (state.streaming) {
-        const tc = state.streaming.toolCalls.find((t) => t.id === payload.id)
-        if (tc) {
-          tc.result = payload.result as any
+      if (!state.streaming) return
+      for (const seg of state.streaming.segments) {
+        if (seg.type === 'tool_call' && seg.toolCall.id === payload.id) {
+          seg.toolCall.result = payload.result as any
+          break
         }
       }
     })
@@ -118,17 +131,24 @@ export const useChatStore = defineStore('chat', () => {
       const convId = msg.conversation_id
       if (!convId) return
       const state = getOrCreateState(convId)
-      // Finalize streaming message into messages list
+      // Finalize streaming: keep the interleaved segments on the message so the
+      // renderer preserves chronological order (content → tool_call → content).
       if (state.streaming) {
-        const assistantMsg: MessageItem = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: state.streaming.content || undefined,
-          reasoning: state.streaming.reasoning || undefined,
-          tool_calls: state.streaming.toolCalls.length > 0 ? state.streaming.toolCalls : undefined,
-          created_at: new Date().toISOString(),
+        const { id, reasoning, segments } = state.streaming
+        // Drop trailing empty content segment if any.
+        const cleaned = segments.filter((s) => s.type !== 'content' || s.text.length > 0)
+        if (cleaned.length > 0 || reasoning) {
+          const assistantMsg: MessageItem = {
+            // Reuse the streaming id so ChatMessages can key the same
+            // AssistantMessage across the streaming → finalized swap.
+            id,
+            role: 'assistant',
+            reasoning: reasoning || undefined,
+            segments: cleaned,
+            created_at: new Date().toISOString(),
+          }
+          state.messages.push(assistantMsg)
         }
-        state.messages.push(assistantMsg)
         state.streaming = null
       }
       state.confirmRequest = null
@@ -173,6 +193,12 @@ export const useChatStore = defineStore('chat', () => {
 
   registerWSHandlers()
   watchConnectionRecovery()
+
+  function ensureStreaming(state: ConversationState) {
+    if (!state.streaming) {
+      state.streaming = { id: crypto.randomUUID(), reasoning: '', segments: [] }
+    }
+  }
 
   function getOrCreateState(convId: string): ConversationState {
     let state = conversationStates.value.get(convId)

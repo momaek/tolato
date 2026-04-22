@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Separator } from '@/components/ui/separator'
 import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -89,8 +88,6 @@ function handleConfirm(id: string, approved: boolean) {
       @quick-action="handleQuickAction"
       @confirm="handleConfirm"
     />
-
-    <Separator />
 
     <ChatInput
       ref="chatInputRef"

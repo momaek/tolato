@@ -100,6 +100,13 @@ func (c *Client) buildSDKClient(cfg ClientConfig) *openai.Client {
 	return &client
 }
 
+// Model returns the configured model name.
+func (c *Client) Model() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.config.Model
+}
+
 // ChatStream sends a streaming chat completion request.
 func (c *Client) ChatStream(ctx context.Context, messages []ChatMessage, callback StreamCallback) (*CompletionResult, error) {
 	c.mu.RLock()

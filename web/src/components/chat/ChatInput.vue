@@ -2,8 +2,6 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Send, Square } from 'lucide-vue-next'
-import { Textarea } from '@/components/ui/textarea'
-import { Button } from '@/components/ui/button'
 import type { ConversationStatus } from '@/stores/chat'
 
 const props = defineProps<{
@@ -19,6 +17,7 @@ const { t } = useI18n()
 const input = ref('')
 
 const isDisabled = computed(() => ['streaming', 'tool_exec', 'confirming'].includes(props.status))
+const isStreaming = computed(() => ['streaming', 'tool_exec'].includes(props.status))
 
 const placeholderMap: Record<ConversationStatus, string> = {
   idle: 'chat.placeholder.idle',
@@ -40,7 +39,7 @@ function handleSend() {
 function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
-    if (!isDisabled) {
+    if (!isDisabled.value) {
       handleSend()
     }
   }
@@ -54,34 +53,49 @@ defineExpose({ fillInput })
 </script>
 
 <template>
-  <div class="px-5 py-4">
-    <div class="relative">
-      <Textarea
+  <div class="px-5 py-4" style="border-top: 1px solid var(--border)">
+    <div class="relative mx-auto w-full max-w-[780px]">
+      <textarea
         v-model="input"
         :placeholder="placeholder"
         :disabled="isDisabled"
-        class="min-h-[52px] resize-none pr-14"
         :rows="1"
+        class="chat-composer w-full resize-none rounded-[12px] py-3.5 pl-4 pr-14 text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        style="background-color: var(--secondary); color: var(--foreground); min-height: 52px; border: none"
         @keydown="onKeydown"
       />
-      <Button
-        v-if="status === 'streaming' || status === 'tool_exec'"
-        size="icon"
-        variant="destructive"
-        class="absolute bottom-2 right-2 h-8 w-8 rounded-full"
+      <button
+        v-if="isStreaming"
+        type="button"
+        class="absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full transition-opacity hover:opacity-90"
+        :style="{
+          backgroundColor: 'var(--destructive)',
+          color: 'var(--destructive-foreground)',
+        }"
         @click="emit('stop')"
       >
-        <Square class="h-3 w-3" />
-      </Button>
-      <Button
+        <Square class="h-3 w-3" fill="currentColor" />
+      </button>
+      <button
         v-else
-        size="icon"
-        class="absolute bottom-2 right-2 h-8 w-8 rounded-full"
+        type="button"
+        class="absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        :style="{
+          backgroundColor: 'var(--primary)',
+          color: 'var(--primary-foreground)',
+        }"
         :disabled="isDisabled || !input.trim()"
         @click="handleSend"
       >
         <Send class="h-4 w-4" />
-      </Button>
+      </button>
     </div>
   </div>
 </template>
+
+<style scoped>
+.chat-composer::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.8;
+}
+</style>

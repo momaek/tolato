@@ -70,7 +70,17 @@ export interface MessageItem {
   tool_calls?: ToolCallItem[]
   tool_call_id?: string
   created_at: string
+  /**
+   * Streaming-only: chronological interleaving of content chunks and tool calls.
+   * When present, the renderer uses this in preference to `content` + `tool_calls`
+   * (which lose ordering when a turn spans multiple LLM rounds).
+   */
+  segments?: MessageSegment[]
 }
+
+export type MessageSegment =
+  | { type: 'content'; text: string }
+  | { type: 'tool_call'; toolCall: ToolCallItem }
 
 export interface ToolCallItem {
   id: string

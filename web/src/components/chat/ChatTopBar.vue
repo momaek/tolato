@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { Bot, Check, Pencil } from 'lucide-vue-next'
+import { Brain, Check, Pencil, Server } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -85,16 +85,20 @@ function onNodeChange(val: any) {
   selectedNode.value = v
   emit('update:defaultNodeId', v === 'all' ? undefined : v)
 }
+
+const pickerClass = 'h-8 gap-1.5 rounded-lg border-border/80 bg-transparent px-2.5 text-xs font-normal'
 </script>
 
 <template>
-  <div class="flex items-center gap-3 border-b px-5 py-3">
-    <div class="flex items-center gap-2">
-      <Bot class="h-4 w-4" style="color: var(--muted-foreground)" />
+  <div
+    class="flex h-14 items-center gap-3 px-5"
+    style="border-bottom: 1px solid var(--border)"
+  >
+    <div class="flex min-w-0 flex-1 items-center gap-2">
       <template v-if="isEditing">
         <Input
           v-model="editTitle"
-          class="h-7 w-48 text-sm"
+          class="h-7 w-56 text-sm"
           @keyup.enter="saveTitle"
           @blur="saveTitle"
         />
@@ -103,26 +107,34 @@ function onNodeChange(val: any) {
         </Button>
       </template>
       <template v-else>
-        <span class="text-sm font-medium cursor-pointer" @click="isEditing = true">
+        <span
+          class="cursor-pointer truncate text-sm font-medium"
+          style="color: var(--foreground)"
+          @click="isEditing = true"
+        >
           {{ title || $t('chat.newConversation') }}
         </span>
         <Pencil
-          class="h-3 w-3 cursor-pointer opacity-50 hover:opacity-100"
+          class="h-3 w-3 cursor-pointer opacity-50 transition-opacity hover:opacity-100"
+          style="color: var(--muted-foreground)"
           @click="isEditing = true"
         />
       </template>
     </div>
-    <div class="flex-1" />
+
     <Select :model-value="selectedModel" @update:model-value="onModelChange">
-      <SelectTrigger class="w-[160px]">
+      <SelectTrigger size="sm" :class="pickerClass">
+        <Brain class="h-3.5 w-3.5" style="color: var(--muted-foreground)" />
         <SelectValue :placeholder="$t('chat.selectModel')" />
       </SelectTrigger>
       <SelectContent>
         <SelectItem v-for="m in modelOptions" :key="m" :value="m">{{ m }}</SelectItem>
       </SelectContent>
     </Select>
+
     <Select :model-value="selectedNode" @update:model-value="onNodeChange">
-      <SelectTrigger class="w-[160px]">
+      <SelectTrigger size="sm" :class="pickerClass">
+        <Server class="h-3.5 w-3.5" style="color: var(--muted-foreground)" />
         <SelectValue :placeholder="$t('chat.defaultNode')" />
       </SelectTrigger>
       <SelectContent>

@@ -10,13 +10,29 @@ defineProps<{
 </script>
 
 <template>
-  <div class="px-5 py-3">
+  <div class="flex flex-col gap-2.5">
     <ThinkingBlock v-if="message.reasoning" :reasoning="message.reasoning" />
-    <ContentBlock v-if="message.content" :content="message.content" />
-    <ToolCallCard
-      v-for="tc in message.tool_calls"
-      :key="tc.id"
-      :tool-call="tc"
-    />
+    <!-- If segments are present (from streaming), render in chronological order. -->
+    <template v-if="message.segments && message.segments.length">
+      <template v-for="(seg, i) in message.segments" :key="i">
+        <ContentBlock
+          v-if="seg.type === 'content' && seg.text"
+          :content="seg.text"
+        />
+        <ToolCallCard
+          v-else-if="seg.type === 'tool_call'"
+          :tool-call="seg.toolCall"
+        />
+      </template>
+    </template>
+    <!-- Fallback for DB-loaded messages: one round per message, content then tools. -->
+    <template v-else>
+      <ContentBlock v-if="message.content" :content="message.content" />
+      <ToolCallCard
+        v-for="tc in message.tool_calls"
+        :key="tc.id"
+        :tool-call="tc"
+      />
+    </template>
   </div>
 </template>

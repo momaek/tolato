@@ -5,10 +5,10 @@ defineProps<{
 </script>
 
 <template>
-  <div class="flex justify-end px-5 py-3">
+  <div class="flex justify-end">
     <div
-      class="max-w-[70%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap"
-      style="background-color: var(--primary); color: var(--primary-foreground)"
+      class="max-w-[70%] whitespace-pre-wrap rounded-[999px] px-4 py-2.5 text-sm leading-relaxed"
+      style="background-color: var(--secondary); color: var(--foreground)"
     >
       {{ content }}
     </div>
