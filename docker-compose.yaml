@@ -8,7 +8,10 @@ services:
       POSTGRES_PASSWORD: tolato
       POSTGRES_DB: tolato
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Bind-mount so the data dir lives next to docker-compose.yaml — easy to
+      # back up (tar) or migrate (rsync). On first start Postgres chowns this
+      # to UID 70. On SELinux systems append `:Z`.
+      - ./pgdata:/var/lib/postgresql/data
     # Not published to the host by default. Uncomment for local DB access.
     # ports:
     #   - "5432:5432"
@@ -27,11 +30,10 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${SERVER_PORT:127.0.0.1:8080}:8080"
+      # Bound to loopback by default. Put a reverse proxy in front for public access,
+      # or override with e.g. SERVER_PORT=0.0.0.0:8080 to expose directly.
+      - "${SERVER_PORT:-127.0.0.1:8080}:8080"
     volumes:
       # Copy config.example.yaml to config.yaml, edit it, then start.
       # DSN must reference the postgres service name (host=postgres).
       - ./config.yaml:/app/config.yaml:ro
-
-volumes:
-  pgdata:

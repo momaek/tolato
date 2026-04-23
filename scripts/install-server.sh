@@ -18,7 +18,8 @@ BRANCH="${TOLATO_BRANCH:-main}"
 VERSION="${TOLATO_VERSION:-latest}"
 DIR="./tolato"
 ADMIN_USER="admin"
-PORT="8080"
+# Empty = use compose default (127.0.0.1:8080). User can pass --port to override.
+PORT=""
 
 # ----- args -----
 while [[ $# -gt 0 ]]; do
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
+
+# Port used for local health check + URL in the final banner.
+LOCAL_PORT="${PORT##*:}"
+LOCAL_PORT="${LOCAL_PORT:-8080}"
 
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 
@@ -96,14 +101,18 @@ sed \
 chmod 600 config.yaml
 
 # ----- up -----
-echo ">>> starting containers (TOLATO_VERSION=${VERSION}, port=${PORT})"
-TOLATO_VERSION="${VERSION}" SERVER_PORT="${PORT}" \
-  docker compose up -d
+echo ">>> starting containers (TOLATO_VERSION=${VERSION}, port=${PORT:-127.0.0.1:8080})"
+# Only set SERVER_PORT if --port was given; otherwise let compose apply its default.
+if [[ -n "$PORT" ]]; then
+  TOLATO_VERSION="${VERSION}" SERVER_PORT="${PORT}" docker compose up -d
+else
+  TOLATO_VERSION="${VERSION}" docker compose up -d
+fi
 
 # ----- wait for server -----
-echo -n ">>> waiting for server on :${PORT} "
+echo -n ">>> waiting for server on :${LOCAL_PORT} "
 for _ in $(seq 1 30); do
-  if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/" 2>/dev/null; then
+  if curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/" 2>/dev/null; then
     echo "ok"
     break
   fi
@@ -117,8 +126,9 @@ cat <<EOF
 ╔════════════════════════════════════════════════════════════════╗
 ║  Tolato server is up.                                          ║
 ╠════════════════════════════════════════════════════════════════╣
-║  URL:      http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo "<host>"):${PORT}
-║            (or http://localhost:${PORT} on the same machine)
+║  URL:      http://localhost:${LOCAL_PORT}
+║            (bound to 127.0.0.1 by default — put a reverse proxy
+║             in front, or re-run with --port 0.0.0.0:${LOCAL_PORT} to expose)
 ║  Username: ${ADMIN_USER}
 ║  Password: ${ADMIN_PASS}
 ╚════════════════════════════════════════════════════════════════╝

@@ -8,3 +8,5 @@ server/config.local.yaml
 agent/agent
 # docker-compose runtime config (copy of config.example.yaml with real secrets)
 /config.yaml
+# docker-compose postgres data (bind-mount)
+/pgdata/
