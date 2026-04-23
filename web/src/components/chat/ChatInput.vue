@@ -15,6 +15,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const input = ref('')
+// Tracks whether an IME composition (Chinese/Japanese/Korean) is in progress.
+// While true, Enter is the IME's "commit candidate" key and must NOT trigger
+// send — otherwise we'd either fire with half-composed text or (depending on
+// the browser) block the IME commit.
+const isComposing = ref(false)
 
 const isDisabled = computed(() => ['streaming', 'tool_exec', 'confirming'].includes(props.status))
 const isStreaming = computed(() => ['streaming', 'tool_exec'].includes(props.status))
@@ -37,11 +42,13 @@ function handleSend() {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault()
-    if (!isDisabled.value) {
-      handleSend()
-    }
+  if (event.key !== 'Enter' || event.shiftKey) return
+  // keyCode 229 is the legacy "IME in progress" signal; `isComposing` is the
+  // modern one. Belt-and-braces — different browsers are inconsistent.
+  if (event.isComposing || event.keyCode === 229 || isComposing.value) return
+  event.preventDefault()
+  if (!isDisabled.value) {
+    handleSend()
   }
 }
 
@@ -63,6 +70,8 @@ defineExpose({ fillInput })
         class="chat-composer w-full resize-none rounded-[12px] py-3.5 pl-4 pr-14 text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-60"
         style="background-color: var(--secondary); color: var(--foreground); min-height: 52px; border: none"
         @keydown="onKeydown"
+        @compositionstart="isComposing = true"
+        @compositionend="isComposing = false"
       />
       <button
         v-if="isStreaming"
