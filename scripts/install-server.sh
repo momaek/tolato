@@ -98,7 +98,10 @@ sed \
   -e "s|^\(  username:\) admin$|\1 ${ADMIN_USER}|" \
   -e "s|^\(  password:\) admin$|\1 ${ADMIN_PASS}|" \
   config.example.yaml > config.yaml
-chmod 600 config.yaml
+# 0644 so the non-root container user (UID 1000) can read the bind-mount.
+# Treating the host box as trusted — anyone with shell access could read
+# docker volumes anyway.
+chmod 644 config.yaml
 
 # ----- up -----
 echo ">>> starting containers (TOLATO_VERSION=${VERSION}, port=${PORT:-127.0.0.1:8080})"
