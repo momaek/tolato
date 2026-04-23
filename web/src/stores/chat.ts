@@ -131,6 +131,9 @@ export const useChatStore = defineStore('chat', () => {
       const convId = msg.conversation_id
       if (!convId) return
       const state = getOrCreateState(convId)
+      // Note: do NOT touch state.error here. On some paths (e.g. blacklisted
+      // tool call) the loop emits ERROR *before* DONE; the error must survive
+      // until the next user message clears it.
       // Finalize streaming: keep the interleaved segments on the message so the
       // renderer preserves chronological order (content → tool_call → content).
       if (state.streaming) {
@@ -152,8 +155,9 @@ export const useChatStore = defineStore('chat', () => {
         state.streaming = null
       }
       state.confirmRequest = null
-      state.status = 'idle'
-      state.error = null
+      if (state.status !== 'error') {
+        state.status = 'idle'
+      }
     })
 
     wsService.on(WS_TYPE.ERROR, (msg: WSMessage) => {
@@ -273,6 +277,9 @@ export const useChatStore = defineStore('chat', () => {
       state.status = 'error'
       return
     }
+
+    // New turn → clear any error from a previous turn so the banner goes away.
+    state.error = null
 
     // Add user message to local state
     state.messages.push({

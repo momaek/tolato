@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { ArrowDown } from 'lucide-vue-next'
+import { ArrowDown, AlertCircle } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import UserMessage from './UserMessage.vue'
 import AssistantMessage from './AssistantMessage.vue'
@@ -16,6 +16,7 @@ const props = defineProps<{
   streaming: StreamingAssistant | null
   status: ConversationStatus
   confirmRequest: ConfirmRequest | null
+  error: string | null
 }>()
 
 const emit = defineEmits<{
@@ -78,6 +79,21 @@ const showEmptyIndicator = computed(() =>
 
       <!-- Streaming indicator: show only when nothing has arrived yet -->
       <StreamingIndicator v-if="showEmptyIndicator" />
+
+      <!-- Error banner: LLM / tool / policy failures surfaced from the server.
+           Persists after DONE so the user actually sees it; cleared on the
+           next user message. -->
+      <div
+        v-if="error"
+        class="flex items-start gap-2.5 rounded-lg border px-4 py-3 text-sm"
+        style="background-color: color-mix(in oklab, var(--destructive) 12%, transparent); border-color: color-mix(in oklab, var(--destructive) 35%, transparent); color: var(--destructive-foreground, var(--foreground))"
+        role="alert"
+      >
+        <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" style="color: var(--destructive)" />
+        <div class="flex-1 whitespace-pre-wrap break-words leading-relaxed">
+          {{ error }}
+        </div>
+      </div>
     </div>
 
     <!-- Scroll to bottom button -->

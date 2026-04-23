@@ -85,6 +85,7 @@ function handleConfirm(id: string, approved: boolean) {
       :streaming="chatStore.activeState?.streaming || null"
       :status="chatStore.activeState?.status || 'idle'"
       :confirm-request="chatStore.activeState?.confirmRequest || null"
+      :error="chatStore.activeState?.error || null"
       @quick-action="handleQuickAction"
       @confirm="handleConfirm"
     />
