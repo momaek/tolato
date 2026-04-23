@@ -27,7 +27,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${SERVER_PORT:-8080}:8080"
+      - "${SERVER_PORT:127.0.0.1:8080}:8080"
     volumes:
       # Copy config.example.yaml to config.yaml, edit it, then start.
       # DSN must reference the postgres service name (host=postgres).
