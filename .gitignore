@@ -6,3 +6,5 @@ tolato-server
 # local config overrides + built binaries (not meant to be committed)
 server/config.local.yaml
 agent/agent
+# docker-compose runtime config (copy of config.example.yaml with real secrets)
+/config.yaml

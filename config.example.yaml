@@ -1,0 +1,40 @@
+# Tolato server config for docker-compose deployment.
+# Copy this to config.yaml and edit the marked values before `docker compose up`.
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  # WebSocket & CORS allowed origins. Empty = same-origin only.
+  # Set to the public URL(s) your users / agents will hit.
+  # Examples: ["https://tolato.example.com"]
+  allowed_origins: []
+  install_script_url: https://raw.githubusercontent.com/momaek/tolato/main/scripts/install.sh
+  # Public URL behind your reverse proxy. Used to generate the agent install
+  # command and WebSocket URL. Leave empty only for same-host testing.
+  # Example: https://tolato.example.com
+  public_address: ""
+
+database:
+  driver: postgres
+  # `postgres` = the compose service name. Keep user/pass/db in sync with the
+  # postgres service in docker-compose.yaml.
+  dsn: host=postgres user=tolato password=tolato dbname=tolato port=5432 sslmode=disable
+
+security:
+  # CHANGE ME — 32 bytes, used to encrypt secrets at rest in the DB.
+  encrypt_key: "tolato-default-encrypt-key-32b!"
+  # CHANGE ME — signs JWT session tokens.
+  jwt_secret: "tolato-jwt-secret-change-me"
+  agent_token_expiry: 0s # 0 = never expires
+
+defaults:
+  heartbeat_interval: 30
+  command_timeout: 60
+  max_rounds: 20
+  context_rounds: 20
+  output_truncate_lines: 100
+
+auth:
+  # CHANGE ME — login credentials for the web UI.
+  username: admin
+  password: admin

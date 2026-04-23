@@ -2,14 +2,36 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: tolato-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: tolato
       POSTGRES_PASSWORD: tolato
       POSTGRES_DB: tolato
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Not published to the host by default. Uncomment for local DB access.
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tolato -d tolato"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    # Pin to a concrete tag in production, e.g. ghcr.io/momaek/tolato-server:v0.1.0
+    image: ghcr.io/momaek/tolato-server:${TOLATO_VERSION:-latest}
+    container_name: tolato-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    volumes:
+      # Copy config.example.yaml to config.yaml, edit it, then start.
+      # DSN must reference the postgres service name (host=postgres).
+      - ./config.yaml:/app/config.yaml:ro
 
 volumes:
   pgdata:

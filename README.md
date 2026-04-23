@@ -1,5 +1,7 @@
 # Tolato
 
+> English · [简体中文](README.zh-CN.md)
+
 Natural-language server management. Talk to a chat UI; it drives remote nodes through an agent that executes commands, collects metrics, and probes network links.
 
 ## Architecture
@@ -25,7 +27,63 @@ Natural-language server management. Talk to a chat UI; it drives remote nodes th
 - **web/** — Vue 3 + Vite + shadcn-vue. Chat, nodes, audit log, settings, topology monitor, alerts.
 - **docs/** — Design, loop architecture, frontend architecture, nodeprobe, implementation plan.
 
-## Quick start
+## Deploy (docker-compose)
+
+The included [docker-compose.yaml](docker-compose.yaml) runs the server image from GHCR plus a Postgres container. The web UI is embedded in the server binary, so there's nothing else to run.
+
+Requirements: Docker with Compose v2.
+
+### One-line install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/momaek/tolato/main/scripts/install-server.sh | bash
+```
+
+Downloads `docker-compose.yaml` + `config.example.yaml` into `./tolato/`, generates random `encrypt_key` / `jwt_secret` / admin password, and runs `docker compose up -d`. Prints the login credentials at the end — **save them, they aren't shown again.**
+
+Flags: `--dir <path>` target directory, `--port <port>` host port (default `8080`), `--admin-user <name>` (default `admin`). Env: `TOLATO_VERSION=v0.1.0` pins the image tag.
+
+### Manual
+
+```sh
+# 1. Create the runtime config from the sample.
+cp config.example.yaml config.yaml
+
+# 2. Edit config.yaml — change every `CHANGE ME` marker:
+#      security.encrypt_key   (32 bytes, encrypts secrets at rest)
+#      security.jwt_secret    (signs session tokens)
+#      auth.username / auth.password  (web UI login)
+#    and set:
+#      server.public_address  (your public URL, e.g. https://tolato.example.com)
+#      server.allowed_origins (same URL, for CORS + WS origin check)
+
+# 3. Start.
+docker compose up -d
+```
+
+Open `http://localhost:8080` and log in with the `auth` credentials.
+
+**Version pinning.** The compose file uses `${TOLATO_VERSION:-latest}`. For reproducible deploys pin to a release tag:
+
+```sh
+TOLATO_VERSION=v0.1.0 docker compose up -d
+```
+
+**Upgrade.**
+
+```sh
+docker compose pull server && docker compose up -d
+```
+
+Schema migrations run automatically on startup.
+
+**Behind a reverse proxy** (Caddy / Nginx / Traefik): terminate TLS upstream, forward `/` to the server container on port 8080, and make sure WebSocket upgrades are preserved. Set `server.public_address` to the proxied URL so the agent install command and WebSocket URL are generated correctly.
+
+**Postgres credentials.** The defaults in compose and `config.example.yaml` match (`tolato/tolato/tolato`). If you change `POSTGRES_PASSWORD` in the compose file, update `database.dsn` in `config.yaml` to match — the YAML config does not interpolate env vars.
+
+**Agent install.** From the **Nodes** page in the web UI, click *Add Node* to generate a one-time token and the `curl | sudo bash` install command — point it at `server.public_address`.
+
+## Quick start (local dev)
 
 ### Prerequisites
 
