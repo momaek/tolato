@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Search, Copy, Check } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Plus, Search, Copy, Check, Terminal as TerminalIcon, Eye } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -33,6 +34,7 @@ import { useNodesStore } from '@/stores/nodes'
 import type { CreateNodeResponse } from '@/types/api'
 
 const { t } = useI18n()
+const router = useRouter()
 const nodesStore = useNodesStore()
 
 const searchQuery = ref('')
@@ -210,7 +212,7 @@ async function handleDeleteNode(id: string) {
             <TableHead>{{ $t('nodes.memory') }}</TableHead>
             <TableHead>{{ $t('nodes.disk') }}</TableHead>
             <TableHead>{{ $t('nodes.lastHeartbeat') }}</TableHead>
-            <TableHead class="w-[80px]">{{ $t('common.actions') }}</TableHead>
+            <TableHead class="w-[180px] text-right">{{ $t('common.actions') }}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -235,14 +237,33 @@ async function handleDeleteNode(id: string) {
             <TableCell>{{ formatPercent(node.disk) }}</TableCell>
             <TableCell>{{ formatTime(node.last_heartbeat) }}</TableCell>
             <TableCell>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="text-destructive"
-                @click="handleDeleteNode(node.id)"
-              >
-                {{ $t('common.remove') }}
-              </Button>
+              <div class="flex items-center justify-end gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  :title="$t('nodes.openTerminal')"
+                  :disabled="node.status !== 'online'"
+                  @click="router.push(`/nodes/${node.id}/terminal`)"
+                >
+                  <TerminalIcon class="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  :title="$t('nodes.viewDetail')"
+                  @click="router.push(`/nodes/${node.id}`)"
+                >
+                  <Eye class="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="text-destructive"
+                  @click="handleDeleteNode(node.id)"
+                >
+                  {{ $t('common.remove') }}
+                </Button>
+              </div>
             </TableCell>
           </TableRow>
           <TableRow v-if="filteredNodes.length === 0">

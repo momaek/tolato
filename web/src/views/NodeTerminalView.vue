@@ -22,6 +22,9 @@ import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/stores/app'
 import { useTheme } from '@/composables/useTheme'
 import { createTerminalWs } from '@/services/terminalWs'
+import { getNode } from '@/services/api'
+import type { NodeDetail } from '@/types/api'
+import { Badge } from '@/components/ui/badge'
 
 const route = useRoute()
 const router = useRouter()
@@ -29,6 +32,7 @@ const appStore = useAppStore()
 const { theme } = useTheme()
 
 const nodeId = route.params.nodeId as string
+const nodeInfo = ref<NodeDetail | null>(null)
 
 // --- Terminal state ---
 const termContainer = ref<HTMLDivElement | null>(null)
@@ -308,6 +312,13 @@ onMounted(async () => {
   mountTerminal()
   openSession()
   window.addEventListener('resize', handleResize)
+  getNode(nodeId)
+    .then((n) => {
+      nodeInfo.value = n
+    })
+    .catch(() => {
+      /* ignore — header degrades to just the id */
+    })
 })
 
 onBeforeUnmount(() => {
@@ -352,8 +363,26 @@ function formatSize(n: number) {
       <Button variant="ghost" size="icon" @click="router.push(`/nodes/${nodeId}`)">
         <ArrowLeft class="h-4 w-4" />
       </Button>
-      <TerminalIcon class="h-4 w-4" style="color: var(--primary)" />
-      <h1 class="text-sm font-semibold">{{ nodeId }}</h1>
+      <TerminalIcon class="h-4 w-4 shrink-0" style="color: var(--primary)" />
+      <h1 class="text-sm font-semibold truncate">
+        {{ nodeInfo?.alias || nodeInfo?.name || nodeId }}
+      </h1>
+      <Badge
+        v-if="nodeInfo"
+        :style="{
+          backgroundColor: nodeInfo.status === 'online' ? 'var(--color-success)' : 'var(--color-error)',
+          color: nodeInfo.status === 'online' ? 'var(--color-success-foreground)' : 'var(--color-error-foreground)',
+        }"
+      >
+        {{ nodeInfo.status === 'online' ? $t('common.online') : $t('common.offline') }}
+      </Badge>
+      <span v-if="nodeInfo?.ip" class="font-mono text-xs" style="color: var(--muted-foreground)">
+        {{ nodeInfo.ip }}
+      </span>
+      <span v-if="nodeInfo?.os" class="text-xs" style="color: var(--muted-foreground)">
+        {{ nodeInfo.os }}
+      </span>
+      <div class="flex-1" />
       <span class="text-xs" style="color: var(--muted-foreground)">
         {{ connState === 'ready' ? 'connected' : connState }}
       </span>

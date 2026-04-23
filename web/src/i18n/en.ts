@@ -101,6 +101,8 @@ export default {
     memory: 'Memory',
     disk: 'Disk',
     lastHeartbeat: 'Last Heartbeat',
+    openTerminal: 'Open Terminal',
+    viewDetail: 'View Details',
   },
 
   nodeDetail: {

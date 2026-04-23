@@ -101,6 +101,8 @@ export default {
     memory: '内存',
     disk: '磁盘',
     lastHeartbeat: '最后心跳',
+    openTerminal: '打开终端',
+    viewDetail: '查看详情',
   },
 
   nodeDetail: {
