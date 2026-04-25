@@ -32,8 +32,6 @@ export default {
   sidebar: {
     chat: 'Chat',
     nodes: 'Nodes',
-    monitor: 'Monitor',
-    alerts: 'Alerts',
     auditLog: 'Audit Log',
     settings: 'Settings',
     lightMode: 'Light Mode',
@@ -124,42 +122,6 @@ export default {
     command: 'Command',
     exitCode: 'Exit Code',
     noCommandHistory: 'No command history',
-  },
-
-  monitor: {
-    linkMonitor: 'Link Monitor',
-    linksCount: '{count} Links',
-    normalCount: '{count} Normal',
-    alertsCount: '{count} Alerts',
-    recentAlerts: 'Recent Alerts',
-  },
-
-  linkDetail: {
-    linkTitle: 'Link: {id}',
-    latency: 'Latency (ms)',
-    min: 'Min',
-    avg: 'Avg',
-    max: 'Max',
-    packetLoss: 'Packet Loss (%)',
-    loss: 'Loss',
-    tcpConnectTime: 'TCP Connect Time (ms)',
-    tcp: 'TCP',
-    bandwidth: 'Bandwidth (Mbps)',
-    alertHistory: 'Alert History',
-    link: 'Link',
-    noAlerts: 'No alerts',
-  },
-
-  alerts: {
-    title: 'Alerts',
-    allTypes: 'All Types',
-    latency: 'Latency',
-    packetLoss: 'Packet Loss',
-    tcp: 'TCP',
-    bandwidth: 'Bandwidth',
-    unresolved: 'Unresolved',
-    noAlerts: 'No alerts found',
-    ongoing: '(ongoing)',
   },
 
   auditLog: {

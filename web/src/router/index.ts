@@ -48,21 +48,6 @@ const router = createRouter({
           name: 'settings',
           component: () => import('@/views/SettingsView.vue'),
         },
-        {
-          path: 'monitor',
-          name: 'monitor',
-          component: () => import('@/views/MonitorView.vue'),
-        },
-        {
-          path: 'monitor/:linkId',
-          name: 'link-detail',
-          component: () => import('@/views/LinkDetailView.vue'),
-        },
-        {
-          path: 'alerts',
-          name: 'alerts',
-          component: () => import('@/views/AlertsView.vue'),
-        },
       ],
     },
   ],

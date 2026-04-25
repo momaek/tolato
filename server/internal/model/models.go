@@ -50,11 +50,6 @@ type Node struct {
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt     time.Time `json:"updated_at" gorm:"autoUpdateTime"`
-
-	// NodeProbe extension fields
-	CanvasX *float64 `json:"canvas_x,omitempty" gorm:"type:real"`
-	CanvasY *float64 `json:"canvas_y,omitempty" gorm:"type:real"`
-	Role    *string  `json:"role,omitempty" gorm:"type:text"` // entry, relay, landing
 }
 
 // --- Core: Registration Tokens ---
@@ -106,38 +101,3 @@ type APIKey struct {
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 
-// --- NodeProbe: Links ---
-
-type ProbeLink struct {
-	ID       string `json:"id" gorm:"primaryKey;type:text"` // format: {source_id}->{target_id}
-	SourceID string `json:"source_id" gorm:"type:text;not null;index"`
-	TargetID string `json:"target_id" gorm:"type:text;not null;index"`
-
-	Source *Node `json:"source,omitempty" gorm:"foreignKey:SourceID;references:ID"`
-	Target *Node `json:"target,omitempty" gorm:"foreignKey:TargetID;references:ID"`
-}
-
-// --- NodeProbe: Metrics ---
-
-type ProbeMetric struct {
-	ID             uint      `json:"id" gorm:"primaryKey;autoIncrement"`
-	LinkID         string    `json:"link_id" gorm:"type:text;not null;index:idx_probe_metrics_link_ts,priority:1"`
-	Timestamp      time.Time `json:"timestamp" gorm:"not null;index:idx_probe_metrics_link_ts,priority:2,sort:desc"`
-	LatencyMin     *float64  `json:"latency_min,omitempty" gorm:"type:real"`
-	LatencyAvg     *float64  `json:"latency_avg,omitempty" gorm:"type:real"`
-	LatencyMax     *float64  `json:"latency_max,omitempty" gorm:"type:real"`
-	PacketLoss     *float64  `json:"packet_loss,omitempty" gorm:"type:real"`
-	TCPConnectTime *float64  `json:"tcp_connect_time,omitempty" gorm:"type:real"`
-	BandwidthMbps  *float64  `json:"bandwidth_mbps,omitempty" gorm:"type:real"`
-}
-
-// --- NodeProbe: Alerts ---
-
-type ProbeAlert struct {
-	ID         uint       `json:"id" gorm:"primaryKey;autoIncrement"`
-	LinkID     string     `json:"link_id" gorm:"type:text;not null;index:idx_probe_alerts_link_ts,priority:1"`
-	Type       string     `json:"type" gorm:"type:text;not null"` // latency, packet_loss, tcp, bandwidth, offline
-	Message    string     `json:"message" gorm:"type:text"`
-	TriggeredAt time.Time `json:"triggered_at" gorm:"not null;index:idx_probe_alerts_link_ts,priority:2,sort:desc"`
-	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
-}

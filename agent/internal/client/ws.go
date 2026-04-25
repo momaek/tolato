@@ -17,7 +17,6 @@ import (
 	"github.com/momaek/tolato/agent/internal/executor"
 	"github.com/momaek/tolato/agent/internal/files"
 	"github.com/momaek/tolato/agent/internal/identity"
-	"github.com/momaek/tolato/agent/internal/probe"
 	"github.com/momaek/tolato/agent/internal/terminal"
 )
 
@@ -126,9 +125,8 @@ type Client struct {
 	identityStore *identity.Store
 	ident         *identity.Identity
 
-	collector      *collector.Collector
-	executor       *executor.Executor
-	probeScheduler *probe.Scheduler
+	collector *collector.Collector
+	executor  *executor.Executor
 
 	conn   *websocket.Conn
 	connMu sync.Mutex // protects conn writes
@@ -335,8 +333,6 @@ func (c *Client) readLoop() error {
 			c.handleRegisterAck(msg)
 		case "command":
 			go c.handleCommand(msg)
-		case "probe_config":
-			c.handleProbeConfig(msg)
 		case "pty_open":
 			go c.handlePTYOpen(msg)
 		case "pty_input":
@@ -404,29 +400,6 @@ func (c *Client) handleCommand(msg WSMessage) {
 	if err := c.sendMessage("command_result", msg.ID, payload); err != nil {
 		log.Printf("[ws] failed to send command_result: %v", err)
 	}
-}
-
-// handleProbeConfig processes probe configuration from the server.
-func (c *Client) handleProbeConfig(msg WSMessage) {
-	var config probe.ProbeConfig
-	if err := json.Unmarshal(msg.Payload, &config); err != nil {
-		log.Printf("[ws] failed to parse probe_config: %v", err)
-		return
-	}
-
-	log.Printf("[ws] received probe_config: enabled=%v, targets=%d", config.Enabled, len(config.Targets))
-
-	if c.probeScheduler == nil {
-		nodeID := ""
-		secret := ""
-		if c.ident != nil {
-			nodeID = c.ident.NodeID
-			secret = c.ident.Secret
-		}
-		c.probeScheduler = probe.NewScheduler(nodeID, secret)
-	}
-
-	c.probeScheduler.UpdateConfig(config)
 }
 
 // heartbeatLoop sends periodic heartbeat messages.

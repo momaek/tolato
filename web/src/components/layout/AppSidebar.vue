@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Server, FileText, Settings, Zap, Activity, AlertTriangle, Sun, Moon, Languages } from 'lucide-vue-next'
+import { MessageSquare, Server, FileText, Settings, Zap, Sun, Moon, Languages } from 'lucide-vue-next'
 import { useTheme } from '@/composables/useTheme'
 import { setLocale, getLocale } from '@/i18n'
 
@@ -18,8 +18,6 @@ const router = useRouter()
 const navItems = computed(() => [
   { label: t('sidebar.chat'), icon: MessageSquare, path: '/chat' },
   { label: t('sidebar.nodes'), icon: Server, path: '/nodes' },
-  { label: t('sidebar.monitor'), icon: Activity, path: '/monitor' },
-  { label: t('sidebar.alerts'), icon: AlertTriangle, path: '/alerts' },
   { label: t('sidebar.auditLog'), icon: FileText, path: '/audit' },
   { label: t('sidebar.settings'), icon: Settings, path: '/settings' },
 ])
@@ -27,9 +25,6 @@ const navItems = computed(() => [
 const isActive = (path: string) => {
   if (path === '/chat') {
     return route.path === '/chat' || route.path.startsWith('/chat/')
-  }
-  if (path === '/monitor') {
-    return route.path === '/monitor' || route.path.startsWith('/monitor/')
   }
   if (path === '/nodes') {
     return route.path === '/nodes' || route.path.startsWith('/nodes/')

@@ -9,7 +9,6 @@ import (
 	"github.com/momaek/tolato/server/internal/config"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/node"
-	"github.com/momaek/tolato/server/internal/probe"
 	"github.com/momaek/tolato/server/internal/settings"
 	"github.com/momaek/tolato/server/internal/webui"
 )
@@ -24,10 +23,6 @@ type Deps struct {
 	NodeManager    *node.NodeManager
 	SessionManager *SessionManager
 	Settings       *settings.Cache
-	// Probe is nil when Probe.Enabled=false in config. Handlers that need it
-	// (pushProbeConfig, probe REST routes) are only wired up in that case, so
-	// a nil-check isn't necessary at the call site.
-	Probe *probe.Store
 }
 
 // ValidateToken validates a JWT token string and returns the claims.
@@ -130,26 +125,6 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	}
 
 	return r
-}
-
-// SetupProbeRoutes registers NodeProbe API routes on the given engine.
-func SetupProbeRoutes(r *gin.Engine, deps *Deps, probeStore *probe.Store, alertEngine *probe.AlertEngine) {
-	probeAPI := r.Group("/api/v1/probe")
-
-	// Agent report (authenticated via node_id:secret)
-	probeAPI.POST("/report", middleware.AgentTokenAuth(), ProbeReportHandler(deps, probeStore, alertEngine))
-
-	// Protected probe routes
-	probeProtected := probeAPI.Group("")
-	probeProtected.Use(middleware.JWTAuth())
-
-	probeProtected.GET("/nodes", ProbeListNodes(deps))
-	probeProtected.PUT("/nodes/:id", ProbeUpdateNodePosition(deps, probeStore))
-	probeProtected.GET("/links", ProbeListLinks(deps, probeStore))
-	probeProtected.POST("/links", ProbeCreateLink(deps, probeStore))
-	probeProtected.DELETE("/links/:id", ProbeDeleteLink(deps, probeStore))
-	probeProtected.GET("/links/:id/metrics", ProbeGetLinkMetrics(deps, probeStore))
-	probeProtected.GET("/alerts", ProbeListAlerts(deps, probeStore))
 }
 
 func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {

@@ -96,7 +96,6 @@ const (
 // Server -> Agent event types
 const (
 	AgentTypeCommand     = "command"
-	AgentTypeProbeConfig = "probe_config"
 	AgentTypePTYOpen     = "pty_open"
 	AgentTypePTYInput    = "pty_input"
 	AgentTypePTYResize   = "pty_resize"
@@ -143,21 +142,6 @@ type AgentCommandPayload struct {
 	Action  string `json:"action"`  // "execute_command"
 	Command string `json:"command"`
 	Timeout int    `json:"timeout"` // seconds
-}
-
-type AgentProbeConfigPayload struct {
-	Enabled   bool                `json:"enabled"`
-	ReportURL string              `json:"report_url"`
-	Targets   []ProbeTargetConfig `json:"targets"`
-}
-
-type ProbeTargetConfig struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	Host         string  `json:"host"`
-	PingCount    int     `json:"ping_count"`
-	TCPPort      int     `json:"tcp_port"`
-	BandwidthURL *string `json:"bandwidth_url,omitempty"`
 }
 
 // AgentAuthResponse is sent to the agent after successful token validation.

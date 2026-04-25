@@ -13,22 +13,9 @@ import (
 	"github.com/momaek/tolato/agent/internal/collector"
 	"github.com/momaek/tolato/agent/internal/executor"
 	"github.com/momaek/tolato/agent/internal/identity"
-	"github.com/momaek/tolato/agent/internal/probe"
 )
 
 func main() {
-	// Handle serve-testfile subcommand
-	if len(os.Args) > 1 && os.Args[1] == "serve-testfile" {
-		serveCmd := flag.NewFlagSet("serve-testfile", flag.ExitOnError)
-		port := serveCmd.Int("port", 9090, "Port to serve on")
-		size := serveCmd.Int("size", 10, "Test file size in MB")
-		serveCmd.Parse(os.Args[2:])
-		if err := probe.ServeTestFile(*port, *size); err != nil {
-			log.Fatalf("serve-testfile failed: %v", err)
-		}
-		return
-	}
-
 	var (
 		serverURL string
 		token     string

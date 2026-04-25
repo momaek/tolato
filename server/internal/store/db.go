@@ -22,6 +22,13 @@ func InitDB(dsn string) error {
 		return fmt.Errorf("open database: %w", err)
 	}
 
+	// One-time cleanup of the retired NodeProbe schema. IF EXISTS makes this a
+	// no-op on already-cleaned DBs; remove this block once all deployments
+	// have been migrated.
+	if err := dropRemovedProbeSchema(db); err != nil {
+		return err
+	}
+
 	// Auto-migrate all models
 	if err := db.AutoMigrate(
 		&model.Conversation{},
@@ -31,9 +38,6 @@ func InitDB(dsn string) error {
 		&model.AuditLog{},
 		&model.Setting{},
 		&model.APIKey{},
-		&model.ProbeLink{},
-		&model.ProbeMetric{},
-		&model.ProbeAlert{},
 	); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
 	}
@@ -43,6 +47,23 @@ func InitDB(dsn string) error {
 	// Initialize default settings
 	initDefaultSettings()
 
+	return nil
+}
+
+func dropRemovedProbeSchema(db *gorm.DB) error {
+	stmts := []string{
+		`DROP TABLE IF EXISTS probe_metrics`,
+		`DROP TABLE IF EXISTS probe_alerts`,
+		`DROP TABLE IF EXISTS probe_links`,
+		`ALTER TABLE nodes DROP COLUMN IF EXISTS canvas_x`,
+		`ALTER TABLE nodes DROP COLUMN IF EXISTS canvas_y`,
+		`ALTER TABLE nodes DROP COLUMN IF EXISTS role`,
+	}
+	for _, s := range stmts {
+		if err := db.Exec(s).Error; err != nil {
+			return fmt.Errorf("drop removed probe schema (%s): %w", s, err)
+		}
+	}
 	return nil
 }
 

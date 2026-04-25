@@ -102,9 +102,6 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			log.Printf("Agent reconnected: node=%s", existingNode.ID)
 			_ = store.UpdateHeartbeat(existingNode.ID)
 
-			// Push probe config
-			pushProbeConfig(deps, existingNode.ID, ac)
-
 			// Block until the router goroutine finishes.
 			<-ac.Done()
 			return
@@ -171,9 +168,6 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 
 			log.Printf("Agent registered: node=%s hostname=%s os=%s ip=%s", node.ID, reg.Hostname, reg.OS, reg.IP)
 
-			// Push probe config if available
-			pushProbeConfig(deps, node.ID, ac)
-
 			// Block until the router goroutine finishes.
 			<-ac.Done()
 			return
@@ -234,52 +228,3 @@ func handleAgentHeartbeat(deps *Deps, nodeID string, payload json.RawMessage) {
 	})
 }
 
-// pushProbeConfig sends the current probe configuration to an agent.
-// This is called after agent registration/reconnection.
-func pushProbeConfig(deps *Deps, nodeID string, ac *node.AgentConn) {
-	if !deps.Config.Probe.Enabled || deps.Probe == nil {
-		return
-	}
-
-	links, err := deps.Probe.ListLinksBySource(nodeID)
-	if err != nil {
-		log.Printf("[probe] list links for %s failed: %v", nodeID, err)
-		return
-	}
-	if len(links) == 0 {
-		return
-	}
-
-	targets := make([]model.ProbeTargetConfig, 0, len(links))
-	for _, link := range links {
-		if link.Target == nil {
-			continue
-		}
-		targets = append(targets, model.ProbeTargetConfig{
-			ID:        link.TargetID,
-			Name:      link.Target.Name,
-			Host:      link.Target.IP,
-			PingCount: 10,
-			TCPPort:   443,
-		})
-	}
-
-	// Agents may be remote; prefer PublicAddress (what install.sh / the web UI use).
-	// Fall back to host:port only for same-host / dev setups.
-	curlURL, _ := publicServerURLs(deps.Config)
-
-	msg := model.WSMessage{
-		Type: model.AgentTypeProbeConfig,
-		Payload: model.AgentProbeConfigPayload{
-			Enabled:   true,
-			ReportURL: curlURL + "/api/v1/probe/report",
-			Targets:   targets,
-		},
-	}
-
-	if err := ac.WriteJSON(msg); err != nil {
-		log.Printf("Failed to push probe_config to node %s: %v", nodeID, err)
-	} else {
-		log.Printf("Pushed probe_config to node %s (%d targets)", nodeID, len(targets))
-	}
-}

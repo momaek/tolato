@@ -32,8 +32,6 @@ export default {
   sidebar: {
     chat: '对话',
     nodes: '节点',
-    monitor: '监控',
-    alerts: '告警',
     auditLog: '审计日志',
     settings: '设置',
     lightMode: '浅色模式',
@@ -124,42 +122,6 @@ export default {
     command: '命令',
     exitCode: '退出码',
     noCommandHistory: '暂无命令历史',
-  },
-
-  monitor: {
-    linkMonitor: '链路监控',
-    linksCount: '{count} 条链路',
-    normalCount: '{count} 正常',
-    alertsCount: '{count} 告警',
-    recentAlerts: '最近告警',
-  },
-
-  linkDetail: {
-    linkTitle: '链路：{id}',
-    latency: '延迟 (ms)',
-    min: '最小值',
-    avg: '平均值',
-    max: '最大值',
-    packetLoss: '丢包率 (%)',
-    loss: '丢包',
-    tcpConnectTime: 'TCP 连接时间 (ms)',
-    tcp: 'TCP',
-    bandwidth: '带宽 (Mbps)',
-    alertHistory: '告警历史',
-    link: '链路',
-    noAlerts: '暂无告警',
-  },
-
-  alerts: {
-    title: '告警',
-    allTypes: '全部类型',
-    latency: '延迟',
-    packetLoss: '丢包',
-    tcp: 'TCP',
-    bandwidth: '带宽',
-    unresolved: '未解决',
-    noAlerts: '未找到告警',
-    ongoing: '（进行中）',
   },
 
   auditLog: {

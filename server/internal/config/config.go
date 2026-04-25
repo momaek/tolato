@@ -14,28 +14,6 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	Defaults DefaultsConfig `yaml:"defaults"`
 	Auth     AuthConfig     `yaml:"auth"`
-	Probe    ProbeConfig    `yaml:"probe"`
-}
-
-type ProbeConfig struct {
-	Enabled       bool             `yaml:"enabled"`
-	RetentionDays int              `yaml:"retention_days"`
-	Telegram      TelegramConfig   `yaml:"telegram"`
-	AlertRules    AlertRulesConfig `yaml:"alert_rules"`
-}
-
-type TelegramConfig struct {
-	BotToken string `yaml:"bot_token"`
-	ChatID   string `yaml:"chat_id"`
-}
-
-type AlertRulesConfig struct {
-	LatencyThresholdMS     float64 `yaml:"latency_threshold_ms"`
-	PacketLossThresholdPct float64 `yaml:"packet_loss_threshold_percent"`
-	TCPConnectThresholdMS  float64 `yaml:"tcp_connect_threshold_ms"`
-	BandwidthThresholdMbps float64 `yaml:"bandwidth_threshold_mbps"`
-	OfflineTimeoutSeconds  int     `yaml:"offline_timeout_seconds"`
-	RecoveryCount          int     `yaml:"recovery_count"`
 }
 
 type ServerConfig struct {
@@ -108,18 +86,6 @@ func Load(path string) (*Config, error) {
 		Auth: AuthConfig{
 			Username: "admin",
 			Password: "admin",
-		},
-		Probe: ProbeConfig{
-			Enabled:       true,
-			RetentionDays: 30,
-			AlertRules: AlertRulesConfig{
-				LatencyThresholdMS:     200,
-				PacketLossThresholdPct: 5,
-				TCPConnectThresholdMS:  500,
-				BandwidthThresholdMbps: 10,
-				OfflineTimeoutSeconds:  180,
-				RecoveryCount:          3,
-			},
 		},
 	}
 
