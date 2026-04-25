@@ -271,6 +271,12 @@ export const useChatStore = defineStore('chat', () => {
 
     const state = getOrCreateState(convId)
 
+    // Reject if a turn is already in flight. Without this, double-Enter or a
+    // racey UI lets two user_message frames hit the backend, which overwrites
+    // the loop registry — the first runner becomes a zombie that interleaves
+    // events with the second one's stream.
+    if (state.status !== 'idle' && state.status !== 'error') return
+
     // Check WS connection before sending
     if (wsService.state !== 'connected') {
       state.error = 'WebSocket is not connected. Please wait for reconnection.'
@@ -290,8 +296,7 @@ export const useChatStore = defineStore('chat', () => {
     })
     state.status = 'streaming'
 
-    // Send via WebSocket
-    wsService.send({
+    const ok = wsService.send({
       type: WS_TYPE.USER_MESSAGE,
       conversation_id: convId,
       payload: {
@@ -300,6 +305,14 @@ export const useChatStore = defineStore('chat', () => {
         default_node_id: state.defaultNodeId || undefined,
       },
     })
+    if (!ok) {
+      // wsService.send no-ops if the socket flipped to non-OPEN between our
+      // state check and the actual send. Roll back so the UI doesn't wedge in
+      // 'streaming' forever waiting for events that will never arrive.
+      state.messages.pop()
+      state.status = 'error'
+      state.error = 'Failed to send: connection lost. Please retry.'
+    }
   }
 
   function confirmAction(id: string, approved: boolean) {

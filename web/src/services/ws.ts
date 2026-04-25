@@ -59,10 +59,12 @@ class WebSocketService {
     this.setState('disconnected')
   }
 
-  send(msg: WSMessage) {
+  send(msg: WSMessage): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg))
+      return true
     }
+    return false
   }
 
   on(type: string, handler: MessageHandler) {
@@ -164,3 +166,14 @@ class WebSocketService {
 
 // Singleton instance
 export const wsService = new WebSocketService()
+
+// In Vite dev mode, this module's singleton survives across HMR of *other*
+// modules; that's intentional (we want one shared connection). But when this
+// module ITSELF hot-updates, the old instance and any pending reconnect timer
+// would leak — and components re-bound to the new instance might race with a
+// stale socket from the old one. Disposing on hot-update keeps things clean.
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    wsService.disconnect()
+  })
+}

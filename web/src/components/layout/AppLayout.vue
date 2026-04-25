@@ -33,7 +33,18 @@ const offState = wsService.onStateChange((s) => {
   }
 })
 
+// Cleanly close the WS on page refresh / tab close so the server reaps the
+// session immediately instead of waiting on a 60s ping timeout. Without this,
+// a refresh leaves the old server-side session lingering until the new tab's
+// connect triggers SessionManager.Replace — that brief gap is what makes it
+// look like "the frontend is still using the old connection".
+function handleBeforeUnload() {
+  wsService.disconnect()
+}
+window.addEventListener('beforeunload', handleBeforeUnload)
+
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   offState()
   wsService.disconnect()
 })

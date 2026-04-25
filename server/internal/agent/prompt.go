@@ -26,12 +26,16 @@ func NewPromptBuilder() *PromptBuilder {
 
 // Build constructs the full system prompt with dynamic node info.
 // customPrompt is the user-configured custom system prompt (may be empty).
-func (pb *PromptBuilder) Build(nodes []NodeInfo, customPrompt string) string {
+// defaultNodeID, if non-empty, marks the node the user pre-selected in the
+// composer; the LLM is told to use it as the implicit target when the user
+// says "this node" / "该节点" without naming one explicitly.
+func (pb *PromptBuilder) Build(nodes []NodeInfo, customPrompt string, defaultNodeID string) string {
 	var b strings.Builder
 
 	pb.writeRole(&b)
 	pb.writeTools(&b)
 	pb.writeNodes(&b, nodes)
+	pb.writeDefaultNode(&b, nodes, defaultNodeID)
 	pb.writeSecurityRules(&b)
 	pb.writeCustomPrompt(&b, customPrompt)
 
@@ -96,6 +100,27 @@ func (pb *PromptBuilder) writeNodes(b *strings.Builder, nodes []NodeInfo) {
 		fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n", n.ID, n.Name, alias, n.IP, n.OS)
 	}
 	b.WriteString("\n")
+}
+
+func (pb *PromptBuilder) writeDefaultNode(b *strings.Builder, nodes []NodeInfo, defaultNodeID string) {
+	if defaultNodeID == "" {
+		return
+	}
+	var match *NodeInfo
+	for i := range nodes {
+		if nodes[i].ID == defaultNodeID {
+			match = &nodes[i]
+			break
+		}
+	}
+	if match == nil {
+		return
+	}
+	label := match.Name
+	if match.Alias != "" {
+		label = match.Alias
+	}
+	fmt.Fprintf(b, "## 用户当前选中的节点\n\n用户在对话框中预选了以下节点作为默认操作目标：\n- ID: %s\n- 名称: %s (%s)\n\n当用户使用「这个节点」「该节点」「当前节点」等指代但未明确点名时，默认使用此节点的 ID 调用工具，无需再追问。仅当用户明确指定了其他节点名称/别名/编号时才切换目标。\n\n", match.ID, label, match.IP)
 }
 
 func (pb *PromptBuilder) writeSecurityRules(b *strings.Builder) {

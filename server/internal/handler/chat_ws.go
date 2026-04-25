@@ -21,6 +21,16 @@ import (
 // chatUpgrader is initialized by InitUpgraders with origin checking.
 var chatUpgrader = websocket.Upgrader{}
 
+// Heartbeat tuning. With no ping/pong, a dead client (browser refresh that
+// dropped TCP, NAT idle timeout, kill -9) leaves the server's ReadMessage
+// blocked forever and the SessionManager pointing at a corpse. The browser
+// auto-replies to WS Pings without JS involvement, so a one-sided pinger on
+// the server is enough to detect dead peers.
+const (
+	chatPingPeriod  = 30 * time.Second
+	chatReadTimeout = 60 * time.Second // must be > chatPingPeriod
+)
+
 // ChatWSHandler handles the frontend chat WebSocket connection at /ws/chat.
 // Authentication is performed via the first message after connection upgrade:
 //
@@ -77,36 +87,99 @@ func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
-		// Clear the read deadline for normal operation
-		_ = conn.SetReadDeadline(time.Time{})
+		// Switch to heartbeat-driven read deadline. The pong handler bumps it
+		// each time the browser auto-replies to our pings; if the client dies
+		// silently, ReadMessage trips the deadline within chatReadTimeout and
+		// the whole shutdown sequence runs.
+		_ = conn.SetReadDeadline(time.Now().Add(chatReadTimeout))
+		conn.SetPongHandler(func(string) error {
+			return conn.SetReadDeadline(time.Now().Add(chatReadTimeout))
+		})
 
-		// Send auth success
+		// Send auth success (still single-goroutine here — writer hasn't started yet)
 		_ = conn.WriteJSON(model.WSMessage{Type: "auth_ok"})
 
+		// Wrap conn in a ChatSession so all post-auth writes (writer goroutine
+		// and SessionManager.Replace) serialize through one mutex.
+		session := NewChatSession(conn)
+
 		// Register with session manager (kicks old connection)
-		deps.SessionManager.Replace(conn)
+		deps.SessionManager.Replace(session)
 
 		// Create shared event channel for all loop runners
 		eventCh := make(chan any, 64)
 
-		// Track active loop runners
+		// Track active loop runners + a WaitGroup so we can join them at
+		// shutdown before closing eventCh (otherwise a still-running runner
+		// would panic on send-to-closed-channel).
 		loops := &loopRegistry{
 			runners: make(map[string]*agent.LoopRunner),
 		}
+		var runnersWG sync.WaitGroup
 
 		// Context for this connection
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		defer func() {
-			deps.SessionManager.Remove(conn)
-			conn.Close()
+
+		// Writer goroutine: drains eventCh and writes to the session. We track
+		// it with a WaitGroup so the deferred shutdown can wait for it to
+		// finish flushing before the connection is fully torn down.
+		var writerWG sync.WaitGroup
+		writerWG.Add(1)
+		go func() {
+			defer writerWG.Done()
+			chatWriteLoop(session, eventCh)
 		}()
 
-		// Writer goroutine: reads events and sends to frontend
-		go chatWriteLoop(conn, eventCh)
+		// Pinger goroutine: sends WS Ping frames every chatPingPeriod so dead
+		// peers are reaped. WriteControl is goroutine-safe per gorilla docs
+		// (separate mutex from regular writes), so it doesn't need writeMu.
+		var pingerWG sync.WaitGroup
+		pingerWG.Add(1)
+		go func() {
+			defer pingerWG.Done()
+			chatPingLoop(ctx, conn, chatPingPeriod)
+		}()
+
+		// Shutdown sequence (LIFO):
+		//   1. cancel ctx → pinger exits, runners' ctx-aware sends + LLM stream + tool exec abort
+		//   2. wait for runners to finish → no more sends on eventCh
+		//   3. close(eventCh) → writer's `range` exits cleanly
+		//   4. wait for writer + pinger to exit
+		//   5. unregister from SessionManager and close the session
+		// Doing it in this order means no goroutine writes to a closed conn
+		// and no runner panics on sending to a closed channel.
+		defer func() {
+			deps.SessionManager.Remove(session)
+			_ = session.Close()
+		}()
+		defer pingerWG.Wait()
+		defer writerWG.Wait()
+		defer close(eventCh)
+		defer runnersWG.Wait()
+		defer cancel()
 
 		// Reader loop: reads messages from frontend
-		chatReadLoop(ctx, conn, deps, loops, eventCh)
+		chatReadLoop(ctx, session, deps, loops, eventCh, &runnersWG)
+	}
+}
+
+// chatPingLoop sends WebSocket Ping control frames at `period`. It returns
+// when ctx is cancelled or WriteControl fails (peer gone). Pongs from the
+// browser are handled by SetPongHandler set up in the caller.
+func chatPingLoop(ctx context.Context, conn *websocket.Conn, period time.Duration) {
+	t := time.NewTicker(period)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			deadline := time.Now().Add(10 * time.Second)
+			if err := conn.WriteControl(websocket.PingMessage, nil, deadline); err != nil {
+				log.Printf("[chat_ws] ping failed, peer likely gone: %v", err)
+				return
+			}
+		}
 	}
 }
 
@@ -143,7 +216,8 @@ type chatInbound struct {
 	Payload        json.RawMessage `json:"payload,omitempty"`
 }
 
-func chatReadLoop(ctx context.Context, conn *websocket.Conn, deps *Deps, loops *loopRegistry, eventCh chan any) {
+func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup) {
+	conn := session.Conn()
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
@@ -164,7 +238,7 @@ func chatReadLoop(ctx context.Context, conn *websocket.Conn, deps *Deps, loops *
 				log.Printf("[chat_ws] bad user_message payload: %v", err)
 				continue
 			}
-			handleUserMessage(ctx, deps, loops, eventCh, msg.ConversationID, evt)
+			handleUserMessage(ctx, deps, loops, eventCh, runnersWG, msg.ConversationID, evt)
 		case model.WSTypeConfirmResponse:
 			var evt model.WSConfirmResponseEvent
 			if err := json.Unmarshal(msg.Payload, &evt); err != nil {
@@ -178,7 +252,7 @@ func chatReadLoop(ctx context.Context, conn *websocket.Conn, deps *Deps, loops *
 	}
 }
 
-func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eventCh chan any, convID string, evt model.WSUserMessageEvent) {
+func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup, convID string, evt model.WSUserMessageEvent) {
 	if convID == "" {
 		log.Printf("[chat_ws] user_message missing conversation_id")
 		return
@@ -224,8 +298,12 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 
 	loops.set(convID, runner)
 
-	// Run loop in background goroutine
+	// Run loop in background goroutine. WaitGroup lets the connection's
+	// shutdown sequence join all in-flight runners before closing eventCh.
+	runnersWG.Add(1)
 	go func() {
+		defer runnersWG.Done()
+		defer loops.remove(convID)
 		input := agent.UserMessageInput{
 			ConversationID: convID,
 			Content:        evt.Content,
@@ -233,7 +311,6 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 			DefaultNodeID:  evt.DefaultNodeID,
 		}
 		runner.Run(ctx, input)
-		loops.remove(convID)
 	}()
 }
 
@@ -246,7 +323,7 @@ func handleConfirmResponse(loops *loopRegistry, convID string, evt model.WSConfi
 	}
 }
 
-func chatWriteLoop(conn *websocket.Conn, eventCh chan any) {
+func chatWriteLoop(session *ChatSession, eventCh chan any) {
 	for evt := range eventCh {
 		var msg model.WSMessage
 
@@ -308,8 +385,13 @@ func chatWriteLoop(conn *websocket.Conn, eventCh chan any) {
 			continue
 		}
 
-		if err := conn.WriteJSON(msg); err != nil {
+		if err := session.WriteJSON(msg); err != nil {
 			log.Printf("[chat_ws] write error: %v", err)
+			// Drain remaining events instead of returning, so runner sends
+			// don't block. Read loop's ctx cancel will cause runners to exit
+			// shortly; once they do, eventCh is closed and we return naturally.
+			for range eventCh {
+			}
 			return
 		}
 	}
