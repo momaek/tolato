@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import { useChatStore } from '@/stores/chat'
@@ -65,21 +64,6 @@ function handleConfirm(id: string, approved: boolean) {
 
 <template>
   <div class="flex h-full flex-col" style="background-color: var(--background)">
-    <ChatTopBar
-      :conversation-id="chatStore.activeConversationId || undefined"
-      :title="chatStore.activeState?.title || ''"
-      :model="chatStore.activeState?.model || pendingModel"
-      :default-node-id="chatStore.activeState?.defaultNodeId ?? pendingNodeId"
-      @update:model="(v) => {
-        if (chatStore.activeState) chatStore.activeState.model = v
-        else pendingModel = v
-      }"
-      @update:default-node-id="(v) => {
-        if (chatStore.activeState) chatStore.activeState.defaultNodeId = v
-        else pendingNodeId = v
-      }"
-    />
-
     <ChatMessages
       :messages="chatStore.activeState?.messages || []"
       :streaming="chatStore.activeState?.streaming || null"
@@ -93,7 +77,18 @@ function handleConfirm(id: string, approved: boolean) {
     <ChatInput
       ref="chatInputRef"
       :status="chatStore.activeState?.status || 'idle'"
+      :conversation-id="chatStore.activeConversationId || undefined"
+      :model="chatStore.activeState?.model || pendingModel"
+      :default-node-id="chatStore.activeState?.defaultNodeId ?? pendingNodeId"
       @send="handleSend"
+      @update:model="(v) => {
+        if (chatStore.activeState) chatStore.activeState.model = v
+        else pendingModel = v
+      }"
+      @update:default-node-id="(v) => {
+        if (chatStore.activeState) chatStore.activeState.defaultNodeId = v
+        else pendingNodeId = v
+      }"
     />
   </div>
 </template>

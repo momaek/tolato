@@ -61,7 +61,7 @@ const showEmptyIndicator = computed(() =>
 
     <div
       v-else
-      class="mx-auto flex w-full flex-col gap-5 px-4 py-6 max-w-[680px] md:px-6 lg:max-w-[780px] xl:max-w-[860px] 2xl:max-w-[960px]"
+      class="mx-auto flex w-full flex-col gap-5 px-5 py-6 md:px-6 max-w-[clamp(720px,58vw,1400px)]"
     >
       <template v-for="msg in displayMessages" :key="msg.id">
         <UserMessage v-if="msg.role === 'user'" :content="msg.content || ''" />

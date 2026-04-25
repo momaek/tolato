@@ -1,20 +1,42 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Send, Square } from 'lucide-vue-next'
+import { ArrowUp, Square } from 'lucide-vue-next'
+import ChatComposerControls from './ChatComposerControls.vue'
 import type { ConversationStatus } from '@/stores/chat'
+
+const TEXTAREA_MAX_HEIGHT = 320
 
 const props = defineProps<{
   status: ConversationStatus
+  conversationId?: string
+  model: string
+  defaultNodeId?: string
 }>()
 
 const emit = defineEmits<{
   (e: 'send', content: string): void
   (e: 'stop'): void
+  (e: 'update:model', value: string): void
+  (e: 'update:defaultNodeId', value: string | undefined): void
 }>()
 
 const { t } = useI18n()
 const input = ref('')
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+
+function autoResize() {
+  const el = textareaRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  const next = Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT)
+  el.style.height = next + 'px'
+  el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden'
+}
+
+watch(input, () => {
+  nextTick(autoResize)
+})
 // Tracks whether an IME composition (Chinese/Japanese/Korean) is in progress.
 // While true, Enter is the IME's "commit candidate" key and must NOT trigger
 // send — otherwise we'd either fire with half-composed text or (depending on
@@ -60,44 +82,64 @@ defineExpose({ fillInput })
 </script>
 
 <template>
-  <div class="px-5 py-4" style="border-top: 1px solid var(--border)">
-    <div class="relative mx-auto w-full max-w-[780px]">
-      <textarea
-        v-model="input"
-        :placeholder="placeholder"
-        :disabled="isDisabled"
-        :rows="1"
-        class="chat-composer w-full resize-none rounded-[12px] py-3.5 pl-4 pr-14 text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-60"
-        style="background-color: var(--secondary); color: var(--foreground); min-height: 52px; border: none"
-        @keydown="onKeydown"
-        @compositionstart="isComposing = true"
-        @compositionend="isComposing = false"
-      />
-      <button
-        v-if="isStreaming"
-        type="button"
-        class="absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full transition-opacity hover:opacity-90"
+  <div class="px-5 py-4 md:px-6">
+    <div class="mx-auto w-full max-w-[clamp(720px,58vw,1400px)]">
+      <div
+        class="chat-composer-shell flex flex-col rounded-[20px] px-2 pb-2 pt-1 transition-shadow focus-within:shadow-sm"
         :style="{
-          backgroundColor: 'var(--destructive)',
-          color: 'var(--destructive-foreground)',
+          backgroundColor: 'var(--secondary)',
+          border: '1px solid color-mix(in oklab, var(--border) 60%, transparent)',
         }"
-        @click="emit('stop')"
       >
-        <Square class="h-3 w-3" fill="currentColor" />
-      </button>
-      <button
-        v-else
-        type="button"
-        class="absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        :style="{
-          backgroundColor: 'var(--primary)',
-          color: 'var(--primary-foreground)',
-        }"
-        :disabled="isDisabled || !input.trim()"
-        @click="handleSend"
-      >
-        <Send class="h-4 w-4" />
-      </button>
+        <textarea
+          ref="textareaRef"
+          v-model="input"
+          :placeholder="placeholder"
+          :disabled="isDisabled"
+          :rows="1"
+          class="chat-composer w-full resize-none bg-transparent px-3 pt-2.5 text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          style="color: var(--foreground); border: none; overflow-y: hidden"
+          @keydown="onKeydown"
+          @compositionstart="isComposing = true"
+          @compositionend="isComposing = false"
+        />
+
+        <div class="flex items-center justify-between gap-2 pt-1.5">
+          <ChatComposerControls
+            :conversation-id="conversationId"
+            :model="model"
+            :default-node-id="defaultNodeId"
+            @update:model="(v) => emit('update:model', v)"
+            @update:default-node-id="(v) => emit('update:defaultNodeId', v)"
+          />
+
+          <button
+            v-if="isStreaming"
+            type="button"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90"
+            :style="{
+              backgroundColor: 'var(--destructive)',
+              color: 'var(--destructive-foreground)',
+            }"
+            @click="emit('stop')"
+          >
+            <Square class="h-3 w-3" fill="currentColor" />
+          </button>
+          <button
+            v-else
+            type="button"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            :style="{
+              backgroundColor: 'var(--primary)',
+              color: 'var(--primary-foreground)',
+            }"
+            :disabled="isDisabled || !input.trim()"
+            @click="handleSend"
+          >
+            <ArrowUp class="h-4 w-4" />
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -106,5 +148,8 @@ defineExpose({ fillInput })
 .chat-composer::placeholder {
   color: var(--muted-foreground);
   opacity: 0.8;
+}
+.chat-composer-shell:focus-within {
+  border-color: color-mix(in oklab, var(--foreground) 18%, transparent);
 }
 </style>
