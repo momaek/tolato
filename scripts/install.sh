@@ -10,6 +10,8 @@
 #   TOLATO_REPO            github repo slug       (default: momaek/tolato)
 #   TOLATO_INSTALL_DIR     binary install dir     (default: /usr/local/bin)
 #   TOLATO_DATA_DIR        agent data dir         (default: /var/lib/tolato)
+#   TOLATO_DOWNLOAD_BASE   binary download base   (default: derived from --server,
+#                                                  e.g. https://<server>/releases)
 
 set -euo pipefail
 
@@ -84,19 +86,52 @@ fi
 
 # ----- download binary --------------------------------------------------------
 ASSET="${BIN_NAME}-${OS}-${ARCH}"
+
+# Pick a download base URL. Preference:
+#   1. TOLATO_DOWNLOAD_BASE env (manual override)
+#   2. derive from --server: use the tolato server itself as a mirror
+#      (it proxies GET /releases/* to github.com so agents in regions where
+#      github is blocked can still install).
+# We always also fall back to direct GitHub on failure, so older servers
+# without the /releases proxy still work.
+GH_BASE="https://github.com/${REPO}/releases"
+DOWNLOAD_BASE="${TOLATO_DOWNLOAD_BASE:-}"
+if [[ -z "$DOWNLOAD_BASE" ]]; then
+  case "$SERVER" in
+    http://*|https://*) DOWNLOAD_BASE="${SERVER%/}/releases" ;;
+    ws://*)             DOWNLOAD_BASE="http://${SERVER#ws://}";  DOWNLOAD_BASE="${DOWNLOAD_BASE%/ws/agent}/releases" ;;
+    wss://*)            DOWNLOAD_BASE="https://${SERVER#wss://}"; DOWNLOAD_BASE="${DOWNLOAD_BASE%/ws/agent}/releases" ;;
+    *)                  DOWNLOAD_BASE="http://${SERVER%/}/releases" ;;
+  esac
+fi
+
 if [[ "$VERSION" == "latest" ]]; then
-  URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
+  URL="${DOWNLOAD_BASE}/latest/download/${ASSET}"
+  GH_URL="${GH_BASE}/latest/download/${ASSET}"
 else
-  URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
+  URL="${DOWNLOAD_BASE}/download/${VERSION}/${ASSET}"
+  GH_URL="${GH_BASE}/download/${VERSION}/${ASSET}"
 fi
 
 TMP="$(mktemp -t tolato-agent.XXXXXX)"
 trap 'rm -f "$TMP"' EXIT
 
+download() {
+  curl -fL --retry 3 --retry-delay 2 -o "$TMP" "$1"
+}
+
 echo ">>> downloading ${URL}"
-if ! curl -fL --retry 3 --retry-delay 2 -o "$TMP" "$URL"; then
-  echo "error: download failed. Is a release published for ${OS}/${ARCH}?" >&2
-  exit 1
+if ! download "$URL"; then
+  if [[ "$URL" != "$GH_URL" ]]; then
+    echo ">>> mirror failed, falling back to ${GH_URL}"
+    if ! download "$GH_URL"; then
+      echo "error: download failed from both mirror and github. Is a release published for ${OS}/${ARCH}?" >&2
+      exit 1
+    fi
+  else
+    echo "error: download failed. Is a release published for ${OS}/${ARCH}?" >&2
+    exit 1
+  fi
 fi
 
 $SUDO install -m 0755 "$TMP" "${INSTALL_DIR}/${BIN_NAME}"

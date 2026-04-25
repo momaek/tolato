@@ -11,6 +11,10 @@ server:
   # 用于生成安装命令和 agent 的 ws 连接地址；为空时 fallback 到 host:port（仅同机有效）。
   # 示例：https://tolato.example.com
   public_address: ""
+  # /releases/* 反代到这个上游（流式转发，跟随 302 到 objects.githubusercontent.com）。
+  # 让 install.sh 可以通过本服务器下载 agent 二进制，绕过被墙的 github。
+  # 留空 = 关闭代理（/releases 返回 404）。
+  release_proxy_upstream: https://github.com/momaek/tolato/releases
 
 database:
   driver: postgres

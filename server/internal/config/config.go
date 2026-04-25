@@ -27,6 +27,11 @@ type ServerConfig struct {
 	// different host/port than what it binds to. If empty, falls back to
 	// host:port, which only works for same-host setups.
 	PublicAddress string `yaml:"public_address"`
+	// ReleaseProxyUpstream is the upstream that /releases/* proxies to,
+	// streaming binaries through this server so agents in regions where
+	// github.com is unreachable can still install. The server itself must be
+	// able to reach this upstream. Empty disables the proxy (404).
+	ReleaseProxyUpstream string `yaml:"release_proxy_upstream"`
 }
 
 type DatabaseConfig struct {
@@ -62,10 +67,11 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{
 		Server: ServerConfig{
-			Host:             "0.0.0.0",
-			Port:             8080,
-			InstallScriptURL: "https://raw.githubusercontent.com/momaek/tolato/main/scripts/install.sh",
-			PublicAddress:    "", // e.g. "https://tolato.example.com" when behind caddy/nginx
+			Host:                 "0.0.0.0",
+			Port:                 8080,
+			InstallScriptURL:     "https://raw.githubusercontent.com/momaek/tolato/main/scripts/install.sh",
+			PublicAddress:        "", // e.g. "https://tolato.example.com" when behind caddy/nginx
+			ReleaseProxyUpstream: "https://github.com/momaek/tolato/releases",
 		},
 		Database: DatabaseConfig{
 			Driver: "postgres",

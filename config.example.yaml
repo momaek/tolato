@@ -13,6 +13,10 @@ server:
   # command and WebSocket URL. Leave empty only for same-host testing.
   # Example: https://tolato.example.com
   public_address: ""
+  # /releases/* reverse-proxies to this upstream, streaming GitHub release
+  # binaries through this server. Lets install.sh download the agent binary
+  # from regions that can't reach github.com. Empty disables the proxy.
+  release_proxy_upstream: https://github.com/momaek/tolato/releases
 
 database:
   driver: postgres

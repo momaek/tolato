@@ -110,6 +110,10 @@ func SetupRouter(deps *Deps) *gin.Engine {
 		c.Redirect(http.StatusFound, url)
 	})
 
+	// Agent binary mirror: streams GitHub release assets through this server so
+	// agents in regions that can't reach github.com can still install.
+	r.GET("/releases/*path", ReleaseProxy(deps))
+
 	// WebSocket: Agent connection (token-based auth, not JWT)
 	r.GET("/ws/agent", AgentWSHandler(deps))
 
