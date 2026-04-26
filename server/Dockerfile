@@ -4,7 +4,9 @@
 # root so we can reach both `web/` and `server/` from here.
 
 # ---------- stage: build web ----------
-FROM node:20-alpine AS web-builder
+# Pin to BUILDPLATFORM: the SPA bundle is arch-independent, so building once
+# on the native runner and copying into both target arches avoids QEMU.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS web-builder
 WORKDIR /web
 
 # corepack is bundled with node 20; enable it so `pnpm` resolves without a
@@ -18,7 +20,12 @@ COPY web/ ./
 RUN pnpm build
 
 # ---------- stage: build server ----------
-FROM golang:1.23-alpine AS server-builder
+# Pin to BUILDPLATFORM and cross-compile via GOARCH=$TARGETARCH. Without this,
+# buildx runs the Go compiler under QEMU on the foreign arch (e.g. arm64),
+# which is 5-15x slower than native cross-compilation.
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS server-builder
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 
 COPY server/go.mod server/go.sum ./
@@ -31,7 +38,7 @@ COPY server/ ./
 COPY --from=web-builder /web/dist ./internal/webui/dist
 
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -trimpath \
     -ldflags "-s -w -X main.version=${VERSION}" \
     -o /out/tolato-server \
