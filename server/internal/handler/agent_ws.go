@@ -134,9 +134,10 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				continue
 			}
 
-			// Create node in database
+			// Create node in database (with best-effort GeoIP lookup)
 			agentSecret := uuid.New().String()
-			node, err := store.CreateNodeFromRegistration(reg, regToken.AliasPrefix, agentSecret)
+			geo, _ := deps.GeoIP.Lookup(reg.IP)
+			node, err := store.CreateNodeFromRegistration(reg, regToken.AliasPrefix, agentSecret, geo)
 			if err != nil {
 				log.Printf("Failed to create node: %v", err)
 				errMsg := model.WSMessage{Type: "error", Payload: map[string]string{"message": "registration failed"}}
@@ -184,18 +185,18 @@ func installSystemHandlers(deps *Deps, nodeID string, ac *node.AgentConn) {
 			handleAgentHeartbeat(deps, nodeID, payload)
 		},
 		OnReRegister: func(payload json.RawMessage) {
-			handleAgentReRegister(nodeID, payload)
+			handleAgentReRegister(deps, nodeID, payload)
 		},
 	})
 }
 
-func handleAgentReRegister(nodeID string, payload json.RawMessage) {
+func handleAgentReRegister(deps *Deps, nodeID string, payload json.RawMessage) {
 	var reg model.AgentRegisterPayload
 	if err := json.Unmarshal(payload, &reg); err != nil {
 		return
 	}
 	// Update node info (hostname, os, etc. may have changed)
-	_ = store.UpdateNode(nodeID, map[string]any{
+	updates := map[string]any{
 		"name":            reg.Hostname,
 		"os":              reg.OS,
 		"kernel":          reg.Kernel,
@@ -205,7 +206,15 @@ func handleAgentReRegister(nodeID string, payload json.RawMessage) {
 		"memory_total_mb": reg.MemoryTotalMB,
 		"disk_total_gb":   reg.DiskTotalGB,
 		"status":          "online",
-	})
+	}
+	// Refresh geo data if the IP changed (cheap to re-query unconditionally
+	// since the cached mmdb lookup is in-memory).
+	if geo, _ := deps.GeoIP.Lookup(reg.IP); !geo.IsZero() {
+		updates["country_code"] = geo.CountryCode
+		updates["city"] = geo.City
+		updates["asn"] = geo.ASN
+	}
+	_ = store.UpdateNode(nodeID, updates)
 }
 
 func handleAgentHeartbeat(deps *Deps, nodeID string, payload json.RawMessage) {

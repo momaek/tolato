@@ -56,6 +56,37 @@ func ToolDefs() []llm.ToolDefinition {
 			},
 		},
 		{
+			Name: "edit_node_info",
+			Description: "Update editable metadata for a node. Use this when the user mentions subscription details, " +
+				"renewal/expiry dates, billing info, account credentials, or any free-form notes about a node. " +
+				"All update fields are optional — pass only the ones you want to change. " +
+				"`extra` is partial-merged into the existing extra map: keys you supply overwrite, omitted keys are kept, " +
+				"and an explicit null value deletes that key. " +
+				"Conventional keys for `extra`: provider (string), plan (string), expires_at (ISO date YYYY-MM-DD), " +
+				"monthly_cost (number), currency (string, e.g. USD/CNY), billing_cycle (string, e.g. monthly/yearly), " +
+				"renewal_url (string), account_email (string), notes (string, freeform markdown). " +
+				"Prefer these keys for consistency, but you may add others when the user provides info that doesn't fit.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"node_id": map[string]any{
+						"type":        "string",
+						"description": "The ID of the node to update.",
+					},
+					"alias": map[string]any{
+						"type":        "string",
+						"description": "Optional new alias (display name). Pass empty string to clear.",
+					},
+					"extra": map[string]any{
+						"type":                 "object",
+						"description":          "Partial map of metadata to merge. See conventional keys in the tool description.",
+						"additionalProperties": true,
+					},
+				},
+				"required": []string{"node_id"},
+			},
+		},
+		{
 			Name:        "execute_command",
 			Description: "Execute a shell command on a specified VPS node.",
 			Parameters: map[string]any{
@@ -138,6 +169,14 @@ func (te *ToolExecutor) executeSingle(ctx context.Context, tc llm.ToolCall) *mod
 	case "get_node_info":
 		nodeID, _ := tc.Args["node_id"].(string)
 		return te.executeGetNodeInfo(nodeID)
+	case "edit_node_info":
+		nodeID, _ := tc.Args["node_id"].(string)
+		var aliasPtr *string
+		if a, ok := tc.Args["alias"].(string); ok {
+			aliasPtr = &a
+		}
+		extra, _ := tc.Args["extra"].(map[string]any)
+		return te.executeEditNodeInfo(nodeID, aliasPtr, extra)
 	case "execute_command":
 		nodeID, _ := tc.Args["node_id"].(string)
 		command, _ := tc.Args["command"].(string)
@@ -216,6 +255,53 @@ func (te *ToolExecutor) executeGetNodeInfo(nodeID string) *model.ToolResultItem 
 		}
 	}
 	return &model.ToolResultItem{Data: info}
+}
+
+func (te *ToolExecutor) executeEditNodeInfo(nodeID string, alias *string, extraPatch map[string]any) *model.ToolResultItem {
+	if nodeID == "" {
+		return &model.ToolResultItem{Data: map[string]any{"error": "node_id is required"}}
+	}
+	n, err := store.GetNodeByID(nodeID)
+	if err != nil {
+		return &model.ToolResultItem{Data: map[string]any{"error": fmt.Sprintf("node not found: %s", nodeID)}}
+	}
+	if alias == nil && extraPatch == nil {
+		return &model.ToolResultItem{Data: map[string]any{"error": "no fields to update (provide alias and/or extra)"}}
+	}
+
+	updates := make(map[string]any)
+	if alias != nil {
+		updates["alias"] = *alias
+	}
+	if extraPatch != nil {
+		merged := model.JSONMap{}
+		for k, v := range n.Extra {
+			merged[k] = v
+		}
+		for k, v := range extraPatch {
+			if v == nil {
+				delete(merged, k)
+			} else {
+				merged[k] = v
+			}
+		}
+		updates["extra"] = merged
+	}
+
+	if err := store.UpdateNode(nodeID, updates); err != nil {
+		return &model.ToolResultItem{Data: map[string]any{"error": err.Error()}}
+	}
+	updated, _ := store.GetNodeByID(nodeID)
+	resp := map[string]any{"id": nodeID, "ok": true}
+	if updated != nil {
+		if updated.Alias != nil {
+			resp["alias"] = *updated.Alias
+		}
+		if updated.Extra != nil {
+			resp["extra"] = updated.Extra
+		}
+	}
+	return &model.ToolResultItem{Data: resp}
 }
 
 func (te *ToolExecutor) executeCommand(ctx context.Context, nodeID, command string, timeout int) *model.ToolResultItem {

@@ -107,8 +107,12 @@ func ListNodes(deps *Deps) gin.HandlerFunc {
 				Name:          n.Name,
 				Alias:         n.Alias,
 				IP:            n.IP,
+				CountryCode:   n.CountryCode,
+				City:          n.City,
+				ASN:           n.ASN,
 				Status:        n.Status,
 				OS:            n.OS,
+				Extra:         n.Extra,
 				LastHeartbeat: n.LastHeartbeat,
 			}
 
@@ -156,6 +160,10 @@ func GetNode(deps *Deps) gin.HandlerFunc {
 			Name:          n.Name,
 			Alias:         n.Alias,
 			IP:            n.IP,
+			CountryCode:   n.CountryCode,
+			City:          n.City,
+			ASN:           n.ASN,
+			Extra:         n.Extra,
 			OS:            n.OS,
 			Kernel:        n.Kernel,
 			AgentVersion:  n.AgentVersion,
@@ -190,6 +198,17 @@ func UpdateNode(deps *Deps) gin.HandlerFunc {
 		if req.Alias != nil {
 			updates["alias"] = *req.Alias
 		}
+		if req.Extra != nil {
+			merged, err := mergeNodeExtra(id, req.Extra)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+					Error:   "internal_error",
+					Message: "failed to merge extra",
+				})
+				return
+			}
+			updates["extra"] = merged
+		}
 
 		if len(updates) == 0 {
 			c.JSON(http.StatusBadRequest, model.ErrorResponse{
@@ -210,6 +229,29 @@ func UpdateNode(deps *Deps) gin.HandlerFunc {
 		n, _ := store.GetNodeByID(id)
 		c.JSON(http.StatusOK, n)
 	}
+}
+
+// mergeNodeExtra applies a partial patch to a node's existing Extra map.
+// Keys with non-nil values are upserted; keys with explicit nil values are
+// deleted. Reads-then-writes — callers should treat concurrent edits to the
+// same node as last-writer-wins.
+func mergeNodeExtra(nodeID string, patch map[string]any) (model.JSONMap, error) {
+	n, err := store.GetNodeByID(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	merged := model.JSONMap{}
+	for k, v := range n.Extra {
+		merged[k] = v
+	}
+	for k, v := range patch {
+		if v == nil {
+			delete(merged, k)
+		} else {
+			merged[k] = v
+		}
+	}
+	return merged, nil
 }
 
 // DeleteNode handles DELETE /api/nodes/:id.

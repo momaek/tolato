@@ -103,7 +103,7 @@ export async function createNode(data: CreateNodeRequest): Promise<CreateNodeRes
 }
 
 export async function updateNode(id: string, data: UpdateNodeRequest): Promise<void> {
-  await api.patch(`/nodes/${id}`, data)
+  await api.put(`/nodes/${id}`, data)
 }
 
 export async function deleteNode(id: string): Promise<void> {

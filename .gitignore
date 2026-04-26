@@ -10,5 +10,7 @@ agent/agent
 /config.yaml
 # docker-compose postgres data (bind-mount)
 /pgdata/
+# server runtime data (geoip mmdb cache, etc.)
+/server/data/
 # Claude Code preview MCP launch config (per-developer)
 .claude/launch.json

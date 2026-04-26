@@ -14,6 +14,16 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	Defaults DefaultsConfig `yaml:"defaults"`
 	Auth     AuthConfig     `yaml:"auth"`
+	GeoIP    GeoIPConfig    `yaml:"geoip"`
+}
+
+type GeoIPConfig struct {
+	// Enabled toggles GeoIP lookup at registration & periodic refresh.
+	Enabled bool `yaml:"enabled"`
+	// DataDir is where the .mmdb files are downloaded and read from.
+	DataDir string `yaml:"data_dir"`
+	// RefreshInterval is how often the .mmdb files are re-downloaded. 0 disables auto-refresh.
+	RefreshInterval time.Duration `yaml:"refresh_interval"`
 }
 
 type ServerConfig struct {
@@ -92,6 +102,11 @@ func Load(path string) (*Config, error) {
 		Auth: AuthConfig{
 			Username: "admin",
 			Password: "admin",
+		},
+		GeoIP: GeoIPConfig{
+			Enabled:         true,
+			DataDir:         "data/geoip",
+			RefreshInterval: 7 * 24 * time.Hour,
 		},
 	}
 

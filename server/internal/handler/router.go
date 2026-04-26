@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/momaek/tolato/server/internal/config"
+	"github.com/momaek/tolato/server/internal/geoip"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/settings"
@@ -23,6 +24,7 @@ type Deps struct {
 	NodeManager    *node.NodeManager
 	SessionManager *SessionManager
 	Settings       *settings.Cache
+	GeoIP          *geoip.Service // may be nil when geoip is disabled
 }
 
 // ValidateToken validates a JWT token string and returns the claims.

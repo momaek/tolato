@@ -84,7 +84,7 @@ export type MessageSegment =
 
 export interface ToolCallItem {
   id: string
-  tool: 'list_nodes' | 'get_node_info' | 'execute_command'
+  tool: 'list_nodes' | 'get_node_info' | 'edit_node_info' | 'execute_command'
   args: Record<string, unknown>
   result?: ToolResultItem
 }
@@ -123,12 +123,31 @@ export interface NodeListItem {
   name: string
   alias?: string
   ip: string
+  country_code?: string  // ISO 3166-1 alpha-2 (e.g. "JP")
+  city?: string          // English city name
+  asn?: string           // autonomous system org name
   status: 'online' | 'offline'
   os: string
   cpu?: number
   memory?: number
   disk?: number
+  extra?: NodeExtra
   last_heartbeat?: string
+}
+
+// NodeExtra is a free-form bag of metadata. Conventional keys are surfaced as
+// optional typed fields, but any key is allowed (the AI assistant may add more).
+export interface NodeExtra {
+  provider?: string
+  plan?: string
+  expires_at?: string         // ISO date (YYYY-MM-DD or RFC3339)
+  monthly_cost?: number
+  currency?: string
+  billing_cycle?: string      // e.g. "monthly", "yearly"
+  renewal_url?: string
+  account_email?: string
+  notes?: string
+  [key: string]: unknown
 }
 
 export interface NodeDetail {
@@ -136,6 +155,9 @@ export interface NodeDetail {
   name: string
   alias?: string
   ip: string
+  country_code?: string
+  city?: string
+  asn?: string
   os: string
   kernel: string
   agent_version: string
@@ -143,6 +165,7 @@ export interface NodeDetail {
   memory_total_mb: number
   disk_total_gb: number
   status: 'online' | 'offline'
+  extra?: NodeExtra
   last_heartbeat?: string
   created_at: string
   metrics?: NodeMetrics
@@ -158,6 +181,7 @@ export interface NodeMetrics {
 
 export interface UpdateNodeRequest {
   alias?: string
+  extra?: Record<string, unknown>  // partial-merged on the server
 }
 
 export interface NodeCommandItem {

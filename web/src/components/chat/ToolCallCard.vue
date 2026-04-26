@@ -38,6 +38,17 @@ const commandStr = computed(() => {
   return JSON.stringify(props.toolCall.args || {})
 })
 
+const editPreview = computed(() => {
+  if (props.toolCall.tool !== 'edit_node_info') return ''
+  const args = props.toolCall.args || {}
+  const parts: string[] = []
+  if (typeof args.alias === 'string') parts.push(`alias=${args.alias || '∅'}`)
+  if (args.extra && typeof args.extra === 'object') {
+    parts.push(...Object.keys(args.extra as object).map((k) => `${k}=${(args.extra as Record<string, unknown>)[k]}`))
+  }
+  return parts.join(' · ')
+})
+
 const borderClass = 'border-l-[3px]'
 
 const borderColor = computed(() => {
@@ -66,6 +77,9 @@ const borderColor = computed(() => {
 
       <span v-if="toolCall.tool === 'execute_command'" class="truncate font-mono opacity-60">
         {{ commandStr }}
+      </span>
+      <span v-else-if="toolCall.tool === 'edit_node_info'" class="truncate opacity-60">
+        {{ editPreview }}
       </span>
 
       <template v-if="toolCall.result?.duration_ms">

@@ -117,11 +117,15 @@ type NodeListItem struct {
 	Name          string     `json:"name"`
 	Alias         *string    `json:"alias,omitempty"`
 	IP            string     `json:"ip"`
+	CountryCode   string     `json:"country_code,omitempty"`
+	City          string     `json:"city,omitempty"`
+	ASN           string     `json:"asn,omitempty"`
 	Status        string     `json:"status"` // online, offline
 	OS            string     `json:"os"`
 	CPU           *float64   `json:"cpu,omitempty"`    // current CPU usage %
 	Memory        *float64   `json:"memory,omitempty"` // current memory usage %
 	Disk          *float64   `json:"disk,omitempty"`   // current disk usage %
+	Extra         JSONMap    `json:"extra,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 }
 
@@ -131,6 +135,9 @@ type NodeDetail struct {
 	Name          string     `json:"name"`
 	Alias         *string    `json:"alias,omitempty"`
 	IP            string     `json:"ip"`
+	CountryCode   string     `json:"country_code,omitempty"`
+	City          string     `json:"city,omitempty"`
+	ASN           string     `json:"asn,omitempty"`
 	OS            string     `json:"os"`
 	Kernel        string     `json:"kernel"`
 	AgentVersion  string     `json:"agent_version"`
@@ -138,6 +145,7 @@ type NodeDetail struct {
 	MemoryTotalMB int        `json:"memory_total_mb"`
 	DiskTotalGB   int        `json:"disk_total_gb"`
 	Status        string     `json:"status"`
+	Extra         JSONMap    `json:"extra,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 
@@ -156,6 +164,9 @@ type NodeMetrics struct {
 // PUT /api/nodes/:id
 type UpdateNodeRequest struct {
 	Alias *string `json:"alias,omitempty"`
+	// Extra is partial-merged into the existing extra map: keys you supply
+	// overwrite, keys you omit are kept, and explicit null values delete that key.
+	Extra map[string]any `json:"extra,omitempty"`
 }
 
 // --- Settings ---

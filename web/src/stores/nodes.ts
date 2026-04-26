@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getNodes, createNode, deleteNode } from '@/services/api'
+import { getNodes, createNode, deleteNode, updateNode } from '@/services/api'
 import type { NodeListItem, CreateNodeRequest, CreateNodeResponse } from '@/types/api'
 
 export const useNodesStore = defineStore('nodes', () => {
@@ -29,11 +29,18 @@ export const useNodesStore = defineStore('nodes', () => {
     nodes.value = nodes.value.filter((n) => n.id !== id)
   }
 
+  async function renameNode(id: string, alias: string) {
+    await updateNode(id, { alias })
+    const n = nodes.value.find((x) => x.id === id)
+    if (n) n.alias = alias || undefined
+  }
+
   return {
     nodes,
     loading,
     fetchNodes,
     addNode,
     removeNode,
+    renameNode,
   }
 })

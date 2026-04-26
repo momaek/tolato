@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Server, Cpu, HardDrive, Activity, Terminal as TerminalIcon } from 'lucide-vue-next'
+import { ArrowLeft, Server, Cpu, HardDrive, Activity, Terminal as TerminalIcon, Info, Calendar } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -42,6 +42,45 @@ onMounted(async () => {
 function formatTime(ts: string) {
   return new Date(ts).toLocaleString()
 }
+
+// Conventional keys we know how to label nicely; everything else is rendered
+// with its raw key as label.
+const EXTRA_LABELS: Record<string, string> = {
+  provider: 'Provider',
+  plan: 'Plan',
+  expires_at: 'Expires',
+  monthly_cost: 'Monthly Cost',
+  currency: 'Currency',
+  billing_cycle: 'Billing Cycle',
+  renewal_url: 'Renewal URL',
+  account_email: 'Account Email',
+  notes: 'Notes',
+}
+
+const extraEntries = computed(() => {
+  const e = node.value?.extra
+  if (!e) return []
+  return Object.entries(e).map(([key, value]) => ({
+    key,
+    label: EXTRA_LABELS[key] ?? key,
+    value,
+    isUrl: typeof value === 'string' && /^https?:\/\//i.test(value),
+    isLong: typeof value === 'string' && value.length > 80,
+  }))
+})
+
+const expiresInfo = computed(() => {
+  const raw = node.value?.extra?.expires_at
+  if (typeof raw !== 'string' || !raw) return null
+  const t = Date.parse(raw)
+  if (Number.isNaN(t)) return null
+  const diffMs = t - Date.now()
+  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+  let tone: 'normal' | 'soon' | 'expired' = 'normal'
+  if (days < 0) tone = 'expired'
+  else if (days <= 14) tone = 'soon'
+  return { days, tone, raw }
+})
 </script>
 
 <template>
@@ -55,6 +94,23 @@ function formatTime(ts: string) {
       <h1 class="text-lg font-semibold">{{ node?.alias || node?.name || $t('common.loading') }}</h1>
       <Badge v-if="node" :variant="node.status === 'online' ? 'default' : 'secondary'">
         {{ node.status === 'online' ? $t('common.online') : $t('common.offline') }}
+      </Badge>
+      <Badge
+        v-if="expiresInfo"
+        :style="{
+          backgroundColor: expiresInfo.tone === 'expired' ? 'var(--color-error)'
+            : expiresInfo.tone === 'soon' ? 'var(--color-warning, #d97706)'
+            : 'var(--secondary)',
+          color: expiresInfo.tone === 'normal' ? 'var(--secondary-foreground)' : 'var(--color-error-foreground)',
+        }"
+      >
+        <Calendar class="mr-1 h-3 w-3 inline" />
+        <template v-if="expiresInfo.tone === 'expired'">
+          {{ $t('nodeDetail.expired', { days: -expiresInfo.days }) }}
+        </template>
+        <template v-else>
+          {{ $t('nodeDetail.expiresInDays', { days: expiresInfo.days }) }}
+        </template>
       </Badge>
       <div class="flex-1" />
       <Button
@@ -130,6 +186,33 @@ function formatTime(ts: string) {
           <div class="rounded-lg p-4" style="background-color: var(--card)">
             <div class="text-xs" style="color: var(--muted-foreground)">{{ $t('nodeDetail.diskUsage') }}</div>
             <div class="mt-1 text-2xl font-bold">{{ node.metrics.disk.toFixed(1) }}%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Subscription / Notes (free-form metadata) -->
+      <div v-if="extraEntries.length > 0">
+        <h2 class="flex items-center gap-2 text-sm font-medium mb-3">
+          <Info class="h-4 w-4" style="color: var(--primary)" />
+          {{ $t('nodeDetail.subscriptionInfo') }}
+        </h2>
+        <div class="rounded-lg p-4 space-y-2" style="background-color: var(--card)">
+          <div
+            v-for="entry in extraEntries"
+            :key="entry.key"
+            class="grid grid-cols-[140px_1fr] gap-3 items-start text-sm"
+          >
+            <div class="text-xs pt-0.5" style="color: var(--muted-foreground)">{{ entry.label }}</div>
+            <a
+              v-if="entry.isUrl"
+              :href="String(entry.value)"
+              target="_blank"
+              rel="noopener"
+              class="break-all underline underline-offset-2 hover:text-foreground"
+              style="color: var(--primary)"
+            >{{ entry.value }}</a>
+            <div v-else-if="entry.isLong" class="whitespace-pre-wrap break-words">{{ entry.value }}</div>
+            <div v-else class="break-all">{{ entry.value }}</div>
           </div>
         </div>
       </div>

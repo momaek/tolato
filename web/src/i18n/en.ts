@@ -94,6 +94,8 @@ export default {
     confirmRemove: 'Are you sure you want to remove this node?',
     noNodes: 'No nodes found',
     ip: 'IP',
+    region: 'Region',
+    asn: 'ASN',
     os: 'OS',
     cpu: 'CPU',
     memory: 'Memory',
@@ -101,6 +103,9 @@ export default {
     lastHeartbeat: 'Last Heartbeat',
     openTerminal: 'Open Terminal',
     viewDetail: 'View Details',
+    editAlias: 'Edit alias',
+    aliasSaveFailed: 'Failed to save alias',
+    geoipAttribution: 'Region & ASN data by',
   },
 
   nodeDetail: {
@@ -122,6 +127,9 @@ export default {
     command: 'Command',
     exitCode: 'Exit Code',
     noCommandHistory: 'No command history',
+    subscriptionInfo: 'Subscription & Notes',
+    expiresInDays: 'Expires in {days}d',
+    expired: 'Expired {days}d ago',
   },
 
   auditLog: {

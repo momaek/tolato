@@ -94,6 +94,8 @@ export default {
     confirmRemove: '确定要移除此节点吗？',
     noNodes: '未找到节点',
     ip: 'IP',
+    region: '区域',
+    asn: 'ASN',
     os: '操作系统',
     cpu: 'CPU',
     memory: '内存',
@@ -101,6 +103,9 @@ export default {
     lastHeartbeat: '最后心跳',
     openTerminal: '打开终端',
     viewDetail: '查看详情',
+    editAlias: '编辑别名',
+    aliasSaveFailed: '保存别名失败',
+    geoipAttribution: '区域与 ASN 数据来源：',
   },
 
   nodeDetail: {
@@ -122,6 +127,9 @@ export default {
     command: '命令',
     exitCode: '退出码',
     noCommandHistory: '暂无命令历史',
+    subscriptionInfo: '订阅与备注',
+    expiresInDays: '{days} 天后到期',
+    expired: '已过期 {days} 天',
   },
 
   auditLog: {

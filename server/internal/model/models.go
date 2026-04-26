@@ -1,7 +1,44 @@
 // Package model defines the database models and API contracts for tolato.
 package model
 
-import "time"
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"time"
+)
+
+// JSONMap is a flexible key/value bag stored as Postgres jsonb. Used for
+// node Extra metadata where the AI assistant (or the user) can stash free-form
+// fields like provider, expires_at, monthly_cost, renewal_url, etc.
+type JSONMap map[string]any
+
+// Value implements driver.Valuer for GORM persistence.
+func (m JSONMap) Value() (driver.Value, error) {
+	if m == nil {
+		return "{}", nil
+	}
+	return json.Marshal(m)
+}
+
+// Scan implements sql.Scanner. Both []byte (typical jsonb) and string forms
+// are accepted; NULL becomes a nil map.
+func (m *JSONMap) Scan(value any) error {
+	if value == nil {
+		*m = nil
+		return nil
+	}
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return errors.New("JSONMap: unsupported scan source")
+	}
+	return json.Unmarshal(bytes, m)
+}
 
 // ============================================================================
 // Database Models (GORM)
@@ -38,18 +75,22 @@ type Node struct {
 	ID            string    `json:"id" gorm:"primaryKey;type:text"`
 	Name          string    `json:"name" gorm:"type:text;not null"`          // hostname reported by agent
 	Alias         *string   `json:"alias,omitempty" gorm:"type:text"`        // user-defined alias
-	IP            string    `json:"ip" gorm:"type:text"`
-	OS            string    `json:"os" gorm:"type:text"`
-	Kernel        string    `json:"kernel" gorm:"type:text"`
-	AgentVersion  string    `json:"agent_version" gorm:"type:text"`
-	CPUCores      int       `json:"cpu_cores" gorm:"default:0"`
-	MemoryTotalMB int       `json:"memory_total_mb" gorm:"default:0"`
-	DiskTotalGB   int       `json:"disk_total_gb" gorm:"default:0"`
-	Status        string    `json:"status" gorm:"type:text;not null;default:'offline'"` // online, offline
-	AgentSecret   string    `json:"-" gorm:"type:text"`                                 // never expose to frontend
+	IP            string     `json:"ip" gorm:"type:text"`
+	CountryCode   string     `json:"country_code" gorm:"type:text"` // ISO 3166-1 alpha-2 from GeoIP lookup
+	City          string     `json:"city" gorm:"type:text"`
+	ASN           string     `json:"asn" gorm:"type:text"` // org name (e.g. "DigitalOcean, LLC")
+	OS            string     `json:"os" gorm:"type:text"`
+	Kernel        string     `json:"kernel" gorm:"type:text"`
+	AgentVersion  string     `json:"agent_version" gorm:"type:text"`
+	CPUCores      int        `json:"cpu_cores" gorm:"default:0"`
+	MemoryTotalMB int        `json:"memory_total_mb" gorm:"default:0"`
+	DiskTotalGB   int        `json:"disk_total_gb" gorm:"default:0"`
+	Status        string     `json:"status" gorm:"type:text;not null;default:'offline'"` // online, offline
+	AgentSecret   string     `json:"-" gorm:"type:text"`                                 // never expose to frontend
+	Extra         JSONMap    `json:"extra,omitempty" gorm:"type:jsonb"`                  // free-form: provider, expires_at, plan, etc.
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
-	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt     time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	CreatedAt     time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // --- Core: Registration Tokens ---

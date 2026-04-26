@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/momaek/tolato/server/internal/geoip"
 	"github.com/momaek/tolato/server/internal/model"
 )
 
@@ -42,12 +43,17 @@ func GetRegistrationToken(tokenID string) (*model.RegistrationToken, error) {
 // --- Nodes ---
 
 // CreateNodeFromRegistration creates a new Node when an agent registers.
-func CreateNodeFromRegistration(reg model.AgentRegisterPayload, alias *string, agentSecret string) (*model.Node, error) {
+// geo carries optional country/city/ASN resolved from reg.IP; pass a zero
+// geoip.Result if lookup was skipped or failed.
+func CreateNodeFromRegistration(reg model.AgentRegisterPayload, alias *string, agentSecret string, geo geoip.Result) (*model.Node, error) {
 	node := &model.Node{
 		ID:            uuid.New().String(),
 		Name:          reg.Hostname,
 		Alias:         alias,
 		IP:            reg.IP,
+		CountryCode:   geo.CountryCode,
+		City:          geo.City,
+		ASN:           geo.ASN,
 		OS:            reg.OS,
 		Kernel:        reg.Kernel,
 		AgentVersion:  reg.AgentVersion,
@@ -61,6 +67,14 @@ func CreateNodeFromRegistration(reg model.AgentRegisterPayload, alias *string, a
 		return nil, err
 	}
 	return node, nil
+}
+
+// ListNodesMissingGeo returns nodes that have an IP but no GeoIP data yet.
+// Used to backfill region/ASN once the geoip service has data available.
+func ListNodesMissingGeo() ([]model.Node, error) {
+	var nodes []model.Node
+	err := DB.Where("ip <> '' AND country_code = ''").Find(&nodes).Error
+	return nodes, err
 }
 
 // ListNodes returns paginated nodes with optional status filter.

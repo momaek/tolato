@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/momaek/tolato/server/internal/config"
+	"github.com/momaek/tolato/server/internal/geoip"
 	"github.com/momaek/tolato/server/internal/handler"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/node"
@@ -38,11 +39,21 @@ func main() {
 	sm := handler.NewSessionManager()
 	settingsCache := settings.New()
 
+	var geoSvc *geoip.Service
+	if cfg.GeoIP.Enabled {
+		var err error
+		geoSvc, err = geoip.New(cfg.GeoIP.DataDir)
+		if err != nil {
+			log.Printf("GeoIP service init failed (continuing without): %v", err)
+		}
+	}
+
 	deps := &handler.Deps{
 		Config:         cfg,
 		NodeManager:    nm,
 		SessionManager: sm,
 		Settings:       settingsCache,
+		GeoIP:          geoSvc,
 	}
 
 	handler.InitUpgraders(cfg.Server.AllowedOrigins)
@@ -70,6 +81,13 @@ func main() {
 		}
 	}()
 
+	if geoSvc != nil {
+		go runGeoIPBackfill(rootCtx, geoSvc)
+		if cfg.GeoIP.RefreshInterval > 0 {
+			go runGeoIPRefresh(rootCtx, geoSvc, cfg.GeoIP.RefreshInterval)
+		}
+	}
+
 	<-rootCtx.Done()
 	log.Println("Shutdown signal received, draining...")
 
@@ -78,6 +96,51 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
+	if geoSvc != nil {
+		geoSvc.Close()
+	}
 
 	log.Println("Bye")
+}
+
+// runGeoIPRefresh re-downloads the .mmdb files on the configured interval.
+func runGeoIPRefresh(ctx context.Context, svc *geoip.Service, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			svc.Refresh()
+		}
+	}
+}
+
+// runGeoIPBackfill fills in country_code/city/asn for nodes that registered
+// before the geoip service was available.
+func runGeoIPBackfill(ctx context.Context, svc *geoip.Service) {
+	nodes, err := store.ListNodesMissingGeo()
+	if err != nil {
+		log.Printf("GeoIP backfill: list failed: %v", err)
+		return
+	}
+	if len(nodes) == 0 {
+		return
+	}
+	log.Printf("GeoIP backfill: resolving %d nodes", len(nodes))
+	for _, n := range nodes {
+		if ctx.Err() != nil {
+			return
+		}
+		geo, _ := svc.Lookup(n.IP)
+		if geo.IsZero() {
+			continue
+		}
+		_ = store.UpdateNode(n.ID, map[string]any{
+			"country_code": geo.CountryCode,
+			"city":         geo.City,
+			"asn":          geo.ASN,
+		})
+	}
 }
