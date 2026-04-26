@@ -12,5 +12,6 @@ agent/agent
 /pgdata/
 # server runtime data (geoip mmdb cache, etc.)
 /server/data/
+/tolato-data/
 # Claude Code preview MCP launch config (per-developer)
 .claude/launch.json

@@ -39,15 +39,24 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # ---------- stage: runtime ----------
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk add --no-cache ca-certificates tzdata su-exec \
  && adduser -D -u 1000 tolato
 
 WORKDIR /app
 COPY --from=server-builder /out/tolato-server /usr/local/bin/tolato-server
 COPY server/config.yaml /app/config.yaml
+COPY server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-USER tolato
+# Pre-create the runtime data dir (geoip mmdb cache lives here by default)
+# and hand it to the unprivileged user. The entrypoint will additionally
+# re-chown on every start so bind-mounted host dirs work without manual setup.
+RUN mkdir -p /app/data/geoip \
+ && chown -R tolato:tolato /app/data \
+ && chmod +x /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/tolato-server"]
+# Start as root so the entrypoint can chown the data dir, then drop to
+# tolato (UID 1000) via su-exec.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["-config", "/app/config.yaml"]
