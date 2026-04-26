@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Copy, Check, Terminal as TerminalIcon, Eye, Pencil } from 'lucide-vue-next'
+import { Plus, Search, Copy, Check, Terminal as TerminalIcon, Eye, Pencil, Rows3, LayoutGrid } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import NodeCard from '@/components/nodes/NodeCard.vue'
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,16 @@ const nodesStore = useNodesStore()
 const searchQuery = ref('')
 const statusFilter = ref('all')
 const dialogOpen = ref(false)
+
+const VIEW_STORAGE_KEY = 'tolato.nodes.viewMode'
+type ViewMode = 'table' | 'card'
+const viewMode = ref<ViewMode>(
+  (localStorage.getItem(VIEW_STORAGE_KEY) as ViewMode) || 'card'
+)
+function setViewMode(mode: ViewMode) {
+  viewMode.value = mode
+  localStorage.setItem(VIEW_STORAGE_KEY, mode)
+}
 const nodeAlias = ref('')
 const createdNode = ref<CreateNodeResponse | null>(null)
 const addingNode = ref(false)
@@ -183,6 +194,31 @@ async function handleDeleteNode(id: string) {
           <SelectItem value="offline">{{ $t('common.offline') }}</SelectItem>
         </SelectContent>
       </Select>
+      <div
+        class="inline-flex items-center rounded-md border p-0.5"
+        style="border-color: var(--border)"
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7"
+          :class="viewMode === 'card' ? 'bg-secondary' : ''"
+          :title="$t('nodes.viewCard')"
+          @click="setViewMode('card')"
+        >
+          <LayoutGrid class="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7"
+          :class="viewMode === 'table' ? 'bg-secondary' : ''"
+          :title="$t('nodes.viewTable')"
+          @click="setViewMode('table')"
+        >
+          <Rows3 class="h-4 w-4" />
+        </Button>
+      </div>
       <Dialog v-model:open="dialogOpen" @update:open="resetDialog">
         <DialogTrigger as-child>
           <Button>
@@ -244,7 +280,7 @@ async function handleDeleteNode(id: string) {
     </div>
 
     <!-- Table -->
-    <div class="flex-1 overflow-auto px-6 py-4">
+    <div v-if="viewMode === 'table'" class="flex-1 overflow-auto px-6 py-4">
       <Table class="mb-3">
         <TableHeader>
           <TableRow>
@@ -355,6 +391,54 @@ async function handleDeleteNode(id: string) {
       </Table>
 
       <p class="px-1 text-xs" style="color: var(--muted-foreground)">
+        {{ $t('nodes.geoipAttribution') }}
+        <a
+          href="https://www.maxmind.com"
+          target="_blank"
+          rel="noopener"
+          class="underline underline-offset-2 hover:text-foreground"
+        >MaxMind GeoLite2</a>
+        ·
+        <a
+          href="https://github.com/P3TERX/GeoLite.mmdb"
+          target="_blank"
+          rel="noopener"
+          class="underline underline-offset-2 hover:text-foreground"
+        >P3TERX/GeoLite.mmdb</a>
+      </p>
+    </div>
+
+    <!-- Card grid -->
+    <div v-else class="flex-1 overflow-auto px-6 py-4">
+      <div
+        v-if="filteredNodes.length === 0"
+        class="py-12 text-center text-sm"
+        style="color: var(--muted-foreground)"
+      >
+        {{ nodesStore.loading ? $t('common.loading') : $t('nodes.noNodes') }}
+      </div>
+      <div
+        v-else
+        class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
+      >
+        <NodeCard
+          v-for="node in filteredNodes"
+          :key="node.id"
+          :node="node"
+          :editing="editingId === node.id"
+          :editing-draft="editingDraft"
+          :alias-saving="aliasSaving"
+          @start-edit="startEditAlias(node.id, node.alias)"
+          @commit-edit="commitAlias"
+          @cancel-edit="cancelEditAlias"
+          @update:editing-draft="(v) => editingDraft = v"
+          @open-terminal="router.push(`/nodes/${node.id}/terminal`)"
+          @view-detail="router.push(`/nodes/${node.id}`)"
+          @remove="handleDeleteNode(node.id)"
+        />
+      </div>
+
+      <p class="mt-4 px-1 text-xs" style="color: var(--muted-foreground)">
         {{ $t('nodes.geoipAttribution') }}
         <a
           href="https://www.maxmind.com"
