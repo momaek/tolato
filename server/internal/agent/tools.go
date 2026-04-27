@@ -35,7 +35,7 @@ func ToolDefs() []llm.ToolDefinition {
 	return []llm.ToolDefinition{
 		{
 			Name:        "list_nodes",
-			Description: "List all registered VPS nodes and their current status.",
+			Description: "List all registered VPS nodes and their current status. Each item includes GeoIP region (country_code, city, asn) when available.",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -43,7 +43,7 @@ func ToolDefs() []llm.ToolDefinition {
 		},
 		{
 			Name:        "get_node_info",
-			Description: "Get detailed system information and real-time metrics for a specific node.",
+			Description: "Get detailed system information and real-time metrics for a specific node, including GeoIP region (country_code, city, asn) when available.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -209,6 +209,15 @@ func (te *ToolExecutor) executeListNodes() *model.ToolResultItem {
 		if n.Alias != nil {
 			item["alias"] = *n.Alias
 		}
+		if n.CountryCode != "" {
+			item["country_code"] = n.CountryCode
+		}
+		if n.City != "" {
+			item["city"] = n.City
+		}
+		if n.ASN != "" {
+			item["asn"] = n.ASN
+		}
 		// Attach cached metrics if online
 		if metrics := te.nodeManager.GetMetrics(n.ID); metrics != nil {
 			item["cpu"] = metrics.CPU
@@ -244,6 +253,15 @@ func (te *ToolExecutor) executeGetNodeInfo(nodeID string) *model.ToolResultItem 
 	}
 	if n.Alias != nil {
 		info["alias"] = *n.Alias
+	}
+	if n.CountryCode != "" {
+		info["country_code"] = n.CountryCode
+	}
+	if n.City != "" {
+		info["city"] = n.City
+	}
+	if n.ASN != "" {
+		info["asn"] = n.ASN
 	}
 	if metrics := te.nodeManager.GetMetrics(n.ID); metrics != nil {
 		info["metrics"] = map[string]any{

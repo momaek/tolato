@@ -69,6 +69,11 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
+		// Capture the real client IP from the connection (honors X-Forwarded-For
+		// only for trusted proxies set in router.go). Agent-reported IPs are not
+		// reliable — agents behind NAT/Docker often pick a private interface.
+		clientIP := c.ClientIP()
+
 		// Upgrade to WebSocket
 		conn, err := agentUpgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
@@ -92,14 +97,26 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			}
 
 			ac := deps.NodeManager.RegisterConn(existingNode.ID, conn)
-			installSystemHandlers(deps, existingNode.ID, ac)
+			installSystemHandlers(deps, existingNode.ID, clientIP, ac)
 			defer func() {
 				deps.NodeManager.RemoveConn(existingNode.ID)
 				_ = store.SetNodeStatus(existingNode.ID, "offline")
 				log.Printf("Agent disconnected (reconnect): node=%s", existingNode.ID)
 			}()
 
-			log.Printf("Agent reconnected: node=%s", existingNode.ID)
+			// Source IP can change between reconnects (machine roams networks);
+			// refresh IP + GeoIP if so. Cheap: mmdb lookup is in-memory.
+			if clientIP != "" && existingNode.IP != clientIP {
+				updates := map[string]any{"ip": clientIP}
+				if geo, _ := deps.GeoIP.Lookup(clientIP); !geo.IsZero() {
+					updates["country_code"] = geo.CountryCode
+					updates["city"] = geo.City
+					updates["asn"] = geo.ASN
+				}
+				_ = store.UpdateNode(existingNode.ID, updates)
+			}
+
+			log.Printf("Agent reconnected: node=%s ip=%s", existingNode.ID, clientIP)
 			_ = store.UpdateHeartbeat(existingNode.ID)
 
 			// Block until the router goroutine finishes.
@@ -134,6 +151,11 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				continue
 			}
 
+			// Override agent-reported IP with the real connection IP. Agents
+			// behind NAT/Docker self-report private addresses, which break
+			// GeoIP and confuse operators viewing the Nodes list.
+			reg.IP = clientIP
+
 			// Create node in database (with best-effort GeoIP lookup)
 			agentSecret := uuid.New().String()
 			geo, _ := deps.GeoIP.Lookup(reg.IP)
@@ -160,7 +182,7 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 
 			// Register connection
 			ac := deps.NodeManager.RegisterConn(node.ID, conn)
-			installSystemHandlers(deps, node.ID, ac)
+			installSystemHandlers(deps, node.ID, clientIP, ac)
 			defer func() {
 				deps.NodeManager.RemoveConn(node.ID)
 				_ = store.SetNodeStatus(node.ID, "offline")
@@ -179,37 +201,39 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 // installSystemHandlers wires heartbeat / re-register callbacks on the AgentConn
 // router. All message reading is owned by the router goroutine started by
 // NodeManager.RegisterConn.
-func installSystemHandlers(deps *Deps, nodeID string, ac *node.AgentConn) {
+//
+// clientIP is the source IP captured at WebSocket upgrade time and is fixed
+// for the lifetime of the connection — used to override the agent-reported IP.
+func installSystemHandlers(deps *Deps, nodeID, clientIP string, ac *node.AgentConn) {
 	ac.SetSystemHandlers(node.SystemHandlers{
 		OnHeartbeat: func(payload json.RawMessage) {
 			handleAgentHeartbeat(deps, nodeID, payload)
 		},
 		OnReRegister: func(payload json.RawMessage) {
-			handleAgentReRegister(deps, nodeID, payload)
+			handleAgentReRegister(deps, nodeID, clientIP, payload)
 		},
 	})
 }
 
-func handleAgentReRegister(deps *Deps, nodeID string, payload json.RawMessage) {
+func handleAgentReRegister(deps *Deps, nodeID, clientIP string, payload json.RawMessage) {
 	var reg model.AgentRegisterPayload
 	if err := json.Unmarshal(payload, &reg); err != nil {
 		return
 	}
-	// Update node info (hostname, os, etc. may have changed)
+	// Update node info (hostname, os, etc. may have changed). IP comes from
+	// the connection, not from the agent payload.
 	updates := map[string]any{
 		"name":            reg.Hostname,
 		"os":              reg.OS,
 		"kernel":          reg.Kernel,
-		"ip":              reg.IP,
+		"ip":              clientIP,
 		"agent_version":   reg.AgentVersion,
 		"cpu_cores":       reg.CPUCores,
 		"memory_total_mb": reg.MemoryTotalMB,
 		"disk_total_gb":   reg.DiskTotalGB,
 		"status":          "online",
 	}
-	// Refresh geo data if the IP changed (cheap to re-query unconditionally
-	// since the cached mmdb lookup is in-memory).
-	if geo, _ := deps.GeoIP.Lookup(reg.IP); !geo.IsZero() {
+	if geo, _ := deps.GeoIP.Lookup(clientIP); !geo.IsZero() {
 		updates["country_code"] = geo.CountryCode
 		updates["city"] = geo.City
 		updates["asn"] = geo.ASN
