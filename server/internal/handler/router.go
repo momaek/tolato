@@ -43,10 +43,19 @@ func (d *Deps) ValidateToken(tokenString string) (*middleware.Claims, error) {
 func SetupRouter(deps *Deps) *gin.Engine {
 	r := gin.Default()
 
-	// Trust only loopback proxies. Default deployment binds the server to
-	// 127.0.0.1 behind a reverse proxy (see docker-compose.yaml); narrowing
-	// the trust set keeps X-Forwarded-For unspoofable from direct callers.
-	_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+	// Trust loopback + RFC1918 ranges. The server binds to 127.0.0.1 on the
+	// host (see docker-compose.yaml) and only to the container interface
+	// inside Docker, so the only callers reaching it from a private address
+	// are the host-side reverse proxy (often arriving as the docker bridge
+	// gateway, e.g. 172.22.0.1) or sibling containers — both trusted.
+	// Public callers can't reach the listening port without traversing the
+	// proxy, so X-Forwarded-For stays unspoofable.
+	_ = r.SetTrustedProxies([]string{
+		"127.0.0.1", "::1",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+	})
 
 	// CORS middleware with origin whitelist
 	r.Use(corsMiddleware(deps.Config.Server.AllowedOrigins))
