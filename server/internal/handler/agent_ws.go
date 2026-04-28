@@ -3,15 +3,48 @@ package handler
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/momaek/tolato/server/internal/geoip"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/store"
 )
+
+// resolvePublicIP returns connIP only when it parses to a routable public
+// address. Used to filter out the docker bridge gateway / loopback /
+// Cloudflare-edge cases where c.ClientIP() doesn't reflect the real client.
+func resolvePublicIP(connIP string) string {
+	ip := net.ParseIP(connIP)
+	if ip == nil || !geoip.IsPublicIP(ip) {
+		return ""
+	}
+	return connIP
+}
+
+// preferredIP picks the better of an agent-reported IP and a server-detected
+// connection IP.
+//
+// Default to trusting the agent's self-report — getLocalIP() works correctly
+// for the vast majority of nodes (single-NIC public VPS). Only fall back to
+// the connection IP when the agent reported something private/unparseable
+// (NAT'd hosts that picked the wrong interface). This deliberately avoids
+// overwriting working public IPs with whatever the connection happens to be —
+// behind Cloudflare/Caddy that connection IP might be a CDN edge address, not
+// the real client.
+func preferredIP(agentIP, connPublicIP string) string {
+	if ip := net.ParseIP(agentIP); ip != nil && geoip.IsPublicIP(ip) {
+		return agentIP
+	}
+	if connPublicIP != "" {
+		return connPublicIP
+	}
+	return agentIP
+}
 
 // agentUpgrader is initialized by InitUpgraders with origin checking.
 var agentUpgrader = websocket.Upgrader{
@@ -70,9 +103,12 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 		}
 
 		// Capture the real client IP from the connection (honors X-Forwarded-For
-		// only for trusted proxies set in router.go). Agent-reported IPs are not
-		// reliable — agents behind NAT/Docker often pick a private interface.
-		clientIP := c.ClientIP()
+		// only for trusted proxies set in router.go). Empty when the apparent
+		// source is private/loopback — usually means the reverse proxy isn't
+		// forwarding X-Forwarded-For, in which case we'd be writing the docker
+		// bridge gateway (e.g. 172.22.0.1) into every node row. Better to fall
+		// back to the agent's self-report than to corrupt every row.
+		clientIP := resolvePublicIP(c.ClientIP())
 
 		// Upgrade to WebSocket
 		conn, err := agentUpgrader.Upgrade(c.Writer, c.Request, nil)
@@ -104,11 +140,12 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				log.Printf("Agent disconnected (reconnect): node=%s", existingNode.ID)
 			}()
 
-			// Source IP can change between reconnects (machine roams networks);
-			// refresh IP + GeoIP if so. Cheap: mmdb lookup is in-memory.
-			if clientIP != "" && existingNode.IP != clientIP {
-				updates := map[string]any{"ip": clientIP}
-				if geo, _ := deps.GeoIP.Lookup(clientIP); !geo.IsZero() {
+			// Heal nodes whose stored IP is private/garbage (NAT'd agent picked
+			// the wrong interface) by replacing with the public connection IP
+			// when available. Don't disturb already-good public IPs.
+			if newIP := preferredIP(existingNode.IP, clientIP); newIP != existingNode.IP {
+				updates := map[string]any{"ip": newIP}
+				if geo, _ := deps.GeoIP.Lookup(newIP); !geo.IsZero() {
 					updates["country_code"] = geo.CountryCode
 					updates["city"] = geo.City
 					updates["asn"] = geo.ASN
@@ -116,7 +153,7 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				_ = store.UpdateNode(existingNode.ID, updates)
 			}
 
-			log.Printf("Agent reconnected: node=%s ip=%s", existingNode.ID, clientIP)
+			log.Printf("Agent reconnected: node=%s", existingNode.ID)
 			_ = store.UpdateHeartbeat(existingNode.ID)
 
 			// Block until the router goroutine finishes.
@@ -151,10 +188,7 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				continue
 			}
 
-			// Override agent-reported IP with the real connection IP. Agents
-			// behind NAT/Docker self-report private addresses, which break
-			// GeoIP and confuse operators viewing the Nodes list.
-			reg.IP = clientIP
+			reg.IP = preferredIP(reg.IP, clientIP)
 
 			// Create node in database (with best-effort GeoIP lookup)
 			agentSecret := uuid.New().String()
@@ -202,8 +236,8 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 // router. All message reading is owned by the router goroutine started by
 // NodeManager.RegisterConn.
 //
-// clientIP is the source IP captured at WebSocket upgrade time and is fixed
-// for the lifetime of the connection — used to override the agent-reported IP.
+// clientIP is the public source IP captured at WebSocket upgrade time, or
+// empty when the connection came from a private/loopback address.
 func installSystemHandlers(deps *Deps, nodeID, clientIP string, ac *node.AgentConn) {
 	ac.SetSystemHandlers(node.SystemHandlers{
 		OnHeartbeat: func(payload json.RawMessage) {
@@ -220,20 +254,19 @@ func handleAgentReRegister(deps *Deps, nodeID, clientIP string, payload json.Raw
 	if err := json.Unmarshal(payload, &reg); err != nil {
 		return
 	}
-	// Update node info (hostname, os, etc. may have changed). IP comes from
-	// the connection, not from the agent payload.
+	ip := preferredIP(reg.IP, clientIP)
 	updates := map[string]any{
 		"name":            reg.Hostname,
 		"os":              reg.OS,
 		"kernel":          reg.Kernel,
-		"ip":              clientIP,
+		"ip":              ip,
 		"agent_version":   reg.AgentVersion,
 		"cpu_cores":       reg.CPUCores,
 		"memory_total_mb": reg.MemoryTotalMB,
 		"disk_total_gb":   reg.DiskTotalGB,
 		"status":          "online",
 	}
-	if geo, _ := deps.GeoIP.Lookup(clientIP); !geo.IsZero() {
+	if geo, _ := deps.GeoIP.Lookup(ip); !geo.IsZero() {
 		updates["country_code"] = geo.CountryCode
 		updates["city"] = geo.City
 		updates["asn"] = geo.ASN

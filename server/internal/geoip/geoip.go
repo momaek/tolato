@@ -79,7 +79,7 @@ func (s *Service) Lookup(ipStr string) (Result, error) {
 		return Result{}, nil
 	}
 	ip := net.ParseIP(ipStr)
-	if ip == nil || !isPublicIP(ip) {
+	if ip == nil || !IsPublicIP(ip) {
 		return Result{}, nil
 	}
 
@@ -227,8 +227,13 @@ func (s *Service) download(url, dest string) error {
 	return os.Rename(tmp, dest)
 }
 
-// isPublicIP filters out IP ranges that geo data won't have records for.
-func isPublicIP(ip net.IP) bool {
+// IsPublicIP reports whether ip is a routable public address — i.e. not
+// loopback, link-local, multicast, unspecified, or RFC1918 private.
+//
+// Used by GeoIP to skip lookups it can't answer, and by the agent WebSocket
+// handler to decide whether the connection's source IP is trustworthy as the
+// node's "real" IP.
+func IsPublicIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() ||
 		ip.IsMulticast() || ip.IsPrivate() {
