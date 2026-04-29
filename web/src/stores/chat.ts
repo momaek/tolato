@@ -249,6 +249,14 @@ export const useChatStore = defineStore('chat', () => {
   async function addConversation(data: CreateConversationRequest) {
     const conv = await createConversation(data)
     conversations.value.unshift(conv)
+    // Seed local state so the first sendMessage() carries the selected model
+    // and node. Without this, sendMessage races loadConversation's network
+    // round-trip and ships default_node_id: undefined — the AI then can't tell
+    // which node "this machine" refers to.
+    const state = getOrCreateState(conv.id)
+    state.title = conv.title
+    state.model = conv.model || data.model || ''
+    state.defaultNodeId = data.default_node_id ?? undefined
     return conv
   }
 
