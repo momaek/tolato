@@ -20,6 +20,12 @@ const route = useRoute()
 const router = useRouter()
 const nodeId = route.params.nodeId as string
 
+// Terminal opens in a new browser tab — see NodesView.openTerminal for rationale.
+function openTerminal() {
+  const href = router.resolve(`/nodes/${nodeId}/terminal`).href
+  window.open(href, '_blank', 'noopener')
+}
+
 const node = ref<NodeDetail | null>(null)
 const commands = ref<NodeCommandItem[]>([])
 const loading = ref(true)
@@ -118,7 +124,7 @@ const expiresInfo = computed(() => {
         variant="outline"
         size="sm"
         :disabled="node.status !== 'online'"
-        @click="router.push(`/nodes/${nodeId}/terminal`)"
+        @click="openTerminal()"
       >
         <TerminalIcon class="h-4 w-4 mr-1" />
         Open Terminal

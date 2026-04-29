@@ -36,7 +36,6 @@ func main() {
 	}
 
 	nm := node.NewNodeManager()
-	sm := handler.NewSessionManager()
 	settingsCache := settings.New()
 
 	var geoSvc *geoip.Service
@@ -49,11 +48,10 @@ func main() {
 	}
 
 	deps := &handler.Deps{
-		Config:         cfg,
-		NodeManager:    nm,
-		SessionManager: sm,
-		Settings:       settingsCache,
-		GeoIP:          geoSvc,
+		Config:      cfg,
+		NodeManager: nm,
+		Settings:    settingsCache,
+		GeoIP:       geoSvc,
 	}
 
 	handler.InitUpgraders(cfg.Server.AllowedOrigins)

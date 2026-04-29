@@ -23,9 +23,9 @@ var chatUpgrader = websocket.Upgrader{}
 
 // Heartbeat tuning. With no ping/pong, a dead client (browser refresh that
 // dropped TCP, NAT idle timeout, kill -9) leaves the server's ReadMessage
-// blocked forever and the SessionManager pointing at a corpse. The browser
-// auto-replies to WS Pings without JS involvement, so a one-sided pinger on
-// the server is enough to detect dead peers.
+// blocked forever and its goroutines parked. The browser auto-replies to WS
+// Pings without JS involvement, so a one-sided pinger on the server is enough
+// to detect dead peers.
 const (
 	chatPingPeriod  = 30 * time.Second
 	chatReadTimeout = 60 * time.Second // must be > chatPingPeriod
@@ -99,12 +99,9 @@ func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 		// Send auth success (still single-goroutine here — writer hasn't started yet)
 		_ = conn.WriteJSON(model.WSMessage{Type: "auth_ok"})
 
-		// Wrap conn in a ChatSession so all post-auth writes (writer goroutine
-		// and SessionManager.Replace) serialize through one mutex.
+		// Wrap conn in a ChatSession so all post-auth writes serialize through
+		// one mutex. Multiple tabs are supported — each opens its own session.
 		session := NewChatSession(conn)
-
-		// Register with session manager (kicks old connection)
-		deps.SessionManager.Replace(session)
 
 		// Create shared event channel for all loop runners
 		eventCh := make(chan any, 64)
@@ -145,11 +142,10 @@ func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 		//   2. wait for runners to finish → no more sends on eventCh
 		//   3. close(eventCh) → writer's `range` exits cleanly
 		//   4. wait for writer + pinger to exit
-		//   5. unregister from SessionManager and close the session
+		//   5. close the session
 		// Doing it in this order means no goroutine writes to a closed conn
 		// and no runner panics on sending to a closed channel.
 		defer func() {
-			deps.SessionManager.Remove(session)
 			_ = session.Close()
 		}()
 		defer pingerWG.Wait()

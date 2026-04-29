@@ -1,43 +1,24 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { onBeforeUnmount } from 'vue'
 import AppSidebar from './AppSidebar.vue'
-import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { wsService } from '@/services/ws'
 
-const appStore = useAppStore()
-// Instantiate the chat store once here so its WS handlers register before
-// any event can arrive. Views that need data just `useChatStore()` later.
+// Instantiate the chat store once at the shell so its WS handlers register
+// before any event can arrive. Views that need data just `useChatStore()`
+// later. The store registering handlers does NOT itself open a connection —
+// see ChatView for the lazy connect.
 useChatStore()
 
-function connect() {
-  if (appStore.token) {
-    wsService.connect(appStore.token)
-  }
-}
-
-// Connect once on shell mount, reconnect if the token changes (re-login).
-onMounted(connect)
-watch(() => appStore.token, (tok) => {
-  if (tok) connect()
-  else wsService.disconnect()
-})
-
-// Session-replaced: another browser/tab logged in with the same account and the
-// server kicked us. Drop local auth and route back to /login.
-const offState = wsService.onStateChange((s) => {
-  if (s === 'replaced') {
-    toast.error('Session replaced by another login')
-    appStore.logout()
-  }
-})
+// chat WS is opened lazily by ChatView (only when the user actually visits
+// /chat). New tabs that go straight to /nodes or /nodes/:id/terminal don't
+// pay the cost of an idle chat connection. Once opened it stays alive across
+// route changes so a long-running LLM stream isn't dropped when the user
+// navigates away from /chat and back.
 
 // Cleanly close the WS on page refresh / tab close so the server reaps the
-// session immediately instead of waiting on a 60s ping timeout. Without this,
-// a refresh leaves the old server-side session lingering until the new tab's
-// connect triggers SessionManager.Replace — that brief gap is what makes it
-// look like "the frontend is still using the old connection".
+// session immediately instead of waiting on the ping timeout. This is a
+// no-op if no connection was opened in this tab.
 function handleBeforeUnload() {
   wsService.disconnect()
 }
@@ -45,7 +26,7 @@ window.addEventListener('beforeunload', handleBeforeUnload)
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
-  offState()
+  // Logout (or any path that unmounts the shell) tears the chat WS down.
   wsService.disconnect()
 })
 </script>

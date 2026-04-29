@@ -20,11 +20,10 @@ import (
 // than the package-level `store.*` globals where practical — it keeps the
 // dependency graph explicit and the seam available for tests.
 type Deps struct {
-	Config         *config.Config
-	NodeManager    *node.NodeManager
-	SessionManager *SessionManager
-	Settings       *settings.Cache
-	GeoIP          *geoip.Service // may be nil when geoip is disabled
+	Config      *config.Config
+	NodeManager *node.NodeManager
+	Settings    *settings.Cache
+	GeoIP       *geoip.Service // may be nil when geoip is disabled
 }
 
 // ValidateToken validates a JWT token string and returns the claims.

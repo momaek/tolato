@@ -1,6 +1,6 @@
 import type { WSMessage } from '@/types/ws'
 
-export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'replaced'
+export type ConnectionState = 'connecting' | 'connected' | 'disconnected'
 export type MessageHandler = (msg: WSMessage) => void
 
 class WebSocketService {
@@ -113,13 +113,6 @@ class WebSocketService {
           return
         }
 
-        // Handle session replaced
-        if (msg.type === 'session_replaced') {
-          this.shouldReconnect = false
-          this.setState('replaced')
-          return
-        }
-
         // Dispatch to registered handlers
         const handlers = this.handlers.get(msg.type) || []
         for (const handler of handlers) {
@@ -137,7 +130,7 @@ class WebSocketService {
     }
 
     this.ws.onclose = () => {
-      if (this._state !== 'replaced' && this.shouldReconnect) {
+      if (this.shouldReconnect) {
         this.setState('disconnected')
         this.scheduleReconnect()
       }

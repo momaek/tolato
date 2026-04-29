@@ -4,16 +4,28 @@ import { useRoute, useRouter } from 'vue-router'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import { useChatStore } from '@/stores/chat'
+import { useAppStore } from '@/stores/app'
+import { wsService } from '@/services/ws'
 
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
+const appStore = useAppStore()
 const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
 // Holds the topbar's model selection before a conversation exists.
 const pendingModel = ref('')
 const pendingNodeId = ref<string | undefined>(undefined)
 
 onMounted(() => {
+  // Lazy chat WS: only opened when the user actually enters /chat. Tabs that
+  // stay on /nodes or /nodes/:id/terminal never pay for an idle chat
+  // connection. wsService.connect is idempotent — re-mounting ChatView (e.g.
+  // navigating between /chat and /chat/:id) is a no-op against an existing
+  // socket with the same token.
+  if (appStore.token) {
+    wsService.connect(appStore.token)
+  }
+
   const convId = route.params.conversationId as string
   if (convId) {
     chatStore.setActive(convId)

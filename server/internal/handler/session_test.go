@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,84 +104,3 @@ func TestChatSession_WriteAfterCloseIsNoop(t *testing.T) {
 	}
 }
 
-func TestSessionManager_ReplaceDoesNotRaceWithWriter(t *testing.T) {
-	// The bug fixed: previously SessionManager.Replace called
-	// conn.WriteJSON directly while chatWriteLoop on the same conn was also
-	// writing — gorilla forbids that. Now Replace acquires the old
-	// session's writeMu via WriteJSON, so concurrent writers serialize.
-	// Run with `go test -race`.
-	srv, client, cleanup := dialPair(t)
-	defer cleanup()
-
-	go drain(client)
-
-	old := NewChatSession(srv)
-	sm := NewSessionManager()
-	sm.Replace(old)
-
-	// Spam writes from one goroutine while Replace kicks the session from
-	// another. Without the writeMu fix, the race detector flags this.
-	var stop atomic.Bool
-	var writerWG sync.WaitGroup
-	writerWG.Add(1)
-	go func() {
-		defer writerWG.Done()
-		for !stop.Load() {
-			_ = old.WriteJSON(map[string]string{"k": "v"})
-		}
-	}()
-
-	// Tiny sleep to let writer get in flight.
-	time.Sleep(20 * time.Millisecond)
-
-	srv2, client2, cleanup2 := dialPair(t)
-	defer cleanup2()
-	go drain(client2)
-	newSess := NewChatSession(srv2)
-	sm.Replace(newSess) // kicks `old`, writes session_replaced under its writeMu
-
-	stop.Store(true)
-	writerWG.Wait()
-
-	// After Replace, old session is closed; further writes are no-ops.
-	if err := old.WriteJSON(map[string]string{"k": "v"}); err != nil {
-		t.Errorf("WriteJSON on kicked session should be nil, got %v", err)
-	}
-}
-
-func TestSessionManager_StaleRemoveDoesNotEvictCurrent(t *testing.T) {
-	// Real-world race: connection A's read loop returns and its deferred
-	// SessionManager.Remove(a) fires AFTER connection B has already taken
-	// over via Replace(b). The stale Remove(a) must be a no-op — otherwise
-	// b would not be kicked when c connects.
-	srv1, client1, c1 := dialPair(t)
-	defer c1()
-	srv2, client2, c2 := dialPair(t)
-	defer c2()
-	srv3, client3, c3 := dialPair(t)
-	defer c3()
-	go drain(client1)
-	go drain(client3)
-	// Don't drain client2 — we want to read the kick message ourselves.
-
-	a := NewChatSession(srv1)
-	b := NewChatSession(srv2)
-	c := NewChatSession(srv3)
-
-	sm := NewSessionManager()
-	sm.Replace(a)
-	sm.Replace(b) // a kicked
-	sm.Remove(a)  // stale — must NOT clear current=b
-
-	sm.Replace(c) // should kick b → writes "session_replaced" to client2
-
-	// First frame on client2 should be the session_replaced message.
-	_ = client2.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, raw, err := client2.ReadMessage()
-	if err != nil {
-		t.Fatalf("expected session_replaced frame on client2, got read err: %v", err)
-	}
-	if !strings.Contains(string(raw), "session_replaced") {
-		t.Errorf("expected session_replaced frame, got: %s", raw)
-	}
-}

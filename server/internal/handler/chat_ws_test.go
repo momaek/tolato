@@ -41,10 +41,10 @@ func TestChatWriteLoop_ExitsCleanlyOnChannelClose(t *testing.T) {
 }
 
 // TestChatWriteLoop_DrainsAfterWriteError covers the scenario where the
-// connection is closed (e.g., session_replaced from another tab) while
-// runners are still streaming events. The writer's first WriteJSON fails;
-// it must drain remaining events instead of returning so runners don't
-// block on send-to-full-channel and deadlock.
+// connection is closed (e.g., the client tab went away) while runners are
+// still streaming events. The writer's first WriteJSON fails; it must drain
+// remaining events instead of returning so runners don't block on
+// send-to-full-channel and deadlock.
 func TestChatWriteLoop_DrainsAfterWriteError(t *testing.T) {
 	srv, client, cleanup := dialPair(t)
 	defer cleanup()
@@ -90,8 +90,7 @@ func TestChatWriteLoop_DrainsAfterWriteError(t *testing.T) {
 // TestChatPingLoop_DeliversPingsAndExitsOnCancel verifies the heartbeat path:
 // without a server-side pinger, dead clients (browser refresh that dropped
 // TCP, NAT idle timeout) leave the server's ReadMessage blocked forever and
-// SessionManager pointing at a corpse — which is what makes a refreshed page
-// appear to "still use the old connection" until the next dial.
+// the connection's goroutines parked indefinitely.
 func TestChatPingLoop_DeliversPingsAndExitsOnCancel(t *testing.T) {
 	srv, client, cleanup := dialPair(t)
 	defer cleanup()
@@ -171,12 +170,11 @@ func TestChatPingLoop_ExitsOnWriteFailure(t *testing.T) {
 	}
 }
 
-// TestChatWriteLoop_SerializesWritesUnderConcurrentReplace verifies the
-// original race: SessionManager.Replace used to call conn.WriteJSON
-// concurrently with chatWriteLoop's WriteJSON on the same conn. Now both
-// paths go through ChatSession.WriteJSON which is mutex-guarded. Run with
-// `go test -race` for full assurance.
-func TestChatWriteLoop_SerializesWritesUnderConcurrentReplace(t *testing.T) {
+// TestChatWriteLoop_SerializesConcurrentWrites verifies that ChatSession's
+// writeMu protects gorilla/websocket from concurrent writes when more than
+// one goroutine writes to the same connection. Run with `go test -race` for
+// full assurance.
+func TestChatWriteLoop_SerializesConcurrentWrites(t *testing.T) {
 	srv, client, cleanup := dialPair(t)
 	defer cleanup()
 	go drain(client)
@@ -191,9 +189,8 @@ func TestChatWriteLoop_SerializesWritesUnderConcurrentReplace(t *testing.T) {
 		chatWriteLoop(session, eventCh)
 	}()
 
-	// Pump events from one side; concurrently issue Replace-style kicks
-	// (direct WriteJSON of session_replaced) from another goroutine. With
-	// the writeMu in place, neither side races.
+	// Pump events from one side; concurrently write directly to the session
+	// from another goroutine. With the writeMu in place, neither side races.
 	var stop sync.WaitGroup
 	stop.Add(2)
 	go func() {
@@ -205,7 +202,7 @@ func TestChatWriteLoop_SerializesWritesUnderConcurrentReplace(t *testing.T) {
 	go func() {
 		defer stop.Done()
 		for i := 0; i < 50; i++ {
-			_ = session.WriteJSON(model.WSMessage{Type: "session_replaced"})
+			_ = session.WriteJSON(model.WSMessage{Type: "ping"})
 			time.Sleep(time.Millisecond)
 		}
 	}()

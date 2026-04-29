@@ -38,6 +38,15 @@ const { t } = useI18n()
 const router = useRouter()
 const nodesStore = useNodesStore()
 
+// Terminal opens in a new browser tab so users can keep the node list in
+// view, work in multiple terminals at once, and not lose state when they
+// navigate elsewhere. Token rides along via localStorage; the SPA's auth
+// guard auto-routes the new tab into /nodes/:id/terminal.
+function openTerminal(nodeId: string) {
+  const href = router.resolve(`/nodes/${nodeId}/terminal`).href
+  window.open(href, '_blank', 'noopener')
+}
+
 const searchQuery = ref('')
 const statusFilter = ref('all')
 const dialogOpen = ref(false)
@@ -359,7 +368,7 @@ async function handleDeleteNode(id: string) {
                   size="icon"
                   :title="$t('nodes.openTerminal')"
                   :disabled="node.status !== 'online'"
-                  @click="router.push(`/nodes/${node.id}/terminal`)"
+                  @click="openTerminal(node.id)"
                 >
                   <TerminalIcon class="h-4 w-4" />
                 </Button>
@@ -432,7 +441,7 @@ async function handleDeleteNode(id: string) {
           @commit-edit="commitAlias"
           @cancel-edit="cancelEditAlias"
           @update:editing-draft="(v) => editingDraft = v"
-          @open-terminal="router.push(`/nodes/${node.id}/terminal`)"
+          @open-terminal="openTerminal(node.id)"
           @view-detail="router.push(`/nodes/${node.id}`)"
           @remove="handleDeleteNode(node.id)"
         />
