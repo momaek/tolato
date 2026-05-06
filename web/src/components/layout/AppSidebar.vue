@@ -2,9 +2,15 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Server, FileText, Settings, Zap, Sun, Moon, Languages } from 'lucide-vue-next'
+import { MessageSquare, Server, FileText, Settings, Zap, Sun, Moon, Languages, Github } from 'lucide-vue-next'
 import { useTheme } from '@/composables/useTheme'
 import { setLocale, getLocale } from '@/i18n'
+
+const REPO_URL = 'https://github.com/momaek/tolato'
+const appVersion = __APP_VERSION__
+const releaseUrl = computed(() =>
+  /^v\d/.test(appVersion) ? `${REPO_URL}/releases/tag/${appVersion}` : `${REPO_URL}/releases`,
+)
 
 const { t } = useI18n()
 const { theme, toggleTheme } = useTheme()
@@ -111,6 +117,30 @@ function toggleLocale() {
         <Moon v-else class="h-4 w-4" />
         {{ theme === 'dark' ? $t('sidebar.lightMode') : $t('sidebar.darkMode') }}
       </button>
+
+      <div
+        class="flex items-center justify-between px-3 pt-2 text-xs"
+        style="color: var(--sidebar-foreground); opacity: 0.5"
+      >
+        <a
+          :href="REPO_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center transition-opacity hover:opacity-100"
+          title="GitHub"
+          aria-label="GitHub repository"
+        >
+          <Github class="h-4 w-4" />
+        </a>
+        <a
+          :href="releaseUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="font-mono transition-opacity hover:opacity-100"
+        >
+          {{ appVersion }}
+        </a>
+      </div>
     </div>
   </aside>
 </template>

@@ -17,6 +17,11 @@ COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY web/ ./
+
+# Forward the VERSION arg to vite so the SPA can display it (sidebar footer
+# links to the matching GitHub release).
+ARG VERSION=dev
+ENV VERSION=${VERSION}
 RUN pnpm build
 
 # ---------- stage: build server ----------
