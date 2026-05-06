@@ -91,6 +91,7 @@ function handleConfirm(id: string, approved: boolean) {
       :model="chatStore.activeState?.model || pendingModel"
       :default-node-id="chatStore.activeState?.defaultNodeId ?? pendingNodeId"
       @send="handleSend"
+      @stop="chatStore.stopGeneration"
       @update:model="(v) => {
         if (chatStore.activeState) chatStore.activeState.model = v
         else pendingModel = v

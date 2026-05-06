@@ -30,6 +30,7 @@ const (
 	WSTypeAuth            = "auth"             // first message: JWT authentication
 	WSTypeUserMessage     = "user_message"     // user sends a chat message
 	WSTypeConfirmResponse = "confirm_response" // user confirms/rejects sensitive operation
+	WSTypeStop            = "stop"             // user aborts the in-flight agent loop for a conversation
 )
 
 // --- Server -> Frontend payloads ---

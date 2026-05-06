@@ -29,6 +29,7 @@ export const WS_TYPE = {
   // Frontend → Server
   USER_MESSAGE: 'user_message',
   CONFIRM_RESPONSE: 'confirm_response',
+  STOP: 'stop',
 } as const
 
 // --- Server → Frontend payloads ---
@@ -100,6 +101,7 @@ export type ServerWSEvent =
 export type ClientWSEvent =
   | WSMessage<WSUserMessageEvent> & { type: typeof WS_TYPE.USER_MESSAGE }
   | WSMessage<WSConfirmResponseEvent> & { type: typeof WS_TYPE.CONFIRM_RESPONSE }
+  | WSMessage<undefined> & { type: typeof WS_TYPE.STOP }
 
 // ============================================================================
 // Server ↔ Node Agent (Agent WebSocket: /ws/agent)

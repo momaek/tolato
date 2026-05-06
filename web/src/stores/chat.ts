@@ -335,6 +335,23 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function stopGeneration() {
+    const convId = activeConversationId.value
+    if (!convId) return
+    const state = conversationStates.value.get(convId)
+    if (!state) return
+    // Only meaningful while a turn is in flight. Skip otherwise so a stray
+    // click on a half-rendered button doesn't push noise to the server.
+    if (!['streaming', 'tool_exec', 'confirming'].includes(state.status)) return
+
+    // Best-effort send. If the socket is gone the server-side runner ctx is
+    // already cancelled by the connection teardown, so nothing more to do.
+    wsService.send({
+      type: WS_TYPE.STOP,
+      conversation_id: convId,
+    })
+  }
+
   function confirmAction(id: string, approved: boolean) {
     const convId = activeConversationId.value
     if (!convId) return
@@ -364,6 +381,7 @@ export const useChatStore = defineStore('chat', () => {
     removeConversation,
     setActive,
     sendMessage,
+    stopGeneration,
     confirmAction,
   }
 })

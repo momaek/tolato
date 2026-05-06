@@ -110,7 +110,7 @@ func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 		// shutdown before closing eventCh (otherwise a still-running runner
 		// would panic on send-to-closed-channel).
 		loops := &loopRegistry{
-			runners: make(map[string]*agent.LoopRunner),
+			runners: make(map[string]*loopEntry),
 		}
 		var runnersWG sync.WaitGroup
 
@@ -179,27 +179,49 @@ func chatPingLoop(ctx context.Context, conn *websocket.Conn, period time.Duratio
 	}
 }
 
+type loopEntry struct {
+	runner *agent.LoopRunner
+	cancel context.CancelFunc
+}
+
 type loopRegistry struct {
 	mu      sync.Mutex
-	runners map[string]*agent.LoopRunner
+	runners map[string]*loopEntry
 }
 
 func (lr *loopRegistry) get(convID string) *agent.LoopRunner {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
-	return lr.runners[convID]
+	if e := lr.runners[convID]; e != nil {
+		return e.runner
+	}
+	return nil
 }
 
-func (lr *loopRegistry) set(convID string, runner *agent.LoopRunner) {
+func (lr *loopRegistry) set(convID string, runner *agent.LoopRunner, cancel context.CancelFunc) {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
-	lr.runners[convID] = runner
+	lr.runners[convID] = &loopEntry{runner: runner, cancel: cancel}
 }
 
 func (lr *loopRegistry) remove(convID string) {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 	delete(lr.runners, convID)
+}
+
+// stop cancels the in-flight runner for convID. Returns true if a runner was
+// found and cancelled. Idempotent — repeat calls after the entry is removed
+// are no-ops.
+func (lr *loopRegistry) stop(convID string) bool {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+	e := lr.runners[convID]
+	if e == nil {
+		return false
+	}
+	e.cancel()
+	return true
 }
 
 // chatInbound is the wire shape for a frame read from /ws/chat. Payload is
@@ -242,6 +264,8 @@ func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, loops *
 				continue
 			}
 			handleConfirmResponse(loops, msg.ConversationID, evt)
+		case model.WSTypeStop:
+			handleStop(loops, msg.ConversationID)
 		default:
 			log.Printf("[chat_ws] unknown message type: %s", msg.Type)
 		}
@@ -292,7 +316,10 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 		},
 	})
 
-	loops.set(convID, runner)
+	// Per-run child ctx so a "stop" can cancel just this turn without tearing
+	// down the whole connection. Parent ctx still wins on disconnect.
+	runCtx, runCancel := context.WithCancel(ctx)
+	loops.set(convID, runner, runCancel)
 
 	// Run loop in background goroutine. WaitGroup lets the connection's
 	// shutdown sequence join all in-flight runners before closing eventCh.
@@ -300,13 +327,24 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 	go func() {
 		defer runnersWG.Done()
 		defer loops.remove(convID)
+		defer runCancel()
 		input := agent.UserMessageInput{
 			ConversationID: convID,
 			Content:        evt.Content,
 			Model:          evt.Model,
 			DefaultNodeID:  evt.DefaultNodeID,
 		}
-		runner.Run(ctx, input)
+		runner.Run(runCtx, input)
+		// If the user stopped this run mid-flight, the runner exits early and
+		// its own send() can't deliver anything (runCtx is dead). Push a final
+		// DONE on the still-live connection ctx so the frontend status flips
+		// back to idle instead of wedging on "AI is processing".
+		if runCtx.Err() != nil && ctx.Err() == nil {
+			select {
+			case eventCh <- agent.DoneEvent{ConversationID: convID}:
+			case <-ctx.Done():
+			}
+		}
 	}()
 }
 
@@ -316,6 +354,15 @@ func handleConfirmResponse(loops *loopRegistry, convID string, evt model.WSConfi
 	}
 	if runner := loops.get(convID); runner != nil {
 		runner.ReceiveConfirm(evt.Approved)
+	}
+}
+
+func handleStop(loops *loopRegistry, convID string) {
+	if convID == "" {
+		return
+	}
+	if !loops.stop(convID) {
+		log.Printf("[chat_ws] stop: no active runner for conv %s", convID)
 	}
 }
 
