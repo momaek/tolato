@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# vue-tsc generated intermediate files (in case noEmit gets dropped)
+*.vue.js
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
