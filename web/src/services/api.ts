@@ -16,6 +16,8 @@ import type {
   SecuritySettings,
   AgentSettings,
   ChatSettings,
+  WebFetchSettings,
+  VerifyWebFetchResponse,
   AuditLogQuery,
   AuditLogItem,
   PaginatedResponse,
@@ -158,6 +160,22 @@ export async function getChatSettings(): Promise<ChatSettings> {
 
 export async function updateChatSettings(data: Partial<ChatSettings>): Promise<void> {
   await api.put('/settings/chat', data)
+}
+
+export async function getWebFetchSettings(): Promise<WebFetchSettings> {
+  const res = await api.get<WebFetchSettings>('/settings/webfetch')
+  return res.data
+}
+
+export async function updateWebFetchSettings(data: Partial<WebFetchSettings>): Promise<void> {
+  await api.put('/settings/webfetch', data)
+}
+
+export async function verifyWebFetch(
+  payload?: { mode?: string; jina_api_key?: string }
+): Promise<VerifyWebFetchResponse> {
+  const res = await api.post<VerifyWebFetchResponse>('/settings/webfetch/verify', payload ?? {})
+  return res.data
 }
 
 // --- Audit Logs ---

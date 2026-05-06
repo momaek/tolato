@@ -91,6 +91,9 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.PUT("/settings/agent", PutAgentSettings(deps))
 	protected.GET("/settings/chat", GetChatSettings(deps))
 	protected.PUT("/settings/chat", PutChatSettings(deps))
+	protected.GET("/settings/webfetch", GetWebFetchSettings(deps))
+	protected.PUT("/settings/webfetch", PutWebFetchSettings(deps))
+	protected.POST("/settings/webfetch/verify", VerifyWebFetchSettings(deps))
 
 	// Audit Logs
 	protected.GET("/audit-logs", ListAuditLogs(deps))

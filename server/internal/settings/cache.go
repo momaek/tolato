@@ -133,6 +133,22 @@ func (c *Cache) Chat() model.ChatSettings {
 	return s
 }
 
+// WebFetch returns web-fetch settings with built-in defaults. The web_fetch
+// tool reads this on every invocation, so edits via the REST API take effect
+// without a restart.
+func (c *Cache) WebFetch() model.WebFetchSettings {
+	s := model.WebFetchSettings{
+		Mode:       "jina",
+		TimeoutSec: 30,
+		MaxKB:      1024,
+	}
+	GetJSON(c, "webfetch.mode", &s.Mode)
+	GetJSON(c, "webfetch.jina_api_key", &s.JinaAPIKey)
+	GetJSON(c, "webfetch.timeout_sec", &s.TimeoutSec)
+	GetJSON(c, "webfetch.max_kb", &s.MaxKB)
+	return s
+}
+
 // SecurityConfirmEnabled and SecurityList are used by security.Checker.
 func (c *Cache) SecurityConfirmEnabled() bool {
 	var enabled bool

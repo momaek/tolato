@@ -228,6 +228,19 @@ export interface ChatSettings {
   custom_system_prompt?: string
 }
 
+export interface WebFetchSettings {
+  mode: 'jina' | 'local'
+  jina_api_key: string         // masked on GET: "jina_****abcd"
+  timeout_sec: number
+  max_kb: number
+}
+
+export interface VerifyWebFetchResponse {
+  success: boolean
+  error?: string
+  sample?: string
+}
+
 // ============================================================================
 // Audit Logs
 // ============================================================================

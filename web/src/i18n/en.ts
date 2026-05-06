@@ -168,6 +168,7 @@ export default {
       security: 'Security',
       agent: 'Node Agent',
       chat: 'Conversation',
+      webFetch: 'Web Fetch',
       apiKeys: 'API Keys',
     },
     llm: {
@@ -207,6 +208,19 @@ export default {
       outputTruncateLines: 'Output Truncate Lines',
       customSystemPrompt: 'Custom System Prompt',
       systemPromptPlaceholder: 'Enter a custom system prompt for the AI assistant...',
+    },
+    webFetch: {
+      title: 'Web Fetch',
+      description: 'Lets the assistant fetch a public URL when the user provides one. Choose a backend and configure its credentials.',
+      mode: 'Backend',
+      modeLocalLabel: 'Local (coming soon)',
+      modeJinaHint: 'Jina Reader fetches and converts the URL to Markdown on its servers, then returns the result. The URL you provide is sent to Jina.',
+      jinaApiKey: 'Jina API Key',
+      jinaKeyHint: 'Get a free API key (1M tokens / month, no credit card) at',
+      timeoutSec: 'Timeout (seconds)',
+      maxKb: 'Max Response (KB)',
+      connectionVerified: 'Connection verified',
+      connectionFailed: 'Connection failed',
     },
     apiKeys: {
       title: 'API Keys',

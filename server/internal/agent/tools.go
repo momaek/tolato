@@ -11,6 +11,7 @@ import (
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/security"
+	"github.com/momaek/tolato/server/internal/settings"
 	"github.com/momaek/tolato/server/internal/store"
 )
 
@@ -18,14 +19,16 @@ import (
 type ToolExecutor struct {
 	nodeManager     *node.NodeManager
 	securityChecker *security.Checker
+	settings        *settings.Cache
 	truncateLines   int
 }
 
 // NewToolExecutor creates a new ToolExecutor.
-func NewToolExecutor(nm *node.NodeManager, sc *security.Checker, truncateLines int) *ToolExecutor {
+func NewToolExecutor(nm *node.NodeManager, sc *security.Checker, sCache *settings.Cache, truncateLines int) *ToolExecutor {
 	return &ToolExecutor{
 		nodeManager:     nm,
 		securityChecker: sc,
+		settings:        sCache,
 		truncateLines:   truncateLines,
 	}
 }
@@ -108,6 +111,24 @@ func ToolDefs() []llm.ToolDefinition {
 				"required": []string{"node_id", "command"},
 			},
 		},
+		{
+			Name: "web_fetch",
+			Description: "Fetch a public HTTP/HTTPS URL and return its readable content as Markdown. " +
+				"Use this when the user provides a URL whose contents you need to read before " +
+				"acting (install scripts, API docs, RSS, subscription endpoints, etc.). " +
+				"If the tool returns an error mentioning a missing API key, instruct the user to " +
+				"configure it under Settings → Web Fetch.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url": map[string]any{
+						"type":        "string",
+						"description": "Absolute http(s) URL to fetch.",
+					},
+				},
+				"required": []string{"url"},
+			},
+		},
 	}
 }
 
@@ -185,6 +206,9 @@ func (te *ToolExecutor) executeSingle(ctx context.Context, tc llm.ToolCall) *mod
 			timeout = int(t)
 		}
 		return te.executeCommand(ctx, nodeID, command, timeout)
+	case "web_fetch":
+		url, _ := tc.Args["url"].(string)
+		return te.executeWebFetch(ctx, url)
 	default:
 		errMsg := fmt.Sprintf("unknown tool: %s", tc.Name)
 		return &model.ToolResultItem{Data: map[string]any{"error": errMsg}}

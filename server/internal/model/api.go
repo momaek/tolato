@@ -201,6 +201,22 @@ type ChatSettings struct {
 	CustomSystemPrompt  *string `json:"custom_system_prompt,omitempty"`
 }
 
+// GET/PUT /api/settings/webfetch
+//
+// Mode: "jina" routes the web_fetch tool through https://r.jina.ai (Reader API).
+// Local mode is reserved for a future direct-fetch implementation; for now the
+// only supported value is "jina" and other values cause the tool to error.
+//
+// JinaAPIKey is masked on GET (e.g. "jina_****abcd"). On PUT, a value still
+// containing the mask sentinel "****" is treated as "unchanged" and skipped,
+// so saving the form without re-typing the key keeps the stored value intact.
+type WebFetchSettings struct {
+	Mode       string `json:"mode"`         // "jina" | "local" (local not yet implemented)
+	JinaAPIKey string `json:"jina_api_key"` // masked on GET
+	TimeoutSec int    `json:"timeout_sec"`
+	MaxKB      int    `json:"max_kb"`
+}
+
 // --- Audit Logs ---
 
 // GET /api/audit-logs?node_id=&keyword=&from=&to=&page=&page_size=

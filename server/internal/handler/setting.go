@@ -248,3 +248,87 @@ func PutChatSettings(deps *Deps) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"message": "updated"})
 	}
 }
+
+// --- Web Fetch Settings ---
+
+// maskAPIKey returns a redacted form of an API key for safe display in GET
+// responses. Anything that already contains "****" is treated as already masked
+// and returned as-is.
+func maskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if strings.Contains(key, "****") {
+		return key
+	}
+	if len(key) <= 8 {
+		return "****"
+	}
+	return key[:4] + "****" + key[len(key)-4:]
+}
+
+func GetWebFetchSettings(deps *Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw, err := readSettingsGroup("webfetch")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: "internal_error", Message: "failed to read settings"})
+			return
+		}
+
+		settings := model.WebFetchSettings{
+			Mode:       "jina",
+			TimeoutSec: 30,
+			MaxKB:      1024,
+		}
+		if v, ok := raw["mode"]; ok {
+			unmarshalSetting(v, &settings.Mode)
+		}
+		if v, ok := raw["jina_api_key"]; ok {
+			unmarshalSetting(v, &settings.JinaAPIKey)
+			settings.JinaAPIKey = maskAPIKey(settings.JinaAPIKey)
+		}
+		if v, ok := raw["timeout_sec"]; ok {
+			unmarshalSetting(v, &settings.TimeoutSec)
+		}
+		if v, ok := raw["max_kb"]; ok {
+			unmarshalSetting(v, &settings.MaxKB)
+		}
+
+		c.JSON(http.StatusOK, settings)
+	}
+}
+
+func PutWebFetchSettings(deps *Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req model.WebFetchSettings
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: "bad_request", Message: "invalid request body"})
+			return
+		}
+
+		mode := strings.ToLower(strings.TrimSpace(req.Mode))
+		if mode != "jina" && mode != "local" {
+			c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: "bad_request", Message: "mode must be 'jina' or 'local'"})
+			return
+		}
+
+		updates := map[string]string{
+			"webfetch.mode":        marshalSetting(mode),
+			"webfetch.timeout_sec": marshalSetting(req.TimeoutSec),
+			"webfetch.max_kb":      marshalSetting(req.MaxKB),
+		}
+		// Skip overwriting the stored API key if the client echoed back the
+		// masked value — i.e. the user didn't edit the field. An empty string
+		// means "clear", which we honor.
+		if !strings.Contains(req.JinaAPIKey, "****") {
+			updates["webfetch.jina_api_key"] = marshalSetting(req.JinaAPIKey)
+		}
+
+		if err := store.SetSettingsGroup(updates); err != nil {
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: "internal_error", Message: "failed to save settings"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "updated"})
+	}
+}

@@ -40,6 +40,9 @@ import {
   updateAgentSettings,
   getChatSettings,
   updateChatSettings,
+  getWebFetchSettings,
+  updateWebFetchSettings,
+  verifyWebFetch,
   getAPIKeys,
   createAPIKey,
   deleteAPIKey,
@@ -49,7 +52,9 @@ import type {
   SecuritySettings,
   AgentSettings,
   ChatSettings,
+  WebFetchSettings,
   VerifyLLMResponse,
+  VerifyWebFetchResponse,
 } from '@/types/api'
 
 const { t } = useI18n()
@@ -60,6 +65,7 @@ const tabs = computed(() => [
   { id: 'security', label: t('settings.tabs.security') },
   { id: 'agent', label: t('settings.tabs.agent') },
   { id: 'chat', label: t('settings.tabs.chat') },
+  { id: 'web_fetch', label: t('settings.tabs.webFetch') },
   { id: 'api_keys', label: t('settings.tabs.apiKeys') },
 ])
 
@@ -102,6 +108,17 @@ const chat = ref<ChatSettings>({
 })
 const chatSaving = ref(false)
 
+// Web Fetch
+const webFetch = ref<WebFetchSettings>({
+  mode: 'jina',
+  jina_api_key: '',
+  timeout_sec: 30,
+  max_kb: 1024,
+})
+const webFetchSaving = ref(false)
+const webFetchVerifying = ref(false)
+const webFetchVerifyResult = ref<VerifyWebFetchResponse | null>(null)
+
 // API Keys
 const apiKeys = ref<any[]>([])
 const showCreateKeyDialog = ref(false)
@@ -112,16 +129,18 @@ const keyCopied = ref(false)
 
 onMounted(async () => {
   try {
-    const [llmData, secData, agentData, chatData] = await Promise.all([
+    const [llmData, secData, agentData, chatData, webFetchData] = await Promise.all([
       getLLMSettings(),
       getSecuritySettings(),
       getAgentSettings(),
       getChatSettings(),
+      getWebFetchSettings(),
     ])
     llm.value = llmData
     security.value = secData
     agent.value = agentData
     chat.value = chatData
+    webFetch.value = webFetchData
     apiKeys.value = await getAPIKeys().catch(() => [])
   } catch {
     toast.error(t('settings.failedToLoad'))
@@ -215,6 +234,36 @@ async function saveChat() {
     toast.error(t('settings.saveFailed'))
   } finally {
     chatSaving.value = false
+  }
+}
+
+async function saveWebFetch() {
+  webFetchSaving.value = true
+  try {
+    await updateWebFetchSettings(webFetch.value)
+  } catch {
+    toast.error(t('settings.saveFailed'))
+  } finally {
+    webFetchSaving.value = false
+  }
+}
+
+async function handleVerifyWebFetch() {
+  webFetchVerifying.value = true
+  webFetchVerifyResult.value = null
+  try {
+    // GET returns jina_api_key masked as "jina_****abcd" — only send it if the
+    // user edited the field, otherwise let the backend use the stored value.
+    const isMasked = /\*{4}/.test(webFetch.value.jina_api_key || '')
+    const res = await verifyWebFetch({
+      mode: webFetch.value.mode,
+      jina_api_key: isMasked ? undefined : webFetch.value.jina_api_key,
+    })
+    webFetchVerifyResult.value = res
+  } catch {
+    webFetchVerifyResult.value = { success: false, error: t('settings.webFetch.connectionFailed') }
+  } finally {
+    webFetchVerifying.value = false
   }
 }
 
@@ -510,6 +559,94 @@ function closeCreateDialog() {
 
         <Button :disabled="chatSaving" @click="saveChat">
           {{ chatSaving ? $t('common.saving') : $t('common.save') }}
+        </Button>
+      </div>
+
+      <!-- Web Fetch -->
+      <div v-if="activeTab === 'web_fetch'" class="max-w-2xl space-y-6">
+        <div>
+          <h2 class="text-base font-semibold">{{ $t('settings.webFetch.title') }}</h2>
+          <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.webFetch.description') }}
+          </p>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <label class="text-sm font-medium">{{ $t('settings.webFetch.mode') }}</label>
+            <Select v-model="webFetch.mode">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="jina">Jina Reader API</SelectItem>
+                <SelectItem value="local" disabled>
+                  {{ $t('settings.webFetch.modeLocalLabel') }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.webFetch.modeJinaHint') }}
+            </p>
+          </div>
+
+          <template v-if="webFetch.mode === 'jina'">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">{{ $t('settings.webFetch.jinaApiKey') }}</label>
+              <div class="flex gap-2">
+                <Input
+                  v-model="webFetch.jina_api_key"
+                  type="password"
+                  placeholder="jina_..."
+                  class="flex-1"
+                />
+                <Button variant="outline" :disabled="webFetchVerifying" @click="handleVerifyWebFetch">
+                  <Loader2 v-if="webFetchVerifying" class="mr-2 h-4 w-4 animate-spin" />
+                  {{ $t('common.verify') }}
+                </Button>
+              </div>
+              <p class="text-xs" style="color: var(--muted-foreground)">
+                {{ $t('settings.webFetch.jinaKeyHint') }}
+                <a
+                  href="https://jina.ai/reader/#apiform"
+                  target="_blank"
+                  rel="noopener"
+                  class="underline"
+                >jina.ai/reader</a>
+              </p>
+              <div v-if="webFetchVerifyResult" class="flex items-center gap-2 text-sm">
+                <template v-if="webFetchVerifyResult.success">
+                  <CheckCircle class="h-4 w-4" style="color: var(--color-success-foreground)" />
+                  <span style="color: var(--color-success-foreground)">
+                    {{ $t('settings.webFetch.connectionVerified') }}
+                  </span>
+                </template>
+                <template v-else>
+                  <AlertCircle class="h-4 w-4" style="color: var(--color-error-foreground)" />
+                  <span style="color: var(--color-error-foreground)">
+                    {{ webFetchVerifyResult.error }}
+                  </span>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">{{ $t('settings.webFetch.timeoutSec') }}</label>
+              <Input v-model.number="webFetch.timeout_sec" type="number" :min="3" :max="120" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">{{ $t('settings.webFetch.maxKb') }}</label>
+              <Input v-model.number="webFetch.max_kb" type="number" :min="64" :max="4096" />
+            </div>
+          </div>
+        </div>
+
+        <Button :disabled="webFetchSaving" @click="saveWebFetch">
+          {{ webFetchSaving ? $t('common.saving') : $t('common.save') }}
         </Button>
       </div>
 

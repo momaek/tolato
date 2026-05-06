@@ -269,7 +269,7 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 
 	llmClient := llm.NewClient(llmCfg, agent.ToolDefs())
 	secChecker := security.NewChecker(deps.Settings)
-	toolExec := agent.NewToolExecutor(deps.NodeManager, secChecker, chatSettings.OutputTruncateLines)
+	toolExec := agent.NewToolExecutor(deps.NodeManager, secChecker, deps.Settings, chatSettings.OutputTruncateLines)
 	promptBuilder := agent.NewPromptBuilder()
 
 	runner := agent.NewLoopRunner(agent.LoopRunnerConfig{

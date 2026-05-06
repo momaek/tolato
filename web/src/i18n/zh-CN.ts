@@ -168,6 +168,7 @@ export default {
       security: '安全',
       agent: '节点 Agent',
       chat: '对话',
+      webFetch: '网页抓取',
       apiKeys: 'API 密钥',
     },
     llm: {
@@ -207,6 +208,19 @@ export default {
       outputTruncateLines: '输出截断行数',
       customSystemPrompt: '自定义系统提示词',
       systemPromptPlaceholder: '输入自定义系统提示词...',
+    },
+    webFetch: {
+      title: '网页抓取',
+      description: '当用户提供 URL 时，让助手抓取并阅读其内容。请选择一个后端并配置凭据。',
+      mode: '后端',
+      modeLocalLabel: '本地（即将推出）',
+      modeJinaHint: 'Jina Reader 在其服务器上抓取目标 URL 并转换为 Markdown 后返回。你提供的 URL 会被发送至 Jina。',
+      jinaApiKey: 'Jina API 密钥',
+      jinaKeyHint: '可在以下网址领取免费 API 密钥（每月 1M tokens，无需信用卡）：',
+      timeoutSec: '超时时间（秒）',
+      maxKb: '最大返回大小 (KB)',
+      connectionVerified: '连接验证成功',
+      connectionFailed: '连接失败',
     },
     apiKeys: {
       title: 'API 密钥',
