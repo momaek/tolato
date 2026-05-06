@@ -57,8 +57,6 @@ async function handleSend(content: string) {
     })
     chatStore.setActive(conv.id)
     router.push(`/chat/${conv.id}`)
-    // Small delay to let state sync
-    await new Promise((r) => setTimeout(r, 50))
   }
   chatStore.sendMessage(content)
 }

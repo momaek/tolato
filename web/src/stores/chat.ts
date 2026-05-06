@@ -51,6 +51,13 @@ export const useChatStore = defineStore('chat', () => {
   // Per-conversation state
   const conversationStates = ref<Map<string, ConversationState>>(new Map())
 
+  // Conversations whose next loadConversation() should be skipped. Set by
+  // addConversation(): we already seeded local state from the create response,
+  // and the server has no messages yet — letting the route-watcher's fetch run
+  // would race the first sendMessage() and overwrite state.messages = [],
+  // eating the user's first message.
+  const skipNextLoad = new Set<string>()
+
   const activeState = computed<ConversationState | null>(() => {
     if (!activeConversationId.value) return null
     return conversationStates.value.get(activeConversationId.value) || null
@@ -234,6 +241,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadConversation(id: string) {
+    if (skipNextLoad.has(id)) {
+      skipNextLoad.delete(id)
+      return
+    }
     try {
       const detail = await getConversation(id)
       const state = getOrCreateState(id)
@@ -257,6 +268,7 @@ export const useChatStore = defineStore('chat', () => {
     state.title = conv.title
     state.model = conv.model || data.model || ''
     state.defaultNodeId = data.default_node_id ?? undefined
+    skipNextLoad.add(conv.id)
     return conv
   }
 
