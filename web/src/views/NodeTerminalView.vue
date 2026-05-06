@@ -8,7 +8,12 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import {
   Table,
   TableBody,
@@ -332,15 +337,15 @@ watch(theme, () => {
   if (term) term.options.theme = terminalTheme()
 })
 
-// Load file list lazily the first time the tab is clicked.
-const activeTab = ref<'terminal' | 'files'>('terminal')
+// Load file list lazily the first time the drawer is opened.
+const filesOpen = ref(false)
 let filesLoaded = false
-watch(activeTab, (tab) => {
-  if (tab === 'files' && !filesLoaded) {
+watch(filesOpen, (open) => {
+  if (open && !filesLoaded) {
     filesLoaded = true
     loadCwd()
   }
-  if (tab === 'terminal') {
+  if (!open) {
     nextTick(() => {
       handleResize()
       term?.focus()
@@ -386,93 +391,93 @@ function formatSize(n: number) {
       <span class="text-xs" style="color: var(--muted-foreground)">
         {{ connState === 'ready' ? 'connected' : connState }}
       </span>
+      <Button variant="outline" size="sm" class="gap-1" @click="filesOpen = true">
+        <Folder class="h-3 w-3" /> Files
+      </Button>
     </div>
 
-    <Tabs v-model="activeTab" class="flex-1 overflow-hidden flex flex-col">
-      <TabsList class="mx-4 mt-2 self-start">
-        <TabsTrigger value="terminal" class="gap-1">
-          <TerminalIcon class="h-3 w-3" /> Terminal
-        </TabsTrigger>
-        <TabsTrigger value="files" class="gap-1">
-          <Folder class="h-3 w-3" /> Files
-        </TabsTrigger>
-      </TabsList>
+    <!-- Terminal: always full main area -->
+    <div class="flex-1 overflow-hidden p-2" :style="{ backgroundColor: terminalTheme().background }">
+      <div ref="termContainer" class="h-full w-full" />
+    </div>
 
-      <!-- Terminal tab -->
-      <TabsContent value="terminal" class="flex-1 overflow-hidden p-0 m-0">
-        <div class="h-full w-full p-2" :style="{ backgroundColor: terminalTheme().background }">
-          <div ref="termContainer" class="h-full w-full" />
+    <!-- Files drawer -->
+    <Sheet v-model:open="filesOpen">
+      <SheetContent side="right" class="!max-w-2xl w-full flex flex-col gap-0 p-0">
+        <SheetHeader class="px-4 py-3 border-b" :style="{ borderColor: 'var(--border)' }">
+          <SheetTitle class="flex items-center gap-2 text-sm">
+            <Folder class="h-4 w-4" /> Files
+          </SheetTitle>
+        </SheetHeader>
+
+        <div class="flex-1 overflow-auto p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <Button variant="outline" size="sm" @click="goUp" :disabled="filesCwd === '/'">
+              <ChevronUp class="h-3 w-3" />
+            </Button>
+            <Input
+              v-model="filesCwd"
+              class="font-mono text-xs"
+              @keydown.enter="loadCwd"
+            />
+            <Button variant="outline" size="sm" @click="loadCwd">
+              <RefreshCcw class="h-3 w-3" />
+            </Button>
+            <Button variant="outline" size="sm" @click="createDir">
+              <FolderPlus class="h-3 w-3" />
+            </Button>
+            <label class="inline-flex items-center gap-1 border rounded-md px-2 py-1 text-xs cursor-pointer" style="border-color: var(--border)">
+              <Upload class="h-3 w-3" />
+              <span>Upload</span>
+              <input type="file" class="hidden" @change="onUploadChange" />
+            </label>
+          </div>
+
+          <div v-if="filesError" class="mb-2 text-xs" style="color: var(--destructive)">
+            {{ filesError }}
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Size</TableHead>
+                <TableHead>Modified</TableHead>
+                <TableHead class="w-[100px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow
+                v-for="e in filesEntries"
+                :key="e.name"
+                class="cursor-pointer"
+                @dblclick="enterEntry(e)"
+              >
+                <TableCell class="font-mono text-xs">
+                  <span v-if="e.is_dir">📁 {{ e.name }}</span>
+                  <span v-else>📄 {{ e.name }}</span>
+                </TableCell>
+                <TableCell class="text-xs">{{ e.is_dir ? '-' : formatSize(e.size) }}</TableCell>
+                <TableCell class="text-xs">{{ new Date(e.mod_time * 1000).toLocaleString() }}</TableCell>
+                <TableCell class="text-right">
+                  <Button v-if="!e.is_dir" variant="ghost" size="icon" @click.stop="downloadEntry(e)">
+                    <Download class="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" @click.stop="deleteEntry(e)">
+                    <Trash2 class="h-3 w-3" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+              <TableRow v-if="filesEntries.length === 0 && !filesLoading">
+                <TableCell :colspan="4" class="text-center text-xs" style="color: var(--muted-foreground)">
+                  (empty)
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
-      </TabsContent>
-
-      <!-- Files tab -->
-      <TabsContent value="files" class="flex-1 overflow-auto p-4 m-0">
-        <div class="flex items-center gap-2 mb-3">
-          <Button variant="outline" size="sm" @click="goUp" :disabled="filesCwd === '/'">
-            <ChevronUp class="h-3 w-3" />
-          </Button>
-          <Input
-            v-model="filesCwd"
-            class="font-mono text-xs"
-            @keydown.enter="loadCwd"
-          />
-          <Button variant="outline" size="sm" @click="loadCwd">
-            <RefreshCcw class="h-3 w-3" />
-          </Button>
-          <Button variant="outline" size="sm" @click="createDir">
-            <FolderPlus class="h-3 w-3" />
-          </Button>
-          <label class="inline-flex items-center gap-1 border rounded-md px-2 py-1 text-xs cursor-pointer" style="border-color: var(--border)">
-            <Upload class="h-3 w-3" />
-            <span>Upload</span>
-            <input type="file" class="hidden" @change="onUploadChange" />
-          </label>
-        </div>
-
-        <div v-if="filesError" class="mb-2 text-xs" style="color: var(--destructive)">
-          {{ filesError }}
-        </div>
-
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Size</TableHead>
-              <TableHead>Modified</TableHead>
-              <TableHead class="w-[100px]"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow
-              v-for="e in filesEntries"
-              :key="e.name"
-              class="cursor-pointer"
-              @dblclick="enterEntry(e)"
-            >
-              <TableCell class="font-mono text-xs">
-                <span v-if="e.is_dir">📁 {{ e.name }}</span>
-                <span v-else>📄 {{ e.name }}</span>
-              </TableCell>
-              <TableCell class="text-xs">{{ e.is_dir ? '-' : formatSize(e.size) }}</TableCell>
-              <TableCell class="text-xs">{{ new Date(e.mod_time * 1000).toLocaleString() }}</TableCell>
-              <TableCell class="text-right">
-                <Button v-if="!e.is_dir" variant="ghost" size="icon" @click.stop="downloadEntry(e)">
-                  <Download class="h-3 w-3" />
-                </Button>
-                <Button variant="ghost" size="icon" @click.stop="deleteEntry(e)">
-                  <Trash2 class="h-3 w-3" />
-                </Button>
-              </TableCell>
-            </TableRow>
-            <TableRow v-if="filesEntries.length === 0 && !filesLoading">
-              <TableCell :colspan="4" class="text-center text-xs" style="color: var(--muted-foreground)">
-                (empty)
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </TabsContent>
-    </Tabs>
+      </SheetContent>
+    </Sheet>
   </div>
 </template>
 
