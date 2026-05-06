@@ -25,6 +25,7 @@ export const WS_TYPE = {
   CONFIRM_REQUEST: 'confirm_request',
   DONE: 'done',
   ERROR: 'error',
+  TITLE_UPDATE: 'title_update',
 
   // Frontend → Server
   USER_MESSAGE: 'user_message',
@@ -72,6 +73,10 @@ export interface WSErrorEvent {
   message: string
 }
 
+export interface WSTitleUpdateEvent {
+  title: string
+}
+
 // --- Frontend → Server payloads ---
 
 export interface WSUserMessageEvent {
@@ -95,6 +100,7 @@ export type ServerWSEvent =
   | WSMessage<WSConfirmRequestEvent> & { type: typeof WS_TYPE.CONFIRM_REQUEST }
   | WSMessage<WSDoneEvent> & { type: typeof WS_TYPE.DONE }
   | WSMessage<WSErrorEvent> & { type: typeof WS_TYPE.ERROR }
+  | WSMessage<WSTitleUpdateEvent> & { type: typeof WS_TYPE.TITLE_UPDATE }
 
 // --- Union type for all client events ---
 

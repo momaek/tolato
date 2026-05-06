@@ -80,7 +80,7 @@ export async function createConversation(data: CreateConversationRequest): Promi
 }
 
 export async function updateConversation(id: string, data: UpdateConversationRequest): Promise<void> {
-  await api.patch(`/conversations/${id}`, data)
+  await api.put(`/conversations/${id}`, data)
 }
 
 export async function deleteConversation(id: string): Promise<void> {

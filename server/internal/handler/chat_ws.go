@@ -296,6 +296,18 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 	toolExec := agent.NewToolExecutor(deps.NodeManager, secChecker, deps.Settings, chatSettings.OutputTruncateLines)
 	promptBuilder := agent.NewPromptBuilder()
 
+	// Decide whether to auto-generate a title for this conversation. Done
+	// synchronously here (before launching goroutines) so the seq read is
+	// racefree against the engine's user-message persist that's about to happen.
+	shouldGenTitle := isFirstUserMessage(convID)
+	if shouldGenTitle {
+		runnersWG.Add(1)
+		go func() {
+			defer runnersWG.Done()
+			generateAndEmitTitle(ctx, llmCfg, convID, evt.Content, eventCh)
+		}()
+	}
+
 	runner := agent.NewLoopRunner(agent.LoopRunnerConfig{
 		ConversationID: convID,
 		LLMClient:      llmClient,
@@ -423,6 +435,12 @@ func chatWriteLoop(session *ChatSession, eventCh chan any) {
 				Type:           model.WSTypeError,
 				ConversationID: e.ConversationID,
 				Payload:        model.WSErrorEvent{Message: e.Message},
+			}
+		case agent.TitleUpdateEvent:
+			msg = model.WSMessage{
+				Type:           model.WSTypeTitleUpdate,
+				ConversationID: e.ConversationID,
+				Payload:        model.WSTitleUpdateEvent{Title: e.Title},
 			}
 		default:
 			continue

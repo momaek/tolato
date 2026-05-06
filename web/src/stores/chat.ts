@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { getConversations, getConversation, createConversation, deleteConversation } from '@/services/api'
 import { wsService } from '@/services/ws'
 import type { ConversationSummary, CreateConversationRequest, MessageItem, MessageSegment } from '@/types/api'
-import type { WSMessage, WSReasoningEvent, WSContentEvent, WSToolCallEvent, WSToolResultEvent, WSConfirmRequestEvent, WSErrorEvent } from '@/types/ws'
+import type { WSMessage, WSReasoningEvent, WSContentEvent, WSToolCallEvent, WSToolResultEvent, WSConfirmRequestEvent, WSErrorEvent, WSTitleUpdateEvent } from '@/types/ws'
 import { WS_TYPE } from '@/types/ws'
 
 export type ConversationStatus = 'idle' | 'streaming' | 'tool_exec' | 'confirming' | 'error'
@@ -175,6 +175,19 @@ export const useChatStore = defineStore('chat', () => {
       state.error = payload?.message ?? 'Unknown error'
       state.status = 'error'
       state.streaming = null
+    })
+
+    wsService.on(WS_TYPE.TITLE_UPDATE, (msg: WSMessage) => {
+      const convId = msg.conversation_id
+      if (!convId || !msg.payload) return
+      const { title } = msg.payload as WSTitleUpdateEvent
+      if (!title) return
+      const state = conversationStates.value.get(convId)
+      if (state) state.title = title
+      // Sidebar reads from `conversations`, not state — update both so the
+      // rename is visible without a refetch.
+      const summary = conversations.value.find((c) => c.id === convId)
+      if (summary) summary.title = title
     })
   }
 

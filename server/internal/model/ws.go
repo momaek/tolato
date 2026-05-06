@@ -23,6 +23,7 @@ const (
 	WSTypeConfirmRequest = "confirm_request" // sensitive operation confirmation request
 	WSTypeDone           = "done"            // agent loop completed
 	WSTypeError          = "error"           // error occurred
+	WSTypeTitleUpdate    = "title_update"    // conversation title auto-generated
 )
 
 // Frontend -> Server event types
@@ -64,6 +65,10 @@ type WSDoneEvent struct{}
 
 type WSErrorEvent struct {
 	Message string `json:"message"`
+}
+
+type WSTitleUpdateEvent struct {
+	Title string `json:"title"`
 }
 
 // --- Frontend -> Server payloads ---

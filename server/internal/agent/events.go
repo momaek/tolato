@@ -70,6 +70,16 @@ type ErrorEvent struct {
 
 func (e ErrorEvent) GetConversationID() string { return e.ConversationID }
 
+// TitleUpdateEvent carries an auto-generated conversation title. Emitted out-of-band
+// from the main loop (separate goroutine) on the first user message of a fresh
+// conversation, after the LLM has produced a short summary title.
+type TitleUpdateEvent struct {
+	ConversationID string
+	Title          string
+}
+
+func (e TitleUpdateEvent) GetConversationID() string { return e.ConversationID }
+
 // SessionReplacedEvent is a connection-level event (not conversation-level)
 // sent when the user's session is superseded by a new connection.
 // It does not implement LoopEvent since it has no conversation context.
