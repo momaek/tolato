@@ -122,6 +122,9 @@ type NodeListItem struct {
 	ASN           string     `json:"asn,omitempty"`
 	Status        string     `json:"status"` // online, offline
 	OS            string     `json:"os"`
+	CPUCores      int        `json:"cpu_cores,omitempty"`       // hardware spec
+	MemoryTotalMB int        `json:"memory_total_mb,omitempty"` // hardware spec
+	DiskTotalGB   int        `json:"disk_total_gb,omitempty"`   // hardware spec
 	CPU           *float64   `json:"cpu,omitempty"`    // current CPU usage %
 	Memory        *float64   `json:"memory,omitempty"` // current memory usage %
 	Disk          *float64   `json:"disk,omitempty"`   // current disk usage %

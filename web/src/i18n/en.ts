@@ -97,6 +97,7 @@ export default {
     region: 'Region',
     asn: 'ASN',
     os: 'OS',
+    spec: 'Spec',
     cpu: 'CPU',
     memory: 'Memory',
     disk: 'Disk',

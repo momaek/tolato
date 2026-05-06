@@ -33,12 +33,15 @@ func ExternalListNodes(deps *Deps) gin.HandlerFunc {
 		items := make([]model.NodeListItem, 0, len(nodes))
 		for _, n := range nodes {
 			item := model.NodeListItem{
-				ID:     n.ID,
-				Name:   n.Name,
-				Alias:  n.Alias,
-				IP:     n.IP,
-				Status: n.Status,
-				OS:     n.OS,
+				ID:            n.ID,
+				Name:          n.Name,
+				Alias:         n.Alias,
+				IP:            n.IP,
+				Status:        n.Status,
+				OS:            n.OS,
+				CPUCores:      n.CPUCores,
+				MemoryTotalMB: n.MemoryTotalMB,
+				DiskTotalGB:   n.DiskTotalGB,
 			}
 			if metrics := deps.NodeManager.GetMetrics(n.ID); metrics != nil {
 				item.CPU = &metrics.CPU

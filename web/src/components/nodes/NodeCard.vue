@@ -77,6 +77,20 @@ function formatPercent(val?: number): string {
   return `${val.toFixed(1)}%`
 }
 
+const specLabel = computed(() => {
+  const cores = props.node.cpu_cores
+  const memMB = props.node.memory_total_mb
+  const diskGB = props.node.disk_total_gb
+  if (!cores && !memMB && !diskGB) return ''
+  const parts: string[] = []
+  if (cores) parts.push(`${cores}C`)
+  if (memMB) {
+    parts.push(memMB >= 1024 ? `${(memMB / 1024).toFixed(memMB % 1024 === 0 ? 0 : 1)}G` : `${memMB}M`)
+  }
+  if (diskGB) parts.push(`${diskGB}G`)
+  return parts.join(' / ')
+})
+
 const lastSeenLabel = computed(() => {
   const iso = props.node.last_heartbeat
   if (!iso) return '-'
@@ -228,6 +242,10 @@ function onAliasInputMounted(vnode: { el?: HTMLInputElement | null }) {
           <template v-if="node.os">
             <span aria-hidden="true">·</span>
             <span>{{ node.os }}</span>
+          </template>
+          <template v-if="specLabel">
+            <span aria-hidden="true">·</span>
+            <span class="font-mono tabular-nums">{{ specLabel }}</span>
           </template>
         </div>
         <div v-if="node.asn" class="truncate text-[11px]" style="color: var(--muted-foreground)" :title="node.asn">

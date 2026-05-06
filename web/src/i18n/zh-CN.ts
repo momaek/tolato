@@ -97,6 +97,7 @@ export default {
     region: '区域',
     asn: 'ASN',
     os: '操作系统',
+    spec: '规格',
     cpu: 'CPU',
     memory: '内存',
     disk: '磁盘',

@@ -162,6 +162,19 @@ function formatPercent(val?: number) {
   return `${val.toFixed(1)}%`
 }
 
+// "1C/2G/40G" — falls back to "-" when the agent hasn't reported specs yet
+// (e.g. legacy nodes registered before this field landed).
+function formatSpec(cores?: number, memMB?: number, diskGB?: number) {
+  if (!cores && !memMB && !diskGB) return '-'
+  const parts: string[] = []
+  if (cores) parts.push(`${cores}C`)
+  if (memMB) {
+    parts.push(memMB >= 1024 ? `${(memMB / 1024).toFixed(memMB % 1024 === 0 ? 0 : 1)}G` : `${memMB}M`)
+  }
+  if (diskGB) parts.push(`${diskGB}G`)
+  return parts.join(' / ')
+}
+
 function formatTime(iso?: string) {
   if (!iso) return '-'
   const d = new Date(iso)
@@ -298,6 +311,7 @@ async function handleDeleteNode(id: string) {
             <TableHead>{{ $t('nodes.region') }}</TableHead>
             <TableHead>{{ $t('common.status') }}</TableHead>
             <TableHead>{{ $t('nodes.os') }}</TableHead>
+            <TableHead>{{ $t('nodes.spec') }}</TableHead>
             <TableHead>{{ $t('nodes.cpu') }}</TableHead>
             <TableHead>{{ $t('nodes.memory') }}</TableHead>
             <TableHead>{{ $t('nodes.disk') }}</TableHead>
@@ -357,6 +371,7 @@ async function handleDeleteNode(id: string) {
               </Badge>
             </TableCell>
             <TableCell>{{ node.os || '-' }}</TableCell>
+            <TableCell class="font-mono text-xs tabular-nums">{{ formatSpec(node.cpu_cores, node.memory_total_mb, node.disk_total_gb) }}</TableCell>
             <TableCell>{{ formatPercent(node.cpu) }}</TableCell>
             <TableCell>{{ formatPercent(node.memory) }}</TableCell>
             <TableCell>{{ formatPercent(node.disk) }}</TableCell>
@@ -392,7 +407,7 @@ async function handleDeleteNode(id: string) {
             </TableCell>
           </TableRow>
           <TableRow v-if="filteredNodes.length === 0">
-            <TableCell :colspan="10" class="py-8 text-center" style="color: var(--muted-foreground)">
+            <TableCell :colspan="11" class="py-8 text-center" style="color: var(--muted-foreground)">
               {{ nodesStore.loading ? $t('common.loading') : $t('nodes.noNodes') }}
             </TableCell>
           </TableRow>

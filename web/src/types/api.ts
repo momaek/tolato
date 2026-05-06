@@ -128,6 +128,9 @@ export interface NodeListItem {
   asn?: string           // autonomous system org name
   status: 'online' | 'offline'
   os: string
+  cpu_cores?: number
+  memory_total_mb?: number
+  disk_total_gb?: number
   cpu?: number
   memory?: number
   disk?: number

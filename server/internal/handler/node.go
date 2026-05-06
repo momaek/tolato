@@ -112,6 +112,9 @@ func ListNodes(deps *Deps) gin.HandlerFunc {
 				ASN:           n.ASN,
 				Status:        n.Status,
 				OS:            n.OS,
+				CPUCores:      n.CPUCores,
+				MemoryTotalMB: n.MemoryTotalMB,
+				DiskTotalGB:   n.DiskTotalGB,
 				Extra:         n.Extra,
 				LastHeartbeat: n.LastHeartbeat,
 			}
