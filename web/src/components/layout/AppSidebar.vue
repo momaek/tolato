@@ -93,13 +93,23 @@ function toggleLocale() {
 
     <Separator class="my-3 mx-3" style="background-color: var(--sidebar-border)" />
 
-    <!-- Conversation list (only on chat routes) -->
-    <ScrollArea v-show="isChatRoute" class="flex-1 px-3">
+    <!-- Conversation list (only on chat routes).
+         min-h-0 is load-bearing: a flex child defaults to min-height:auto,
+         which lets ScrollArea grow to its content height and pushes the
+         bottom controls off-screen. With min-h-0 the flex layout can shrink
+         this region and the inner ScrollAreaViewport actually scrolls.
+         When the list is hidden on non-chat routes we collapse this region
+         entirely so the bottom controls hug the separator instead of
+         leaving a tall blank gap. -->
+    <ScrollArea v-if="isChatRoute" class="min-h-0 flex-1 px-3">
       <ConversationList />
     </ScrollArea>
 
-    <!-- Bottom controls -->
-    <div class="mt-auto px-3 pb-4 space-y-1">
+    <!-- Bottom controls. shrink-0 keeps flex from squeezing them when the
+         conversation list is long; mt-auto pins them to the bottom on
+         non-chat routes where the ScrollArea isn't rendered (so there's no
+         flex-1 sibling consuming the remaining space). -->
+    <div class="mt-auto shrink-0 px-3 pb-4 pt-1 space-y-1">
       <button
         class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
         style="color: var(--sidebar-foreground); opacity: 0.7"
