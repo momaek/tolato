@@ -6,11 +6,13 @@
 # ---------- stage: build web ----------
 # Pin to BUILDPLATFORM: the SPA bundle is arch-independent, so building once
 # on the native runner and copying into both target arches avoids QEMU.
-FROM --platform=$BUILDPLATFORM node:20-alpine AS web-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web-builder
 WORKDIR /web
 
-# corepack is bundled with node 20; enable it so `pnpm` resolves without a
-# separate global install step.
+# corepack is bundled with node; enable it so `pnpm` resolves without a
+# separate global install step. Pinned to node:22 because corepack's default
+# pnpm (currently 11.x) requires Node ≥22.13 — node:20 broke the build with
+# `ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`.
 RUN corepack enable
 
 COPY web/package.json web/pnpm-lock.yaml ./
