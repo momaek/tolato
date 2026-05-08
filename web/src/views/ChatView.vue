@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import { useChatStore } from '@/stores/chat'
 import { useAppStore } from '@/stores/app'
 import { wsService } from '@/services/ws'
+
+const { t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +73,15 @@ function handleQuickAction(text: string) {
 function handleConfirm(id: string, approved: boolean) {
   chatStore.confirmAction(id, approved)
 }
+
+async function handleDeleteMessage(id: string) {
+  if (!window.confirm(t('chat.confirmDeleteMessage'))) return
+  try {
+    await chatStore.removeMessage(id)
+  } catch {
+    // TODO: surface a toast — silent failure mirrors removeConversation today.
+  }
+}
 </script>
 
 <template>
@@ -82,6 +94,7 @@ function handleConfirm(id: string, approved: boolean) {
       :error="chatStore.activeState?.error || null"
       @quick-action="handleQuickAction"
       @confirm="handleConfirm"
+      @delete-message="handleDeleteMessage"
     />
 
     <ChatInput

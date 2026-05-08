@@ -74,6 +74,7 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.GET("/conversations/:id", GetConversation(deps))
 	protected.PUT("/conversations/:id", UpdateConversation(deps))
 	protected.DELETE("/conversations/:id", DeleteConversation(deps))
+	protected.DELETE("/conversations/:id/messages/:messageId", DeleteMessage(deps))
 
 	// Nodes
 	protected.POST("/nodes", CreateNode(deps))

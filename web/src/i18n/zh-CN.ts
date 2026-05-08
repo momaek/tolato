@@ -78,6 +78,8 @@ export default {
     sensitiveOperation: '敏感操作',
     approve: '批准',
     reject: '拒绝',
+    deleteMessage: '删除消息',
+    confirmDeleteMessage: '确定要删除这条消息吗？此操作无法撤销。',
   },
 
   nodes: {

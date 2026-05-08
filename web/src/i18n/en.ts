@@ -78,6 +78,8 @@ export default {
     sensitiveOperation: 'Sensitive Operation',
     approve: 'Approve',
     reject: 'Reject',
+    deleteMessage: 'Delete message',
+    confirmDeleteMessage: 'Delete this message? This cannot be undone.',
   },
 
   nodes: {

@@ -22,7 +22,17 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'quick-action', text: string): void
   (e: 'confirm', id: string, approved: boolean): void
+  (e: 'delete-message', id: string): void
 }>()
+
+const idle = computed(() => props.status === 'idle' || props.status === 'error')
+
+function isPersisted(msg: MessageItem): boolean {
+  // The streaming turn is folded into the list with a temp id that won't
+  // exist in the DB until DONE — guard against deleting a row that isn't
+  // there yet by only allowing delete on truly persisted messages.
+  return !props.streaming || msg.id !== props.streaming.id
+}
 
 const containerRef = ref<HTMLElement | null>(null)
 const { showScrollButton, scrollToBottom } = useAutoScroll(containerRef)
@@ -64,8 +74,18 @@ const showEmptyIndicator = computed(() =>
       class="mx-auto flex w-full flex-col gap-5 px-5 py-6 md:px-6 max-w-[clamp(720px,58vw,1400px)]"
     >
       <template v-for="msg in displayMessages" :key="msg.id">
-        <UserMessage v-if="msg.role === 'user'" :content="msg.content || ''" />
-        <AssistantMessage v-else-if="msg.role === 'assistant'" :message="msg" />
+        <UserMessage
+          v-if="msg.role === 'user'"
+          :content="msg.content || ''"
+          :deletable="idle && isPersisted(msg)"
+          @delete="emit('delete-message', msg.id)"
+        />
+        <AssistantMessage
+          v-else-if="msg.role === 'assistant'"
+          :message="msg"
+          :deletable="idle && isPersisted(msg)"
+          @delete="emit('delete-message', msg.id)"
+        />
       </template>
 
       <!-- Confirm card -->

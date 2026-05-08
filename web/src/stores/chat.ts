@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getConversations, getConversation, createConversation, deleteConversation } from '@/services/api'
+import { getConversations, getConversation, createConversation, deleteConversation, deleteMessage } from '@/services/api'
 import { wsService } from '@/services/ws'
 import type { ConversationSummary, CreateConversationRequest, MessageItem, MessageSegment } from '@/types/api'
 import type { WSMessage, WSReasoningEvent, WSContentEvent, WSToolCallEvent, WSToolResultEvent, WSConfirmRequestEvent, WSErrorEvent, WSTitleUpdateEvent } from '@/types/ws'
@@ -294,6 +294,19 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function removeMessage(messageId: string) {
+    const convId = activeConversationId.value
+    if (!convId) return
+    const state = conversationStates.value.get(convId)
+    if (!state) return
+    // Don't allow deletion mid-turn — the assistant could be writing to this
+    // very message id and the optimistic splice would race the streaming
+    // finalizer in the DONE handler.
+    if (state.status !== 'idle' && state.status !== 'error') return
+    await deleteMessage(convId, messageId)
+    state.messages = state.messages.filter((m) => m.id !== messageId)
+  }
+
   function setActive(id: string | null) {
     activeConversationId.value = id
   }
@@ -392,6 +405,7 @@ export const useChatStore = defineStore('chat', () => {
     loadConversation,
     addConversation,
     removeConversation,
+    removeMessage,
     setActive,
     sendMessage,
     stopGeneration,

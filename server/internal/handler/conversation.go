@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/store"
+	"gorm.io/gorm"
 )
 
 // CreateConversation handles POST /api/conversations.
@@ -179,6 +181,33 @@ func DeleteConversation(deps *Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error:   "internal_error",
 				Message: "failed to delete conversation",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	}
+}
+
+// DeleteMessage handles DELETE /api/conversations/:id/messages/:messageId.
+// Removes a single message (and, for assistant messages, the tool-role
+// messages that hold its tool results) from the conversation history.
+func DeleteMessage(deps *Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		convID := c.Param("id")
+		msgID := c.Param("messageId")
+
+		if err := store.DeleteMessage(convID, msgID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, model.ErrorResponse{
+					Error:   "not_found",
+					Message: "message not found",
+				})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+				Error:   "internal_error",
+				Message: "failed to delete message",
 			})
 			return
 		}

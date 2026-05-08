@@ -87,6 +87,10 @@ export async function deleteConversation(id: string): Promise<void> {
   await api.delete(`/conversations/${id}`)
 }
 
+export async function deleteMessage(conversationId: string, messageId: string): Promise<void> {
+  await api.delete(`/conversations/${conversationId}/messages/${messageId}`)
+}
+
 // --- Nodes ---
 
 export async function getNodes(): Promise<NodeListItem[]> {
