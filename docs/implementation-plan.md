@@ -2,12 +2,11 @@
 
 > 本文档基于 design.md、loop-architecture.md、frontend-architecture.md、nodeprobe.md 四份设计文档与现有代码的对比分析，列出所有未完成功能及实现计划。
 
-> **实现状态**：所有 Phase 1-3 + Phase X 功能已于 2026-04-04 完成实现。
+> **实现状态**：Phase 1、Phase 2、Phase X 已完成；**Phase 3（NodeProbe 链路监控）已于 2026-05-08 取消**，对应代码不会落地，下文小节仅作历史设计参考。
 >
 > **实现说明**：
 > - LLM Client 使用 `openai-go/v2` SDK 替代了原计划的 `llm-sdk`
 > - ContentBlock 已集成 markstream-vue 流式 Markdown 渲染
-> - LinkLine.vue 和 MetricChart.vue 功能已合并到 TopologyCanvas.vue 和 LinkDetailView.vue 中
 > - Toast 通知使用 vue-sonner，Light/Dark 主题通过 useTheme composable 切换
 > - 审计日志支持行展开查看完整 stdout/stderr
 
@@ -277,9 +276,9 @@
 
 ---
 
-## Phase 3：NodeProbe 链路监控
+## Phase 3：NodeProbe 链路监控（已取消 — 2026-05-08）
 
-> 完整的网络拓扑监控系统，含探测、告警、通知。
+> ❌ **已决定不做**。下面的小节保留作为历史设计参考，所有 `[x]` 标记不代表实际实现状态——代码并未落地。如未来重启该方向请新建独立设计文档。
 
 ### 3.1 后端 — Probe 配置扩展
 
