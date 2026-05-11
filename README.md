@@ -1,5 +1,4 @@
 # Tolato
-
 > English · [简体中文](README.zh-CN.md)
 
 Natural-language server management. Talk to a chat UI; it drives remote nodes through an agent that executes commands, collects metrics, and probes network links.
