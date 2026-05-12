@@ -4,6 +4,15 @@
 
 > [English](README.md) · 简体中文
 
+## 截图
+
+![聊天 — 问一句，节点信息直接渲染出来](docs/screenshots/chat_3.png)
+
+| 节点列表 | 审计日志 |
+|---|---|
+| ![节点列表](docs/screenshots/nodelist.png) | ![审计日志](docs/screenshots/auditlog.png) |
+| ![聊天里查 iptables](docs/screenshots/chat_1.png) | ![工具调用过程](docs/screenshots/chat_2.png) |
+
 ## 架构
 
 ```

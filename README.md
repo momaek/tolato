@@ -3,6 +3,15 @@
 
 Natural-language server management. Talk to a chat UI; it drives remote nodes through an agent that executes commands, collects metrics, and probes network links.
 
+## Screenshots
+
+![Chat — ask about a node, get a rendered answer](docs/screenshots/chat_3.png)
+
+| Nodes inventory | Audit log |
+|---|---|
+| ![Nodes](docs/screenshots/nodelist.png) | ![Audit log](docs/screenshots/auditlog.png) |
+| ![Inspect iptables via chat](docs/screenshots/chat_1.png) | ![Tool calls in action](docs/screenshots/chat_2.png) |
+
 ## Architecture
 
 ```
