@@ -8,6 +8,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/momaek/tolato/server/internal/config"
 	"github.com/momaek/tolato/server/internal/geoip"
+	"github.com/momaek/tolato/server/internal/mcp"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/settings"
@@ -117,6 +118,14 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	v1.GET("/nodes", ExternalListNodes(deps))
 	v1.GET("/nodes/:id", ExternalGetNode(deps))
 	v1.POST("/nodes/:id/execute", ExternalExecuteCommand(deps))
+
+	// MCP endpoint for Claude Code / other MCP clients. Streamable HTTP
+	// transport over JSON-RPC 2.0; reuses the same API-key auth as /api/v1.
+	mcpGroup := r.Group("/mcp")
+	mcpGroup.Use(middleware.APIKeyAuth())
+	mcpHandler := mcp.Handler(deps.NodeManager, deps.Settings)
+	mcpGroup.POST("", mcpHandler)
+	mcpGroup.GET("", mcpHandler) // returns 405 with a useful body
 
 	// Agent install script: 302 → GitHub raw (configurable via server.install_script_url).
 	// curl -fsSL follows the redirect transparently.

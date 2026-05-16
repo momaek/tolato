@@ -158,6 +158,33 @@ For bandwidth probing, run a file server on the target node:
 
 LLM endpoint, API key, model, sensitive-command rules, and Telegram bot credentials are stored in the database via the **Settings** UI.
 
+## Use from Claude Code (MCP)
+
+Tolato exposes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at `/mcp`, so Claude Code (and other MCP clients) can drive your fleet directly. Auth reuses the existing **API Keys** — generate one in **Settings → API Keys**, pick the permission tier you want Claude to operate at, then:
+
+```sh
+claude mcp add --transport http tolato https://tolato.example.com/mcp \
+  --header "Authorization: Bearer tlt_xxxxxxxxxxxxxxxx"
+```
+
+Tools exposed:
+
+| Tool | What it does |
+|---|---|
+| `list_nodes` | All nodes with status, region, and live CPU/mem/disk |
+| `get_node` | Single-node detail (hardware, OS/kernel, agent version, metrics) |
+| `execute_command` | Run a shell command on a node. Read-only keys are rejected; sensitive commands (rm, reboot, …) return `needs_confirmation` and require `confirm: true` on retry; blacklisted commands are refused. Every call is written to the audit log with `source = "mcp"`. |
+| `web_fetch` | Fetch a public URL via the server's configured Jina Reader and return Markdown |
+
+The transport is plain JSON-RPC 2.0 over HTTP — no streaming, no session header. A quick smoke test:
+
+```sh
+curl -s https://tolato.example.com/mcp \
+  -H "Authorization: Bearer tlt_xxxxxxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
+```
+
 ## Development
 
 - Server build: `cd server && go build ./cmd/server`
