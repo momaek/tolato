@@ -48,6 +48,7 @@ export default {
     errorRequired: '请输入用户名和密码',
     errorFailed: '登录失败',
     errorNetwork: '网络错误',
+    meta: '自部署实例 · 登录以继续',
   },
 
   chat: {

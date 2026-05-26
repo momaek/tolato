@@ -48,6 +48,7 @@ export default {
     errorRequired: 'Please enter username and password',
     errorFailed: 'Login failed',
     errorNetwork: 'Network error',
+    meta: 'Self-hosted · Sign in to your instance',
   },
 
   chat: {
