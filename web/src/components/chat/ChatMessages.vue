@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import UserMessage from './UserMessage.vue'
 import AssistantMessage from './AssistantMessage.vue'
 import ConfirmCard from './ConfirmCard.vue'
-import StreamingIndicator from './StreamingIndicator.vue'
+import GenerationTimer from './GenerationTimer.vue'
 import EmptyState from './EmptyState.vue'
 import { useAutoScroll } from '@/composables/useAutoScroll'
 import type { MessageItem } from '@/types/api'
@@ -55,10 +55,11 @@ const displayMessages = computed<MessageItem[]>(() => {
   ]
 })
 
-const showEmptyIndicator = computed(() =>
-  props.status === 'streaming' &&
-  !props.streaming?.reasoning &&
-  (props.streaming?.segments?.length ?? 0) === 0,
+// Live generation timer: visible the whole time the turn is being produced
+// (initial wait, content streaming, and tool execution), not just at the start.
+const generating = computed(() =>
+  props.streaming != null &&
+  (props.status === 'streaming' || props.status === 'tool_exec'),
 )
 </script>
 
@@ -83,6 +84,7 @@ const showEmptyIndicator = computed(() =>
         <AssistantMessage
           v-else-if="msg.role === 'assistant'"
           :message="msg"
+          :show-meta="isPersisted(msg)"
           :deletable="idle && isPersisted(msg)"
           @delete="emit('delete-message', msg.id)"
         />
@@ -97,8 +99,8 @@ const showEmptyIndicator = computed(() =>
         @confirm="(id, approved) => emit('confirm', id, approved)"
       />
 
-      <!-- Streaming indicator: show only when nothing has arrived yet -->
-      <StreamingIndicator v-if="showEmptyIndicator" />
+      <!-- Live generation timer: spinner + elapsed seconds while the turn runs -->
+      <GenerationTimer v-if="generating && streaming" :started-at="streaming.startedAt" />
 
       <!-- Error banner: LLM / tool / policy failures surfaced from the server.
            Persists after DONE so the user actually sees it; cleared on the

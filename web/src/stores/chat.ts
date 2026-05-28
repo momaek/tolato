@@ -23,6 +23,8 @@ export interface StreamingAssistant {
    * the interleaving.
    */
   segments: MessageSegment[]
+  /** Epoch ms when this turn began streaming — drives the live elapsed timer. */
+  startedAt: number
 }
 
 export interface ConfirmRequest {
@@ -220,7 +222,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function ensureStreaming(state: ConversationState) {
     if (!state.streaming) {
-      state.streaming = { id: crypto.randomUUID(), reasoning: '', segments: [] }
+      state.streaming = { id: crypto.randomUUID(), reasoning: '', segments: [], startedAt: Date.now() }
     }
   }
 
