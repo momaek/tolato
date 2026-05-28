@@ -83,6 +83,16 @@ const verifying = ref(false)
 const availableModels = ref<string[]>([])
 const llmSaving = ref(false)
 
+const modelOptions = computed(() => {
+  const base = availableModels.value.length
+    ? availableModels.value
+    : ['gpt-4o', 'gpt-4o-mini', 'claude-3.5-sonnet']
+  // Always include the currently-saved model so the Select can display it,
+  // even before the user verifies and fetches the full model list.
+  const current = llm.value.default_model
+  return current && !base.includes(current) ? [current, ...base] : base
+})
+
 // Security
 const security = ref<SecuritySettings>({
   confirm_enabled: true,
@@ -376,7 +386,7 @@ function closeCreateDialog() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem
-                  v-for="model in availableModels.length ? availableModels : ['gpt-4o', 'gpt-4o-mini', 'claude-3.5-sonnet']"
+                  v-for="model in modelOptions"
                   :key="model"
                   :value="model"
                 >

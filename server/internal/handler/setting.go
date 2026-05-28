@@ -52,10 +52,7 @@ func GetLLMSettings(deps *Deps) gin.HandlerFunc {
 		}
 		if v, ok := raw["api_key"]; ok {
 			unmarshalSetting(v, &settings.APIKey)
-			// Mask API key for GET
-			if len(settings.APIKey) > 8 {
-				settings.APIKey = settings.APIKey[:4] + "****" + settings.APIKey[len(settings.APIKey)-4:]
-			}
+			settings.APIKey = maskAPIKey(settings.APIKey)
 		}
 		if v, ok := raw["default_model"]; ok {
 			unmarshalSetting(v, &settings.DefaultModel)
@@ -84,11 +81,16 @@ func PutLLMSettings(deps *Deps) gin.HandlerFunc {
 
 		settings := map[string]string{
 			"llm.api_base_url":         marshalSetting(req.APIBaseURL),
-			"llm.api_key":              marshalSetting(req.APIKey),
 			"llm.default_model":        marshalSetting(req.DefaultModel),
 			"llm.max_rounds":           marshalSetting(req.MaxRounds),
 			"llm.temperature":          marshalSetting(req.Temperature),
 			"llm.interleaved_thinking": marshalSetting(req.InterleavedThinking),
+		}
+		// Skip overwriting the stored API key if the client echoed back the
+		// masked value — i.e. the user didn't edit the field. An empty string
+		// means "clear", which we honor.
+		if !strings.Contains(req.APIKey, "****") {
+			settings["llm.api_key"] = marshalSetting(req.APIKey)
 		}
 
 		if err := store.SetSettingsGroup(settings); err != nil {
