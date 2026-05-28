@@ -115,6 +115,7 @@ func (c *Cache) LLM() model.LLMSettings {
 	GetJSON(c, "llm.default_model", &s.DefaultModel)
 	GetJSON(c, "llm.max_rounds", &s.MaxRounds)
 	GetJSON(c, "llm.temperature", &s.Temperature)
+	GetJSON(c, "llm.interleaved_thinking", &s.InterleavedThinking)
 	return s
 }
 

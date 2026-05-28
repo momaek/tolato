@@ -76,6 +76,7 @@ const llm = ref<LLMSettings>({
   default_model: '',
   max_rounds: 10,
   temperature: 0.7,
+  interleaved_thinking: false,
 })
 const verifyResult = ref<VerifyLLMResponse | null>(null)
 const verifying = ref(false)
@@ -394,6 +395,27 @@ function closeCreateDialog() {
               <label class="text-sm font-medium">{{ $t('settings.llm.temperature') }}</label>
               <Input v-model.number="llm.temperature" type="number" :min="0" :max="2" step="0.1" />
             </div>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm font-medium">{{ $t('settings.llm.interleavedThinking') }}</label>
+              <p class="text-sm" style="color: var(--muted-foreground)">
+                {{ $t('settings.llm.interleavedThinkingDescription') }}
+              </p>
+            </div>
+            <button
+              class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+              :style="{
+                backgroundColor: llm.interleaved_thinking ? 'var(--primary)' : 'var(--secondary)',
+              }"
+              @click="llm.interleaved_thinking = !llm.interleaved_thinking"
+            >
+              <span
+                class="absolute top-0.5 block h-5 w-5 rounded-full bg-white transition-transform"
+                :class="llm.interleaved_thinking ? 'translate-x-5' : 'translate-x-0.5'"
+              />
+            </button>
           </div>
         </div>
 

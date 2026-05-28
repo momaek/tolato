@@ -66,6 +66,9 @@ func GetLLMSettings(deps *Deps) gin.HandlerFunc {
 		if v, ok := raw["temperature"]; ok {
 			unmarshalSetting(v, &settings.Temperature)
 		}
+		if v, ok := raw["interleaved_thinking"]; ok {
+			unmarshalSetting(v, &settings.InterleavedThinking)
+		}
 
 		c.JSON(http.StatusOK, settings)
 	}
@@ -80,11 +83,12 @@ func PutLLMSettings(deps *Deps) gin.HandlerFunc {
 		}
 
 		settings := map[string]string{
-			"llm.api_base_url": marshalSetting(req.APIBaseURL),
-			"llm.api_key":      marshalSetting(req.APIKey),
-			"llm.default_model": marshalSetting(req.DefaultModel),
-			"llm.max_rounds":   marshalSetting(req.MaxRounds),
-			"llm.temperature":  marshalSetting(req.Temperature),
+			"llm.api_base_url":         marshalSetting(req.APIBaseURL),
+			"llm.api_key":              marshalSetting(req.APIKey),
+			"llm.default_model":        marshalSetting(req.DefaultModel),
+			"llm.max_rounds":           marshalSetting(req.MaxRounds),
+			"llm.temperature":          marshalSetting(req.Temperature),
+			"llm.interleaved_thinking": marshalSetting(req.InterleavedThinking),
 		}
 
 		if err := store.SetSettingsGroup(settings); err != nil {

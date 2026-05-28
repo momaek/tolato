@@ -186,6 +186,8 @@ export default {
       selectModel: '选择模型',
       maxRounds: '最大轮次',
       temperature: '温度',
+      interleavedThinking: '交错思考 (Interleaved Thinking)',
+      interleavedThinkingDescription: '工具调用之间回传模型的思考内容。DeepSeek 思考模型（如 deepseek-reasoner）等需开启；不支持的模型请保持关闭。',
     },
     security: {
       title: '安全设置',

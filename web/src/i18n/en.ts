@@ -186,6 +186,8 @@ export default {
       selectModel: 'Select a model',
       maxRounds: 'Max Rounds',
       temperature: 'Temperature',
+      interleavedThinking: 'Interleaved Thinking',
+      interleavedThinkingDescription: 'Pass the model\'s reasoning back between tool calls. Enable for DeepSeek thinking models (e.g. deepseek-reasoner); leave off for models that don\'t support it.',
     },
     security: {
       title: 'Security Settings',

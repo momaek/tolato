@@ -205,6 +205,7 @@ export interface LLMSettings {
   default_model: string
   max_rounds: number
   temperature: number
+  interleaved_thinking: boolean
 }
 
 export interface VerifyLLMResponse {

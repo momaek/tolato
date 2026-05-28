@@ -282,10 +282,11 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 	chatSettings := deps.Settings.Chat()
 
 	llmCfg := llm.ClientConfig{
-		APIBaseURL:  normalizeLLMBaseURL(llmSettings.APIBaseURL),
-		APIKey:      llmSettings.APIKey,
-		Model:       llmSettings.DefaultModel,
-		Temperature: llmSettings.Temperature,
+		APIBaseURL:          normalizeLLMBaseURL(llmSettings.APIBaseURL),
+		APIKey:              llmSettings.APIKey,
+		Model:               llmSettings.DefaultModel,
+		Temperature:         llmSettings.Temperature,
+		InterleavedThinking: llmSettings.InterleavedThinking,
 	}
 	if evt.Model != nil && *evt.Model != "" {
 		llmCfg.Model = *evt.Model
@@ -496,4 +497,3 @@ func normalizeLLMBaseURL(s string) string {
 	}
 	return s + "/v1"
 }
-

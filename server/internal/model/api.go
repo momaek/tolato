@@ -176,11 +176,12 @@ type UpdateNodeRequest struct {
 
 // GET/PUT /api/settings/llm
 type LLMSettings struct {
-	APIBaseURL   string  `json:"api_base_url"`
-	APIKey       string  `json:"api_key"`
-	DefaultModel string  `json:"default_model"`
-	MaxRounds    int     `json:"max_rounds"`
-	Temperature  float64 `json:"temperature"`
+	APIBaseURL          string  `json:"api_base_url"`
+	APIKey              string  `json:"api_key"`
+	DefaultModel        string  `json:"default_model"`
+	MaxRounds           int     `json:"max_rounds"`
+	Temperature         float64 `json:"temperature"`
+	InterleavedThinking bool    `json:"interleaved_thinking"`
 }
 
 // GET/PUT /api/settings/security

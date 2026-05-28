@@ -59,6 +59,11 @@ type ClientConfig struct {
 	APIKey      string
 	Model       string
 	Temperature float64
+	// InterleavedThinking echoes the prior turn's reasoning_content back on
+	// assistant messages that carry tool_calls. Required by DeepSeek thinking
+	// mode (deepseek-reasoner) and other providers that interleave reasoning
+	// with tool calls; leave false for models that don't support / reject it.
+	InterleavedThinking bool
 }
 
 // Client is the LLM client for OpenAI-compatible APIs.
@@ -113,12 +118,13 @@ func (c *Client) ChatStream(ctx context.Context, messages []ChatMessage, callbac
 	sdk := c.sdk
 	model := c.config.Model
 	temperature := c.config.Temperature
+	interleavedThinking := c.config.InterleavedThinking
 	tools := c.tools
 	c.mu.RUnlock()
 
 	params := openai.ChatCompletionNewParams{
 		Model:       shared.ChatModel(model),
-		Messages:    convertMessages(messages),
+		Messages:    convertMessages(messages, interleavedThinking),
 		Temperature: param.NewOpt(temperature),
 	}
 
@@ -224,7 +230,7 @@ func assembleToolCalls(accs map[int64]*toolCallAccumulator) []ToolCall {
 	return calls
 }
 
-func convertMessages(messages []ChatMessage) []openai.ChatCompletionMessageParamUnion {
+func convertMessages(messages []ChatMessage, interleavedThinking bool) []openai.ChatCompletionMessageParamUnion {
 	out := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
 	for _, msg := range messages {
 		switch msg.Role {
@@ -250,11 +256,23 @@ func convertMessages(messages []ChatMessage) []openai.ChatCompletionMessageParam
 						},
 					})
 				}
+				assistant := openai.ChatCompletionAssistantMessageParam{
+					Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: param.NewOpt(msg.Content)},
+					ToolCalls: toolCalls,
+				}
+				// DeepSeek (and other reasoning models) require the prior turn's
+				// reasoning_content to be passed back verbatim on the assistant
+				// message that carries tool_calls, otherwise the API returns 400:
+				// "The reasoning_content in the thinking mode must be passed back".
+				// This is opt-in per model (InterleavedThinking): providers that
+				// don't support it — or reject unknown message fields — keep it off
+				// and the emitted request stays byte-identical to the non-thinking
+				// path.
+				if interleavedThinking && msg.Reasoning != "" {
+					assistant.SetExtraFields(map[string]any{"reasoning_content": msg.Reasoning})
+				}
 				out = append(out, openai.ChatCompletionMessageParamUnion{
-					OfAssistant: &openai.ChatCompletionAssistantMessageParam{
-						Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: param.NewOpt(msg.Content)},
-						ToolCalls: toolCalls,
-					},
+					OfAssistant: &assistant,
 				})
 			} else {
 				out = append(out, openai.AssistantMessage(msg.Content))
