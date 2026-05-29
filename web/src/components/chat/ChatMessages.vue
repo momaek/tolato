@@ -61,6 +61,16 @@ const generating = computed(() =>
   props.streaming != null &&
   (props.status === 'streaming' || props.status === 'tool_exec'),
 )
+
+// Reasoning is "live" only while it's actively arriving: the turn is streaming
+// and no content has started yet. Once the first content segment lands (or a
+// tool runs), thinking is done — the label flips to "已完成思考". This is what
+// the collapsed label tracks, NOT the open/closed toggle.
+const reasoningLive = computed(() =>
+  props.streaming != null &&
+  props.status === 'streaming' &&
+  !props.streaming.segments.some((s) => s.type === 'content' && s.text.length > 0),
+)
 </script>
 
 <template>
@@ -78,6 +88,7 @@ const generating = computed(() =>
         <UserMessage
           v-if="msg.role === 'user'"
           :content="msg.content || ''"
+          :created-at="msg.created_at"
           :deletable="idle && isPersisted(msg)"
           @delete="emit('delete-message', msg.id)"
         />
@@ -86,6 +97,7 @@ const generating = computed(() =>
           :message="msg"
           :show-meta="isPersisted(msg)"
           :deletable="idle && isPersisted(msg)"
+          :reasoning-live="msg.id === streaming?.id && reasoningLive"
           @delete="emit('delete-message', msg.id)"
         />
       </template>

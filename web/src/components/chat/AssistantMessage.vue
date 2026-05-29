@@ -10,6 +10,8 @@ const props = defineProps<{
   message: MessageItem
   showMeta?: boolean
   deletable?: boolean
+  /** This turn's reasoning is still streaming in. */
+  reasoningLive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -21,7 +23,7 @@ const timeAgo = useRelativeTime(() => props.message.created_at)
 
 <template>
   <div class="group flex flex-col gap-2.5">
-    <ThinkingBlock v-if="message.reasoning" :reasoning="message.reasoning" />
+    <ThinkingBlock v-if="message.reasoning" :reasoning="message.reasoning" :live="reasoningLive" />
     <!-- If segments are present (from streaming), render in chronological order. -->
     <template v-if="message.segments && message.segments.length">
       <template v-for="(seg, i) in message.segments" :key="i">

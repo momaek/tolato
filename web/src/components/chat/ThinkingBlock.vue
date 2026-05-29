@@ -4,6 +4,8 @@ import { Brain, ChevronRight } from 'lucide-vue-next'
 
 defineProps<{
   reasoning: string
+  /** Reasoning is still being streamed — show the in-progress label + pulse. */
+  live?: boolean
 }>()
 
 const isOpen = ref(false)
@@ -18,8 +20,10 @@ const isOpen = ref(false)
       style="color: var(--muted-foreground)"
       @click="isOpen = !isOpen"
     >
-      <Brain class="h-3 w-3" />
-      <span>{{ isOpen ? $t('chat.thoughtForAMoment') : $t('chat.thinking') }}</span>
+      <Brain class="h-3 w-3" :class="{ 'animate-pulse': live }" />
+      <span :class="{ 'animate-pulse': live }">
+        {{ live ? $t('chat.thinking') : $t('chat.thoughtForAMoment') }}
+      </span>
       <ChevronRight
         class="h-3 w-3 transition-transform"
         :class="{ 'rotate-90': isOpen }"
