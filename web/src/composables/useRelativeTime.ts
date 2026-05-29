@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 // the active i18n locale via the native Intl.RelativeTimeFormat — no message
 // tables to maintain.
 export function useRelativeTime(time: MaybeRefOrGetter<string | number | Date | undefined>) {
-  const now = useNow({ interval: 30_000 })
+  const now = useNow({ interval: 10_000 })
   const { locale } = useI18n()
 
   return computed(() => {
@@ -16,20 +16,23 @@ export function useRelativeTime(time: MaybeRefOrGetter<string | number | Date | 
     if (Number.isNaN(then)) return ''
 
     const rtf = new Intl.RelativeTimeFormat(locale.value, { numeric: 'auto' })
-    const sec = Math.round((then - now.value.getTime()) / 1000)
-    const abs = Math.abs(sec)
+    // Seconds elapsed since `then`. Clamp to >= 0 so minor clock skew or a
+    // freshly-created message (whose timestamp can sit just ahead of our
+    // sampled `now`) never renders as the future ("in 3 seconds" / "3秒后").
+    const elapsed = Math.max(0, Math.round((now.value.getTime() - then) / 1000))
 
-    if (abs < 60) return rtf.format(sec, 'second')
-    const min = Math.round(sec / 60)
-    if (Math.abs(min) < 60) return rtf.format(min, 'minute')
-    const hr = Math.round(sec / 3600)
-    if (Math.abs(hr) < 24) return rtf.format(hr, 'hour')
-    const day = Math.round(sec / 86400)
-    if (Math.abs(day) < 7) return rtf.format(day, 'day')
+    // Pass a NEGATIVE value to format() — negative = past ("3 seconds ago").
+    if (elapsed < 60) return rtf.format(-elapsed, 'second')
+    const min = Math.round(elapsed / 60)
+    if (min < 60) return rtf.format(-min, 'minute')
+    const hr = Math.round(elapsed / 3600)
+    if (hr < 24) return rtf.format(-hr, 'hour')
+    const day = Math.round(elapsed / 86400)
+    if (day < 7) return rtf.format(-day, 'day')
     const wk = Math.round(day / 7)
-    if (Math.abs(wk) < 5) return rtf.format(wk, 'week')
+    if (wk < 5) return rtf.format(-wk, 'week')
     const mo = Math.round(day / 30)
-    if (Math.abs(mo) < 12) return rtf.format(mo, 'month')
-    return rtf.format(Math.round(day / 365), 'year')
+    if (mo < 12) return rtf.format(-mo, 'month')
+    return rtf.format(-Math.round(day / 365), 'year')
   })
 }
