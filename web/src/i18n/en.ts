@@ -74,6 +74,8 @@ export default {
     },
     thinking: 'Thinking',
     thoughtForAMoment: 'Thought for a moment',
+    copy: 'Copy',
+    copied: 'Copied',
     aiThinking: 'AI is thinking...',
     executing: 'Executing...',
     sensitiveOperation: 'Sensitive Operation',

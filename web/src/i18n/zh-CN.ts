@@ -74,6 +74,8 @@ export default {
     },
     thinking: '思考中',
     thoughtForAMoment: '已完成思考',
+    copy: '复制',
+    copied: '已复制',
     aiThinking: 'AI 正在思考...',
     executing: '执行中...',
     sensitiveOperation: '敏感操作',
