@@ -242,6 +242,9 @@ func (te *ToolExecutor) executeListNodes() *model.ToolResultItem {
 		if n.ASN != "" {
 			item["asn"] = n.ASN
 		}
+		if len(n.Extra) > 0 {
+			item["extra"] = n.Extra
+		}
 		// Attach cached metrics if online
 		if metrics := te.nodeManager.GetMetrics(n.ID); metrics != nil {
 			item["cpu"] = metrics.CPU
@@ -286,6 +289,9 @@ func (te *ToolExecutor) executeGetNodeInfo(nodeID string) *model.ToolResultItem 
 	}
 	if n.ASN != "" {
 		info["asn"] = n.ASN
+	}
+	if len(n.Extra) > 0 {
+		info["extra"] = n.Extra
 	}
 	if metrics := te.nodeManager.GetMetrics(n.ID); metrics != nil {
 		info["metrics"] = map[string]any{
