@@ -14,6 +14,14 @@ const editingId = ref<string | null>(null)
 const editingTitle = ref('')
 const editInputRef = ref<HTMLInputElement | null>(null)
 
+// A conversation is "running" while its turn is in flight. Driven by the
+// per-conversation state in the store, so a background conversation (not the
+// active one) still shows its loading indicator as it streams.
+function isRunning(id: string): boolean {
+  const status = chatStore.conversationStates.get(id)?.status
+  return status === 'streaming' || status === 'tool_exec' || status === 'confirming'
+}
+
 onMounted(() => {
   chatStore.fetchConversations()
 })
@@ -119,17 +127,18 @@ function cancelEdit() {
         </button>
       </template>
       <template v-else>
+        <span v-if="isRunning(conv.id)" class="loading-dots" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
         <span class="flex-1 truncate">{{ conv.title || $t('chat.newConversation') }}</span>
         <button
-          class="hidden h-5 w-5 items-center justify-center rounded group-hover:flex"
-          style="color: var(--muted-foreground)"
+          class="row-action hidden h-5 w-5 items-center justify-center rounded group-hover:flex"
           @click="startEdit(conv, $event)"
         >
           <Pencil class="h-3 w-3" />
         </button>
         <button
-          class="hidden h-5 w-5 items-center justify-center rounded group-hover:flex"
-          style="color: var(--muted-foreground)"
+          class="row-action row-action-danger hidden h-5 w-5 items-center justify-center rounded group-hover:flex"
           @click="handleDelete(conv.id, $event)"
         >
           <Trash2 class="h-3 w-3" />
@@ -146,3 +155,56 @@ function cancelEdit() {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Three-dot typing/loading indicator shown while a conversation's turn runs. */
+.loading-dots {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+.loading-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: var(--primary);
+  animation: loading-dots-bounce 1.2s infinite ease-in-out both;
+}
+.loading-dots > span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+.loading-dots > span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+@keyframes loading-dots-bounce {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Row hover actions (rename / delete). Inline styles previously set the color,
+   which would have outranked a :hover class — so colors live here instead. */
+.row-action {
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.row-action:hover {
+  background-color: color-mix(in srgb, var(--sidebar-foreground) 12%, transparent);
+  color: var(--sidebar-foreground);
+}
+.row-action-danger:hover {
+  background-color: color-mix(in srgb, var(--destructive) 15%, transparent);
+  color: var(--destructive);
+}
+</style>
