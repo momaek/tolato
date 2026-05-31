@@ -89,6 +89,23 @@ type ToolResultItem struct {
 	Stderr     *string `json:"stderr,omitempty"`
 	DurationMS *int64  `json:"duration_ms,omitempty"`
 	Data       any     `json:"data,omitempty"` // for non-command tool results
+
+	// Preview metadata, set only on the history GET path (buildMessageItems).
+	// When Truncated is true, Stdout/Stderr hold a head preview and the full
+	// output can be fetched lazily via GET .../tool-calls/:toolCallId/output.
+	// StdoutLines/StderrLines report the full line counts so the UI can show
+	// "view all N lines". Live (WebSocket) results never set these — they carry
+	// the full output inline.
+	Truncated   bool `json:"truncated,omitempty"`
+	StdoutLines *int `json:"stdout_lines,omitempty"`
+	StderrLines *int `json:"stderr_lines,omitempty"`
+}
+
+// ToolCallOutputResponse is the full, untruncated output for a single tool call.
+// GET /api/conversations/:id/tool-calls/:toolCallId/output
+type ToolCallOutputResponse struct {
+	Stdout *string `json:"stdout,omitempty"`
+	Stderr *string `json:"stderr,omitempty"`
 }
 
 // PUT /api/conversations/:id

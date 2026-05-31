@@ -44,6 +44,18 @@ func GetMessage(conversationID, messageID string) (*model.Message, error) {
 	return &m, nil
 }
 
+// GetToolResultByCallID returns the tool-role message holding a tool call's
+// result, scoped to a conversation. Used to lazily serve full command output
+// after the conversation GET delivered only a head preview.
+func GetToolResultByCallID(conversationID, toolCallID string) (*model.Message, error) {
+	var m model.Message
+	if err := DB.Where("conversation_id = ? AND role = ? AND tool_call_id = ?", conversationID, "tool", toolCallID).
+		First(&m).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // DeleteMessage removes a single message. For assistant messages, any tool-role
 // messages whose tool_call_id matches one of the assistant's stored tool_calls
 // are deleted in the same transaction — leaving them behind would surface

@@ -5,12 +5,23 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/store"
 	"gorm.io/gorm"
+)
+
+// Output preview caps applied on the history GET path. Command output is stored
+// in full, but the conversation payload only carries a head preview so a single
+// chat with many large outputs stays small; the full text is fetched on demand
+// via GetToolCallOutput when the user expands and clicks "view all".
+const (
+	previewMaxLines = 80
+	previewMaxBytes = 12000
 )
 
 // CreateConversation handles POST /api/conversations.
@@ -216,6 +227,114 @@ func DeleteMessage(deps *Deps) gin.HandlerFunc {
 	}
 }
 
+// GetToolCallOutput handles GET /api/conversations/:id/tool-calls/:toolCallId/output.
+// It returns the full, untruncated stdout/stderr for a single tool call — the
+// lazy-load counterpart to the head preview embedded in GetConversation.
+func GetToolCallOutput(deps *Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		convID := c.Param("id")
+		toolCallID := c.Param("toolCallId")
+
+		m, err := store.GetToolResultByCallID(convID, toolCallID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, model.ErrorResponse{
+					Error:   "not_found",
+					Message: "tool call output not found",
+				})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+				Error:   "internal_error",
+				Message: "failed to load tool call output",
+			})
+			return
+		}
+
+		resp := model.ToolCallOutputResponse{}
+		if m.Content != nil {
+			var r model.ToolResultItem
+			if err := json.Unmarshal([]byte(*m.Content), &r); err == nil {
+				resp.Stdout = r.Stdout
+				resp.Stderr = r.Stderr
+			} else {
+				// Malformed row — hand back the raw content so the UI shows
+				// something rather than an empty body.
+				raw := *m.Content
+				resp.Stdout = &raw
+			}
+		}
+
+		c.JSON(http.StatusOK, resp)
+	}
+}
+
+// previewText returns a head preview of s capped at previewMaxLines lines and
+// previewMaxBytes bytes (whichever hits first), the full line count, and whether
+// any capping happened. The byte cap is backed off to a valid UTF-8 boundary so
+// a multibyte rune is never split.
+func previewText(s string) (preview string, totalLines int, truncated bool) {
+	if s == "" {
+		return "", 0, false
+	}
+	totalLines = strings.Count(s, "\n") + 1
+	preview = s
+
+	if totalLines > previewMaxLines {
+		if idx := nthByteIndex(s, '\n', previewMaxLines); idx >= 0 {
+			preview = s[:idx]
+			truncated = true
+		}
+	}
+	if len(preview) > previewMaxBytes {
+		preview = preview[:previewMaxBytes]
+		for len(preview) > 0 && !utf8.ValidString(preview) {
+			preview = preview[:len(preview)-1]
+		}
+		truncated = true
+	}
+	return preview, totalLines, truncated
+}
+
+// nthByteIndex returns the byte index of the nth occurrence of c in s, or -1.
+func nthByteIndex(s string, c byte, n int) int {
+	count := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			if count++; count == n {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// previewToolResult returns a copy of r with stdout/stderr replaced by head
+// previews plus full line counts, so large outputs don't bloat the conversation
+// payload. nil-safe; results without stdout/stderr (e.g. non-command tools) pass
+// through untouched.
+func previewToolResult(r *model.ToolResultItem) *model.ToolResultItem {
+	if r == nil {
+		return nil
+	}
+	out := *r
+	if r.Stdout != nil {
+		p, lines, tr := previewText(*r.Stdout)
+		out.Stdout = &p
+		ln := lines
+		out.StdoutLines = &ln
+		out.Truncated = out.Truncated || tr
+	}
+	if r.Stderr != nil {
+		p, lines, tr := previewText(*r.Stderr)
+		out.Stderr = &p
+		ln := lines
+		out.StderrLines = &ln
+		out.Truncated = out.Truncated || tr
+	}
+	return &out
+}
+
 // storedToolCall matches the JSON shape produced by agent/engine.marshalToolCalls
 // (which marshals []llm.ToolCall — that struct has no JSON tags, so keys are
 // capitalized). Decoupled from llm.ToolCall so handler doesn't import llm.
@@ -277,7 +396,7 @@ func buildMessageItems(dbMsgs []model.Message) []model.MessageItem {
 						ID:     s.ID,
 						Tool:   s.Name, // stored Name → API tool
 						Args:   s.Args,
-						Result: toolResults[s.ID],
+						Result: previewToolResult(toolResults[s.ID]),
 					})
 				}
 				item.ToolCalls = calls

@@ -95,6 +95,19 @@ export interface ToolResultItem {
   stderr?: string
   duration_ms?: number
   data?: unknown // for non-command tool results
+  /**
+   * History GET only: when true, stdout/stderr hold a head preview and the full
+   * output must be fetched via getToolCallOutput. Live (WebSocket) results carry
+   * the full output inline and never set this.
+   */
+  truncated?: boolean
+  stdout_lines?: number // full line count (for "view all N lines")
+  stderr_lines?: number
+}
+
+export interface ToolCallOutputResponse {
+  stdout?: string
+  stderr?: string
 }
 
 export interface UpdateConversationRequest {

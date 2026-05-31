@@ -23,6 +23,7 @@ import type {
   PaginatedResponse,
   PaginationQuery,
   NodeCommandItem,
+  ToolCallOutputResponse,
 } from '@/types/api'
 import router from '@/router'
 
@@ -89,6 +90,18 @@ export async function deleteConversation(id: string): Promise<void> {
 
 export async function deleteMessage(conversationId: string, messageId: string): Promise<void> {
   await api.delete(`/conversations/${conversationId}/messages/${messageId}`)
+}
+
+// Fetch the full, untruncated stdout/stderr for one tool call. Used by
+// ToolCallCard when the conversation payload only delivered a head preview.
+export async function getToolCallOutput(
+  conversationId: string,
+  toolCallId: string
+): Promise<ToolCallOutputResponse> {
+  const res = await api.get<ToolCallOutputResponse>(
+    `/conversations/${conversationId}/tool-calls/${toolCallId}/output`
+  )
+  return res.data
 }
 
 // --- Nodes ---
