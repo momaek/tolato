@@ -33,13 +33,37 @@ watch(
 const copied = ref(false)
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 async function copy() {
+  if (!(await writeClipboard(code.value))) return
+  copied.value = true
+  clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => (copied.value = false), 1500)
+}
+
+// navigator.clipboard only exists in secure contexts (https / localhost). Over
+// plain http on a LAN IP it's undefined, so fall back to the legacy execCommand
+// path via a temporary textarea.
+async function writeClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // fall through to the legacy path
+    }
+  }
   try {
-    await navigator.clipboard.writeText(code.value)
-    copied.value = true
-    clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => (copied.value = false), 1500)
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
   } catch {
-    // Clipboard blocked (insecure context / denied) — silently no-op.
+    return false
   }
 }
 onBeforeUnmount(() => clearTimeout(copyTimer))
@@ -62,7 +86,7 @@ onBeforeUnmount(() => clearTimeout(copyTimer))
       </span>
       <button
         type="button"
-        class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition hover:bg-[var(--accent)]"
+        class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition hover:bg-black/5 dark:hover:bg-white/10"
         style="color: var(--muted-foreground)"
         @click="copy"
       >
