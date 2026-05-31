@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Terminal as TerminalIcon, Folder, ChevronUp, Trash2, Download, Upload, FolderPlus, RefreshCcw } from 'lucide-vue-next'
+import { ArrowLeft, Terminal as TerminalIcon, Folder, ChevronUp, Trash2, Download, Upload, FolderPlus, RefreshCcw, WifiOff } from 'lucide-vue-next'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -26,7 +26,7 @@ import { Input } from '@/components/ui/input'
 
 import { useAppStore } from '@/stores/app'
 import { useTheme } from '@/composables/useTheme'
-import { createTerminalWs } from '@/services/terminalWs'
+import { createTerminalWs, type TerminalWSState } from '@/services/terminalWs'
 import { getNode } from '@/services/api'
 import type { NodeDetail } from '@/types/api'
 import { Badge } from '@/components/ui/badge'
@@ -44,8 +44,19 @@ const termContainer = ref<HTMLDivElement | null>(null)
 let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
 const ws = createTerminalWs()
-const connState = ref(ws.state)
+// Starts as 'connecting' (not the ws's initial 'closed') because we connect
+// immediately on mount — avoids a one-frame flash of the disconnected overlay.
+const connState = ref<TerminalWSState>('connecting')
 const exitInfo = ref<{ code: number; error?: string } | null>(null)
+
+// --- Connection status (for the header indicator + disconnected overlay) ---
+const isConnected = computed(() => connState.value === 'ready')
+const isDisconnected = computed(() => connState.value === 'closed' || connState.value === 'error')
+// idle / connecting / authenticating / authenticated all read as "connecting".
+const isConnecting = computed(() => !isConnected.value && !isDisconnected.value)
+const statusColor = computed(() =>
+  isConnected.value ? 'var(--color-success)' : isDisconnected.value ? 'var(--color-error)' : '#f59e0b',
+)
 
 // --- Files state ---
 const filesCwd = ref('/')
@@ -166,6 +177,29 @@ function openSession() {
   })
 
   ws.connect(token)
+}
+
+function reconnect() {
+  if (isConnecting.value) return
+  const token = appStore.token
+  if (!token) {
+    router.replace('/login')
+    return
+  }
+  // close() nulls the underlying socket so connect() can open a fresh one.
+  // Message/state handlers registered in openSession() persist on `ws`.
+  ws.close()
+  exitInfo.value = null
+  term?.writeln('\r\n\x1b[33m[reconnecting…]\x1b[0m')
+  ws.connect(token)
+}
+
+// Re-establish the session when returning to a tab whose socket the server
+// dropped while it was hidden — otherwise input silently goes nowhere.
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible' && isDisconnected.value) {
+    reconnect()
+  }
 }
 
 function handleResize() {
@@ -317,6 +351,7 @@ onMounted(async () => {
   mountTerminal()
   openSession()
   window.addEventListener('resize', handleResize)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   getNode(nodeId)
     .then((n) => {
       nodeInfo.value = n
@@ -328,6 +363,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   ws.send({ type: 'close' })
   ws.close()
   term?.dispose()
@@ -388,17 +424,47 @@ function formatSize(n: number) {
         {{ nodeInfo.os }}
       </span>
       <div class="flex-1" />
-      <span class="text-xs" style="color: var(--muted-foreground)">
-        {{ connState === 'ready' ? 'connected' : connState }}
-      </span>
+      <div class="flex items-center gap-1.5 text-xs" style="color: var(--muted-foreground)">
+        <span
+          class="inline-block h-2 w-2 rounded-full"
+          :class="{ 'animate-pulse': isConnecting }"
+          :style="{ backgroundColor: statusColor }"
+        />
+        <span>
+          {{ isConnected ? $t('terminal.connected') : isDisconnected ? $t('terminal.disconnected') : $t('terminal.connecting') }}
+        </span>
+      </div>
+      <Button v-if="isDisconnected" variant="outline" size="sm" class="gap-1" @click="reconnect">
+        <RefreshCcw class="h-3 w-3" /> {{ $t('terminal.reconnect') }}
+      </Button>
       <Button variant="outline" size="sm" class="gap-1" @click="filesOpen = true">
         <Folder class="h-3 w-3" /> Files
       </Button>
     </div>
 
     <!-- Terminal: always full main area -->
-    <div class="flex-1 overflow-hidden p-2" :style="{ backgroundColor: terminalTheme().background }">
+    <div class="relative flex-1 overflow-hidden p-2" :style="{ backgroundColor: terminalTheme().background }">
       <div ref="termContainer" class="h-full w-full" />
+
+      <!-- Disconnected overlay: makes a dropped session impossible to miss. -->
+      <div
+        v-if="isDisconnected"
+        class="absolute inset-0 z-10 flex items-center justify-center"
+        style="background: rgba(0, 0, 0, 0.55)"
+      >
+        <div
+          class="flex flex-col items-center gap-3 rounded-lg px-6 py-5 shadow-lg"
+          style="background: var(--background); border: 1px solid var(--border)"
+        >
+          <div class="flex items-center gap-2 text-sm font-medium" style="color: var(--color-error)">
+            <WifiOff class="h-4 w-4" />
+            {{ $t('terminal.connectionLost') }}
+          </div>
+          <Button size="sm" class="gap-1" @click="reconnect">
+            <RefreshCcw class="h-3 w-3" /> {{ $t('terminal.reconnect') }}
+          </Button>
+        </div>
+      </div>
     </div>
 
     <!-- Files drawer -->

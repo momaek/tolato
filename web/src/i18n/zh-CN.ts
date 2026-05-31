@@ -135,6 +135,15 @@ export default {
     perCycle: '/{cycle}',
   },
 
+  terminal: {
+    connected: '已连接',
+    connecting: '连接中…',
+    disconnected: '已断开',
+    reconnect: '重新连接',
+    reconnecting: '重新连接中…',
+    connectionLost: '连接已断开 —— 你的输入不会被发送。',
+  },
+
   nodeDetail: {
     hostname: '主机名',
     ip: 'IP',

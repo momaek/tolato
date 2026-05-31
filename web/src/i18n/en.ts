@@ -135,6 +135,15 @@ export default {
     perCycle: '/{cycle}',
   },
 
+  terminal: {
+    connected: 'Connected',
+    connecting: 'Connecting…',
+    disconnected: 'Disconnected',
+    reconnect: 'Reconnect',
+    reconnecting: 'Reconnecting…',
+    connectionLost: 'Connection lost — your input is not being sent.',
+  },
+
   nodeDetail: {
     hostname: 'Hostname',
     ip: 'IP',
