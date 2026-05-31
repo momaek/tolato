@@ -92,11 +92,31 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 	messages = append(messages, history...)
 	messages = append(messages, llm.ChatMessage{Role: "user", Content: input.Content})
 
-	// Track messages to persist at the end (assistant + tool turns).
-	// User message is persisted up-front so it survives any mid-stream cancel
-	// (network drop, LLM error, ctx cancellation) — without this, refresh after
-	// disconnect erases the user's last input from history.
-	var newMessages []model.Message
+	// Persist each round's assistant + tool messages as the round completes,
+	// instead of buffering the whole run and flushing once at the very end. A
+	// single end-of-run flush loses everything when the run is interrupted
+	// mid-way — most importantly when the agent restarts tolato itself via a
+	// tool call, which kills this goroutine before the flush ever runs. Writing
+	// per round bounds the loss to at most the in-flight round. (The user
+	// message is persisted up-front below for the same reason — so it survives
+	// any mid-stream cancel and a refresh-after-disconnect doesn't erase the
+	// user's last input.)
+	roundMessages := make([]model.Message, 0, 4)
+	totalPersisted := 0
+	flushRound := func() {
+		if len(roundMessages) == 0 {
+			return
+		}
+		if err := store.BatchCreateMessages(roundMessages); err != nil {
+			log.Printf("[loop] failed to persist round messages for conv %s: %v", convID, err)
+		}
+		totalPersisted += len(roundMessages)
+		roundMessages = roundMessages[:0]
+	}
+	// Safety net: persists the in-flight round on any early return (client
+	// disconnect, ctx cancel, send failure). Per-round flushes inside the loop
+	// clear roundMessages, so this is a no-op on the normal path.
+	defer flushRound()
 	seq, _ := store.GetMaxSeq(convID)
 
 	seq++
@@ -157,7 +177,7 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 			if result.Reasoning != "" {
 				assistantMsg.Reasoning = &result.Reasoning
 			}
-			newMessages = append(newMessages, assistantMsg)
+			roundMessages = append(roundMessages, assistantMsg)
 			break
 		}
 
@@ -176,7 +196,16 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 		if result.Reasoning != "" {
 			assistantMsg.Reasoning = &result.Reasoning
 		}
-		newMessages = append(newMessages, assistantMsg)
+		// Persist the assistant's tool-call decision NOW, before executing the
+		// tools — not at round end. A tool that restarts tolato itself kills this
+		// process mid-execution, and SIGKILL skips the deferred flush, so writing
+		// it up-front is the only way to keep this turn's reply. The tool results
+		// are persisted per-round below once they complete; until then a reload
+		// shows the tool call in an "executing" state (a nil result is the
+		// nil-safe, expected path through buildMessageItems → ToolCallCard).
+		if err := store.BatchCreateMessages([]model.Message{assistantMsg}); err != nil {
+			log.Printf("[loop] failed to persist assistant message for conv %s: %v", convID, err)
+		}
 
 		// Add assistant message to LLM context
 		messages = append(messages, llm.ChatMessage{
@@ -235,7 +264,7 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 						seq++
 						toolCallID := tc.ID
 						rejectedJSON := ResultToJSON(rejectedResult)
-						newMessages = append(newMessages, model.Message{
+						roundMessages = append(roundMessages, model.Message{
 							ID:             uuid.New().String(),
 							ConversationID: convID,
 							Role:           "tool",
@@ -244,7 +273,8 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 							Seq:            seq,
 						})
 					}
-					continue // let LLM respond to rejection
+					flushRound() // rejection round complete — persist before re-prompting the LLM
+					continue     // let LLM respond to rejection
 				}
 			case <-ctx.Done():
 				return
@@ -285,7 +315,7 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 
 			seq++
 			toolCallID := tc.ID
-			newMessages = append(newMessages, model.Message{
+			roundMessages = append(roundMessages, model.Message{
 				ID:             uuid.New().String(),
 				ConversationID: convID,
 				Role:           "tool",
@@ -294,17 +324,18 @@ func (lr *LoopRunner) Run(ctx context.Context, input UserMessageInput) {
 				Seq:            seq,
 			})
 		}
+
+		// Round complete (assistant + its tool results) — persist as a unit so an
+		// interruption before the next round can't discard it.
+		flushRound()
 	}
 
-	// Persist all new messages
-	if len(newMessages) > 0 {
-		if err := store.BatchCreateMessages(newMessages); err != nil {
-			log.Printf("[loop] failed to persist messages for conv %s: %v", convID, err)
-		}
-	}
+	// Persist the final round (e.g. the terminal assistant reply) before
+	// signaling done, so a client that refreshes on DoneEvent already sees it.
+	flushRound()
 
 	// Emit done
-	log.Printf("[loop] done conv=%s new_messages=%d", convID, len(newMessages))
+	log.Printf("[loop] done conv=%s new_messages=%d", convID, totalPersisted)
 	lr.send(ctx, DoneEvent{ConversationID: convID})
 }
 

@@ -42,6 +42,13 @@ type ServerConfig struct {
 	// github.com is unreachable can still install. The server itself must be
 	// able to reach this upstream. Empty disables the proxy (404).
 	ReleaseProxyUpstream string `yaml:"release_proxy_upstream"`
+	// SelfNode names the registered node (alias or hostname) that this server
+	// itself runs on. Used only to pre-fill the in-app upgrade prompt so the AI
+	// assistant knows which node to run `docker compose pull && up -d` on.
+	// The server can't reliably auto-detect this (it lives in a container with
+	// a random hostname), so it's an explicit, deterministic opt-in. Empty =>
+	// the upgrade prompt stays generic ("on the node where Tolato runs").
+	SelfNode string `yaml:"self_node"`
 }
 
 type DatabaseConfig struct {

@@ -15,6 +15,9 @@ server:
   # 让 install.sh 可以通过本服务器下载 agent 二进制，绕过被墙的 github。
   # 留空 = 关闭代理（/releases 返回 404）。
   release_proxy_upstream: https://github.com/momaek/tolato/releases
+  # 本服务器所在的已注册节点名（别名或主机名）。仅用于在「有可用更新」弹窗里
+  # 预填升级指令，让 AI 助手知道在哪台机器上执行升级。留空则使用通用提示。
+  self_node: ""
 
 database:
   driver: postgres

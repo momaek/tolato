@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Server, FileText, Settings, Zap, Sun, Moon, Languages, Github } from 'lucide-vue-next'
+import { MessageSquare, Server, FileText, Settings, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink } from 'lucide-vue-next'
 import { useTheme } from '@/composables/useTheme'
 import { setLocale, getLocale } from '@/i18n'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { getVersionInfo, type VersionInfo } from '@/services/api'
 
 const REPO_URL = 'https://github.com/momaek/tolato'
 const appVersion = __APP_VERSION__
@@ -47,6 +53,70 @@ function navigate(path: string) {
 function toggleLocale() {
   const current = getLocale()
   setLocale(current === 'en' ? 'zh-CN' : 'en')
+}
+
+// --- Update check (best-effort; failure just means no red dot) ---
+const versionInfo = ref<VersionInfo | null>(null)
+const hasUpdate = computed(() => versionInfo.value?.has_update ?? false)
+const copied = ref(false)
+
+onMounted(async () => {
+  try {
+    versionInfo.value = await getVersionInfo()
+  } catch {
+    /* version check is best-effort */
+  }
+})
+
+// The upgrade prompt names the node Tolato runs on when the server knows it
+// (server.self_node), so the AI assistant targets the right machine. Falls
+// back to a generic phrasing otherwise.
+const upgradePrompt = computed(() => {
+  const latest = versionInfo.value?.latest || ''
+  const node = versionInfo.value?.self_node?.trim()
+  return node
+    ? t('update.upgradePromptNode', { latest, node })
+    : t('update.upgradePrompt', { latest })
+})
+
+// Notes link goes through this server's /releases proxy (works where
+// github.com is blocked) when the backend resolved a tag; else the GitHub repo.
+const notesUrl = computed(() => versionInfo.value?.release_url || releaseUrl.value)
+
+async function copyPrompt() {
+  const text = upgradePrompt.value
+  let ok = false
+  // navigator.clipboard is undefined over plain http (LAN IP) — fall back
+  // to the legacy execCommand path the same way CodeBlock does.
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      ok = true
+    } catch {
+      /* fall through */
+    }
+  }
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+    } catch {
+      ok = false
+    }
+  }
+  if (ok) {
+    copied.value = true
+    setTimeout(() => {
+      copied.value = false
+    }, 1500)
+  }
 }
 </script>
 
@@ -142,14 +212,71 @@ function toggleLocale() {
         >
           <Github class="h-4 w-4" />
         </a>
-        <a
-          :href="releaseUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="font-mono transition-opacity hover:opacity-100"
-        >
-          {{ appVersion }}
-        </a>
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <button
+              type="button"
+              class="relative inline-flex items-center font-mono transition-opacity hover:opacity-100"
+            >
+              {{ appVersion }}
+              <span
+                v-if="hasUpdate"
+                class="absolute -right-2 -top-1 h-1.5 w-1.5 rounded-full"
+                style="background-color: var(--color-error)"
+                aria-hidden="true"
+              />
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent align="end" side="top" :side-offset="8" class="w-80 p-3">
+            <!-- Header: current → latest -->
+            <div class="mb-2 flex items-center gap-1.5 text-sm font-medium">
+              {{ hasUpdate ? $t('update.title') : $t('update.upToDate') }}
+            </div>
+            <div class="mb-3 flex flex-wrap items-center gap-1.5 text-xs" style="color: var(--muted-foreground)">
+              <span>{{ $t('update.current') }}</span>
+              <code class="font-mono">{{ versionInfo?.current || appVersion }}</code>
+              <template v-if="hasUpdate">
+                <span>→</span>
+                <span>{{ $t('update.latest') }}</span>
+                <code class="font-mono" style="color: var(--color-error)">{{ versionInfo?.latest }}</code>
+              </template>
+            </div>
+
+            <!-- Upgrade prompt + copy (only when an update exists) -->
+            <template v-if="hasUpdate">
+              <p class="mb-1.5 text-xs" style="color: var(--muted-foreground)">
+                {{ $t('update.promptHint') }}
+              </p>
+              <pre
+                class="mb-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md p-2 text-[11px] leading-relaxed"
+                style="background: var(--secondary)"
+              >{{ upgradePrompt }}</pre>
+              <button
+                type="button"
+                class="mb-1 inline-flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors"
+                style="background: var(--primary); color: var(--primary-foreground)"
+                @click="copyPrompt"
+              >
+                <Check v-if="copied" class="h-3 w-3" />
+                <Copy v-else class="h-3 w-3" />
+                {{ copied ? $t('update.copied') : $t('update.copyPrompt') }}
+              </button>
+            </template>
+
+            <!-- Release notes link -->
+            <a
+              :href="notesUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 text-xs transition-opacity hover:opacity-100"
+              style="color: var(--muted-foreground)"
+            >
+              <ExternalLink class="h-3 w-3" />
+              {{ $t('update.viewNotes') }}
+            </a>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   </aside>

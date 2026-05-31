@@ -63,6 +63,19 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
   return res.data
 }
 
+export interface VersionInfo {
+  current: string
+  latest: string
+  has_update: boolean
+  release_url: string
+  self_node?: string
+}
+
+export async function getVersionInfo(): Promise<VersionInfo> {
+  const res = await api.get<VersionInfo>('/version')
+  return res.data
+}
+
 // --- Conversations ---
 
 export async function getConversations(): Promise<ConversationSummary[]> {

@@ -20,6 +20,10 @@ import (
 	"github.com/momaek/tolato/server/internal/store"
 )
 
+// version is injected at build time via -ldflags "-X main.version=<tag>"
+// (see server/Dockerfile). Defaults to "dev" for local `go run`/`go build`.
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()
@@ -52,6 +56,7 @@ func main() {
 		NodeManager: nm,
 		Settings:    settingsCache,
 		GeoIP:       geoSvc,
+		Version:     version,
 	}
 
 	handler.InitUpgraders(cfg.Server.AllowedOrigins)

@@ -25,6 +25,7 @@ type Deps struct {
 	NodeManager *node.NodeManager
 	Settings    *settings.Cache
 	GeoIP       *geoip.Service // may be nil when geoip is disabled
+	Version     string         // server build version (e.g. "v0.8.10"), "dev" in local builds
 }
 
 // ValidateToken validates a JWT token string and returns the claims.
@@ -112,6 +113,9 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.POST("/api-keys", CreateAPIKey(deps))
 	protected.GET("/api-keys", ListAPIKeys(deps))
 	protected.DELETE("/api-keys/:id", DeleteAPIKey(deps))
+
+	// Version / update check
+	protected.GET("/version", VersionInfo(deps))
 
 	// External API (API Key auth)
 	v1 := r.Group("/api/v1")

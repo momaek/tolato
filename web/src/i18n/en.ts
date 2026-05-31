@@ -144,6 +144,21 @@ export default {
     connectionLost: 'Connection lost — your input is not being sent.',
   },
 
+  update: {
+    title: 'Update available',
+    upToDate: "You're on the latest version",
+    current: 'Current',
+    latest: 'Latest',
+    promptHint: 'Copy this and send it to the AI assistant — it can upgrade Tolato for you:',
+    upgradePrompt:
+      'Please upgrade Tolato to the latest version {latest}. On the node where Tolato runs, go to the directory containing docker-compose.yaml and run: docker compose pull && docker compose up -d. Then confirm the tolato-server container restarted on the new image.',
+    upgradePromptNode:
+      'Please upgrade Tolato to the latest version {latest} on node "{node}". Go to the directory containing docker-compose.yaml and run: docker compose pull && docker compose up -d. Then confirm the tolato-server container restarted on the new image.',
+    copyPrompt: 'Copy prompt',
+    copied: 'Copied',
+    viewNotes: 'Release notes',
+  },
+
   nodeDetail: {
     hostname: 'Hostname',
     ip: 'IP',

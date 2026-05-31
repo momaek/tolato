@@ -17,6 +17,10 @@ server:
   # binaries through this server. Lets install.sh download the agent binary
   # from regions that can't reach github.com. Empty disables the proxy.
   release_proxy_upstream: https://github.com/momaek/tolato/releases
+  # Name (alias or hostname) of the registered node this server runs on. Only
+  # used to pre-fill the in-app upgrade prompt so the AI assistant targets the
+  # right machine. Leave empty for a generic prompt.
+  self_node: ""
 
 database:
   driver: postgres

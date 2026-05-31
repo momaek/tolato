@@ -144,6 +144,21 @@ export default {
     connectionLost: '连接已断开 —— 你的输入不会被发送。',
   },
 
+  update: {
+    title: '有可用更新',
+    upToDate: '已是最新版本',
+    current: '当前',
+    latest: '最新',
+    promptHint: '复制这段发给 AI 助手 —— 它可以帮你升级 Tolato：',
+    upgradePrompt:
+      '请把 Tolato 升级到最新版 {latest}。在运行 Tolato 的节点上，进入 docker-compose.yaml 所在目录，执行：docker compose pull && docker compose up -d，然后确认 tolato-server 容器已用新镜像重启。',
+    upgradePromptNode:
+      '请在节点「{node}」上把 Tolato 升级到最新版 {latest}。进入 docker-compose.yaml 所在目录，执行：docker compose pull && docker compose up -d，然后确认 tolato-server 容器已用新镜像重启。',
+    copyPrompt: '复制升级指令',
+    copied: '已复制',
+    viewNotes: '更新说明',
+  },
+
   nodeDetail: {
     hostname: '主机名',
     ip: 'IP',
