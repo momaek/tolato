@@ -79,12 +79,13 @@ export interface MessageItem {
 }
 
 export type MessageSegment =
+  | { type: 'thinking'; text: string }
   | { type: 'content'; text: string }
   | { type: 'tool_call'; toolCall: ToolCallItem }
 
 export interface ToolCallItem {
   id: string
-  tool: 'list_nodes' | 'get_node_info' | 'edit_node_info' | 'execute_command'
+  tool: 'list_nodes' | 'get_node_info' | 'edit_node_info' | 'execute_command' | 'update_agent'
   args: Record<string, unknown>
   result?: ToolResultItem
 }

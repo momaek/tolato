@@ -15,12 +15,11 @@ export interface StreamingAssistant {
    * markdown isn't re-parsed (no flash of re-hydrated content).
    */
   id: string
-  reasoning: string
   /**
    * Segments in the order events arrived on the wire. A single agent turn may
-   * span multiple LLM rounds (content → tool_call → content → …), so we can't
-   * flatten into separate `content` and `toolCalls` buckets without losing
-   * the interleaving.
+   * span multiple LLM rounds (thinking → content → tool_call → thinking → …),
+   * so reasoning lives here as interleaved `thinking` segments too — not a flat
+   * string — otherwise later rounds' thinking collapses onto the first block.
    */
   segments: MessageSegment[]
   /** Epoch ms when this turn began streaming — drives the live elapsed timer. */
@@ -74,7 +73,16 @@ export const useChatStore = defineStore('chat', () => {
       const payload = msg.payload as WSReasoningEvent
       const state = getOrCreateState(convId)
       ensureStreaming(state)
-      state.streaming!.reasoning += payload.delta
+      const segs = state.streaming!.segments
+      const last = segs[segs.length - 1]
+      // Coalesce consecutive reasoning deltas into the trailing thinking
+      // segment. A content or tool_call between rounds breaks the run, so the
+      // next round's thinking starts a fresh block in its own chronological slot.
+      if (last && last.type === 'thinking') {
+        last.text += payload.delta
+      } else {
+        segs.push({ type: 'thinking', text: payload.delta })
+      }
       state.status = 'streaming'
     })
 
@@ -146,16 +154,17 @@ export const useChatStore = defineStore('chat', () => {
       // Finalize streaming: keep the interleaved segments on the message so the
       // renderer preserves chronological order (content → tool_call → content).
       if (state.streaming) {
-        const { id, reasoning, segments } = state.streaming
-        // Drop trailing empty content segment if any.
-        const cleaned = segments.filter((s) => s.type !== 'content' || s.text.length > 0)
-        if (cleaned.length > 0 || reasoning) {
+        const { id, segments } = state.streaming
+        // Drop trailing empty content/thinking segments if any.
+        const cleaned = segments.filter(
+          (s) => s.type === 'tool_call' || s.text.length > 0,
+        )
+        if (cleaned.length > 0) {
           const assistantMsg: MessageItem = {
             // Reuse the streaming id so ChatMessages can key the same
             // AssistantMessage across the streaming → finalized swap.
             id,
             role: 'assistant',
-            reasoning: reasoning || undefined,
             segments: cleaned,
             created_at: new Date().toISOString(),
           }
@@ -222,7 +231,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function ensureStreaming(state: ConversationState) {
     if (!state.streaming) {
-      state.streaming = { id: crypto.randomUUID(), reasoning: '', segments: [], startedAt: Date.now() }
+      state.streaming = { id: crypto.randomUUID(), segments: [], startedAt: Date.now() }
     }
   }
 

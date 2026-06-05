@@ -48,7 +48,6 @@ const displayMessages = computed<MessageItem[]>(() => {
     {
       id: props.streaming.id,
       role: 'assistant',
-      reasoning: props.streaming.reasoning || undefined,
       segments: props.streaming.segments,
       created_at: new Date().toISOString(),
     },
@@ -62,14 +61,12 @@ const generating = computed(() =>
   (props.status === 'streaming' || props.status === 'tool_exec'),
 )
 
-// Reasoning is "live" only while it's actively arriving: the turn is streaming
-// and no content has started yet. Once the first content segment lands (or a
-// tool runs), thinking is done — the label flips to "已完成思考". This is what
-// the collapsed label tracks, NOT the open/closed toggle.
+// A thinking segment is "live" only while it's the trailing segment of an
+// actively-streaming turn. Once content lands or a tool runs after it, that
+// round's thinking is done and its label flips to "已完成思考". Per-round, this
+// naturally tracks the latest thinking block (not just the first one).
 const reasoningLive = computed(() =>
-  props.streaming != null &&
-  props.status === 'streaming' &&
-  !props.streaming.segments.some((s) => s.type === 'content' && s.text.length > 0),
+  props.streaming != null && props.status === 'streaming',
 )
 </script>
 

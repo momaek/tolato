@@ -23,12 +23,17 @@ const timeAgo = useRelativeTime(() => props.message.created_at)
 
 <template>
   <div class="group flex flex-col gap-2.5">
-    <ThinkingBlock v-if="message.reasoning" :reasoning="message.reasoning" :live="reasoningLive" />
-    <!-- If segments are present (from streaming), render in chronological order. -->
+    <!-- If segments are present (from streaming), render in chronological order
+         — thinking, content, and tool calls interleaved across rounds. -->
     <template v-if="message.segments && message.segments.length">
       <template v-for="(seg, i) in message.segments" :key="i">
+        <ThinkingBlock
+          v-if="seg.type === 'thinking' && seg.text"
+          :reasoning="seg.text"
+          :live="reasoningLive && i === message.segments.length - 1"
+        />
         <ContentBlock
-          v-if="seg.type === 'content' && seg.text"
+          v-else-if="seg.type === 'content' && seg.text"
           :content="seg.text"
         />
         <ToolCallCard
@@ -37,8 +42,10 @@ const timeAgo = useRelativeTime(() => props.message.created_at)
         />
       </template>
     </template>
-    <!-- Fallback for DB-loaded messages: one round per message, content then tools. -->
+    <!-- Fallback for DB-loaded messages: one round per message, reasoning then
+         content then tools. -->
     <template v-else>
+      <ThinkingBlock v-if="message.reasoning" :reasoning="message.reasoning" :live="reasoningLive" />
       <ContentBlock v-if="message.content" :content="message.content" />
       <ToolCallCard
         v-for="tc in message.tool_calls"
