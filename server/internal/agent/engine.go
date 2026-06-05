@@ -360,7 +360,17 @@ func (lr *LoopRunner) loadHistory() ([]llm.ChatMessage, error) {
 	// Trim to contextRounds (keep last N*2 messages approximately)
 	maxMsgs := lr.contextRounds * 2
 	if len(dbMsgs) > maxMsgs {
-		dbMsgs = dbMsgs[len(dbMsgs)-maxMsgs:]
+		start := len(dbMsgs) - maxMsgs
+		// A "tool" message must be preceded by the assistant message whose
+		// tool_calls it answers. If the trim boundary lands inside a tool-call
+		// sequence, the parent assistant gets dropped and the LLM rejects the
+		// orphaned tool result ("Messages with role 'tool' must be a response
+		// to a preceding message with 'tool_calls'"). Skip any leading tool
+		// messages so the window starts on a clean boundary.
+		for start < len(dbMsgs) && dbMsgs[start].Role == "tool" {
+			start++
+		}
+		dbMsgs = dbMsgs[start:]
 	}
 
 	messages := make([]llm.ChatMessage, 0, len(dbMsgs))
