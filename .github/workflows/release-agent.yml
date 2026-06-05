@@ -46,9 +46,13 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
+          # Tag push → e.g. "v0.2.0"; manual run → branch name. The self-update
+          # flow compares this to the running version, so it must be accurate.
+          VERSION: ${{ github.ref_name }}
         run: |
           OUT="tolato-agent-${GOOS}-${GOARCH}"
-          go build -trimpath -ldflags "-s -w" -o "../dist/${OUT}" ./cmd/agent
+          LDFLAGS="-s -w -X github.com/momaek/tolato/agent/internal/client.Version=${VERSION}"
+          go build -trimpath -ldflags "${LDFLAGS}" -o "../dist/${OUT}" ./cmd/agent
           (cd ../dist && sha256sum "${OUT}" > "${OUT}.sha256")
 
       - uses: actions/upload-artifact@v4

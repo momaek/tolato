@@ -142,6 +142,21 @@ export async function deleteNode(id: string): Promise<void> {
   await api.delete(`/nodes/${id}`)
 }
 
+export interface UpdateAgentResponse {
+  message: string
+  old_version: string
+  new_version: string
+}
+
+export async function updateNodeAgent(id: string): Promise<UpdateAgentResponse> {
+  // The agent downloads + verifies + swaps the binary then restarts, so this
+  // can take a while; give it a generous client timeout.
+  const res = await api.post<UpdateAgentResponse>(`/nodes/${id}/update`, null, {
+    timeout: 6 * 60 * 1000,
+  })
+  return res.data
+}
+
 // --- Settings ---
 
 export async function getLLMSettings(): Promise<LLMSettings> {

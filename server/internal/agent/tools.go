@@ -90,8 +90,14 @@ func ToolDefs() []llm.ToolDefinition {
 			},
 		},
 		{
-			Name:        "execute_command",
-			Description: "Execute a shell command on a specified VPS node.",
+			Name: "execute_command",
+			Description: "Execute a shell command on a specified VPS node and wait for it to finish. " +
+				"Do NOT run commands that block the foreground for a long time (e.g. `nc -l` waiting for a " +
+				"connection, `tail -f`, a server started in the foreground) — the call will hang until it times out. " +
+				"To start a long-running/listening process, background it and return immediately, e.g. " +
+				"`nohup <cmd> >/tmp/x.log 2>&1 &` or `setsid <cmd> &` then `echo \"pid: $!\"`, and verify it later " +
+				"with a separate command (check logs, or `ss -lntp` for a port). " +
+				"For commands you expect to take a while, raise the `timeout`.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -105,10 +111,27 @@ func ToolDefs() []llm.ToolDefinition {
 					},
 					"timeout": map[string]any{
 						"type":        "integer",
-						"description": "Timeout in seconds (default 60).",
+						"description": "Timeout in seconds (default 60). Raise it for commands expected to run longer.",
 					},
 				},
 				"required": []string{"node_id", "command"},
+			},
+		},
+		{
+			Name: "update_agent",
+			Description: "Update a node's tolato-agent to the latest released version. The agent " +
+				"downloads the new binary through the server's release mirror, verifies it, swaps it " +
+				"in, and restarts (briefly going offline then reconnecting). Use when a node reports an " +
+				"outdated agent_version or to pick up an agent bug fix.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"node_id": map[string]any{
+						"type":        "string",
+						"description": "The target node ID.",
+					},
+				},
+				"required": []string{"node_id"},
 			},
 		},
 		{
@@ -206,6 +229,9 @@ func (te *ToolExecutor) executeSingle(ctx context.Context, tc llm.ToolCall) *mod
 			timeout = int(t)
 		}
 		return te.executeCommand(ctx, nodeID, command, timeout)
+	case "update_agent":
+		nodeID, _ := tc.Args["node_id"].(string)
+		return te.executeUpdateAgent(ctx, nodeID)
 	case "web_fetch":
 		url, _ := tc.Args["url"].(string)
 		return te.executeWebFetch(ctx, url)
@@ -401,6 +427,26 @@ func (te *ToolExecutor) executeCommand(ctx context.Context, nodeID, command stri
 		Stderr:     &stderr,
 		DurationMS: &result.DurationMS,
 	}
+}
+
+func (te *ToolExecutor) executeUpdateAgent(ctx context.Context, nodeID string) *model.ToolResultItem {
+	if nodeID == "" {
+		return &model.ToolResultItem{Data: map[string]any{"error": "node_id is required"}}
+	}
+
+	result, err := te.nodeManager.UpdateAgent(ctx, nodeID)
+	if err != nil {
+		return &model.ToolResultItem{Data: map[string]any{"error": fmt.Sprintf("agent update failed: %s", err.Error())}}
+	}
+	if !result.OK {
+		return &model.ToolResultItem{Data: map[string]any{"error": fmt.Sprintf("agent update failed: %s", result.Error)}}
+	}
+
+	return &model.ToolResultItem{Data: map[string]any{
+		"message":     "agent updated and restarting",
+		"old_version": result.OldVersion,
+		"new_version": result.NewVersion,
+	}}
 }
 
 // truncateOutput keeps the first N/2 and last N/2 lines if total exceeds N.

@@ -20,8 +20,18 @@ import (
 	"github.com/momaek/tolato/agent/internal/terminal"
 )
 
+// Version is the agent build version, reported on register and printed by the
+// `--version` flag. The self-update flow verifies a freshly downloaded binary
+// by invoking `--version` on it and compares the output to this value to decide
+// whether a swap is needed — so `--version` MUST print exactly this string, and
+// release builds MUST inject the real version via:
+//
+//	-ldflags "-X github.com/momaek/tolato/agent/internal/client.Version=v1.2.3"
+//
+// (It's a var, not a const, precisely so -X can override it.) Unset = dev build.
+var Version = "dev"
+
 const (
-	agentVersion      = "0.1.0"
 	heartbeatInterval = 30 * time.Second
 	initialBackoff    = 1 * time.Second
 	maxBackoff        = 60 * time.Second
@@ -286,7 +296,7 @@ func (c *Client) sendRegister() error {
 		OS:            sysInfo.OS,
 		Kernel:        sysInfo.Kernel,
 		IP:            sysInfo.IP,
-		AgentVersion:  agentVersion,
+		AgentVersion:  Version,
 		CPUCores:      sysInfo.CPUCores,
 		MemoryTotalMB: sysInfo.MemoryTotalMB,
 		DiskTotalGB:   sysInfo.DiskTotalGB,
@@ -333,6 +343,8 @@ func (c *Client) readLoop() error {
 			c.handleRegisterAck(msg)
 		case "command":
 			go c.handleCommand(msg)
+		case "update":
+			go c.handleUpdate(msg)
 		case "pty_open":
 			go c.handlePTYOpen(msg)
 		case "pty_input":
@@ -363,7 +375,7 @@ func (c *Client) handleRegisterAck(msg WSMessage) {
 		Secret:   ack.Secret,
 		Hostname: sysInfo.Hostname,
 		OS:       sysInfo.OS,
-		Version:  agentVersion,
+		Version:  Version,
 	}
 
 	if err := c.identityStore.Save(c.ident); err != nil {

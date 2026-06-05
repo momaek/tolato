@@ -97,6 +97,7 @@ const (
 	AgentTypePTYOutput     = "pty_output"
 	AgentTypePTYExit       = "pty_exit"
 	AgentTypeFileResult    = "file_result"
+	AgentTypeUpdateResult  = "update_result"
 )
 
 // Server -> Agent event types
@@ -107,6 +108,7 @@ const (
 	AgentTypePTYResize   = "pty_resize"
 	AgentTypePTYClose    = "pty_close"
 	AgentTypeFileOp      = "file_op"
+	AgentTypeUpdate      = "update"
 )
 
 // --- Agent -> Server payloads ---
@@ -140,6 +142,14 @@ type AgentCommandResultPayload struct {
 type AgentCommandStreamPayload struct {
 	Stream string `json:"stream"` // "stdout" or "stderr"
 	Data   string `json:"data"`
+}
+
+// AgentUpdateResultPayload is the agent's reply to an update request.
+type AgentUpdateResultPayload struct {
+	OK         bool   `json:"ok"`
+	OldVersion string `json:"old_version"`
+	NewVersion string `json:"new_version,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // --- Server -> Agent payloads ---

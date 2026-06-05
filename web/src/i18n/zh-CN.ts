@@ -181,6 +181,12 @@ export default {
     subscriptionInfo: '订阅与备注',
     expiresInDays: '{days} 天后到期',
     expired: '已过期 {days} 天',
+    updateAgent: '更新 Agent',
+    updatingAgent: '更新中…',
+    updateAgentConfirm: '将该节点的 agent 更新到最新版本？过程中会短暂离线并自动重连。',
+    updateAgentSuccess: 'Agent 已更新：{old} → {new}',
+    updateAgentNoChange: 'Agent 已是最新版本（{version}）',
+    updateAgentFailed: 'Agent 更新失败：{error}',
   },
 
   auditLog: {

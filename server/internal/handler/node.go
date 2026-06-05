@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/momaek/tolato/server/internal/config"
@@ -274,5 +276,48 @@ func DeleteNode(deps *Deps) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	}
+}
+
+// UpdateNodeAgent handles POST /api/nodes/:id/update — tells the node's agent to
+// self-update to the latest release via the server's /releases proxy chain. On
+// success the agent restarts and reconnects shortly after.
+func UpdateNodeAgent(deps *Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+
+		if _, err := store.GetNodeByID(id); err != nil {
+			c.JSON(http.StatusNotFound, model.ErrorResponse{
+				Error:   "not_found",
+				Message: "node not found",
+			})
+			return
+		}
+
+		// Allow time for the binary download through the mirror plus headroom.
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 6*time.Minute)
+		defer cancel()
+
+		result, err := deps.NodeManager.UpdateAgent(ctx, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+				Error:   "update_failed",
+				Message: err.Error(),
+			})
+			return
+		}
+		if !result.OK {
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+				Error:   "update_failed",
+				Message: result.Error,
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":     "updated",
+			"old_version": result.OldVersion,
+			"new_version": result.NewVersion,
+		})
 	}
 }

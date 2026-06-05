@@ -379,3 +379,29 @@ func (m *NodeManager) ExecuteCommand(ctx context.Context, nodeID, command string
 	}
 	return &result, nil
 }
+
+// UpdateAgent tells the agent to self-update to the latest release (via the
+// server's /releases proxy chain) and waits for its result. On success the
+// agent restarts, so the connection drops shortly after the reply arrives.
+func (m *NodeManager) UpdateAgent(ctx context.Context, nodeID string) (*model.AgentUpdateResultPayload, error) {
+	ac, ok := m.GetConn(nodeID)
+	if !ok {
+		return nil, errors.New("node is not online")
+	}
+
+	// Generous timeout: a binary download through the mirror can be slow.
+	reply, err := ac.Request(ctx, model.AgentTypeUpdate, struct{}{}, 5*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+
+	if reply.Type != model.AgentTypeUpdateResult {
+		return nil, fmt.Errorf("unexpected reply type: %s", reply.Type)
+	}
+
+	var result model.AgentUpdateResultPayload
+	if err := reply.Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode payload: %w", err)
+	}
+	return &result, nil
+}

@@ -181,6 +181,12 @@ export default {
     subscriptionInfo: 'Subscription & Notes',
     expiresInDays: 'Expires in {days}d',
     expired: 'Expired {days}d ago',
+    updateAgent: 'Update Agent',
+    updatingAgent: 'Updating…',
+    updateAgentConfirm: 'Update this node\'s agent to the latest version? It will briefly go offline and reconnect.',
+    updateAgentSuccess: 'Agent updated: {old} → {new}',
+    updateAgentNoChange: 'Agent already up to date ({version})',
+    updateAgentFailed: 'Agent update failed: {error}',
   },
 
   auditLog: {

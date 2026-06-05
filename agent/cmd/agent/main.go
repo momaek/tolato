@@ -17,15 +17,24 @@ import (
 
 func main() {
 	var (
-		serverURL string
-		token     string
-		dataDir   string
+		serverURL   string
+		token       string
+		dataDir     string
+		showVersion bool
 	)
 
 	flag.StringVar(&serverURL, "server", "", "Server WebSocket URL (required, e.g. ws://localhost:8080/ws/agent)")
 	flag.StringVar(&token, "token", "", "One-time registration token (required for first run)")
 	flag.StringVar(&dataDir, "data-dir", "", "Data directory for identity storage (default: ~/.tolato)")
+	flag.BoolVar(&showVersion, "version", false, "Print the agent version and exit")
 	flag.Parse()
+
+	// --version prints just the version string; the self-update flow relies on
+	// this to verify a freshly downloaded binary before swapping it in.
+	if showVersion {
+		fmt.Println(client.Version)
+		return
+	}
 
 	if serverURL == "" {
 		fmt.Fprintln(os.Stderr, "error: --server is required")

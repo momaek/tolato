@@ -84,6 +84,7 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.GET("/nodes", ListNodes(deps))
 	protected.GET("/nodes/:id", GetNode(deps))
 	protected.PUT("/nodes/:id", UpdateNode(deps))
+	protected.POST("/nodes/:id/update", UpdateNodeAgent(deps))
 	protected.DELETE("/nodes/:id", DeleteNode(deps))
 
 	// Settings

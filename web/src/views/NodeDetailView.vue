@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Server, Cpu, HardDrive, Activity, Terminal as TerminalIcon, Info, Calendar } from 'lucide-vue-next'
+import { ArrowLeft, Server, Cpu, HardDrive, Activity, Terminal as TerminalIcon, Info, Calendar, RefreshCw } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -13,9 +14,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getNode, getNodeCommands } from '@/services/api'
+import { getNode, getNodeCommands, updateNodeAgent } from '@/services/api'
 import type { NodeDetail, NodeCommandItem } from '@/types/api'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const nodeId = route.params.nodeId as string
@@ -29,6 +31,37 @@ function openTerminal() {
 const node = ref<NodeDetail | null>(null)
 const commands = ref<NodeCommandItem[]>([])
 const loading = ref(true)
+
+const updating = ref(false)
+const updateMessage = ref<{ tone: 'success' | 'error'; text: string } | null>(null)
+
+async function runUpdateAgent() {
+  if (!node.value || updating.value) return
+  if (!window.confirm(t('nodeDetail.updateAgentConfirm'))) return
+
+  updating.value = true
+  updateMessage.value = null
+  try {
+    const res = await updateNodeAgent(nodeId)
+    if (res.old_version === res.new_version) {
+      updateMessage.value = { tone: 'success', text: t('nodeDetail.updateAgentNoChange', { version: res.new_version }) }
+    } else {
+      updateMessage.value = { tone: 'success', text: t('nodeDetail.updateAgentSuccess', { old: res.old_version, new: res.new_version }) }
+    }
+    // Refresh node info once it reconnects with the new version.
+    try {
+      node.value = await getNode(nodeId)
+    } catch {
+      // node may still be reconnecting; ignore
+    }
+  } catch (e) {
+    const err = e as { response?: { data?: { message?: string } }; message?: string }
+    const detail = err.response?.data?.message || err.message || 'unknown error'
+    updateMessage.value = { tone: 'error', text: t('nodeDetail.updateAgentFailed', { error: detail }) }
+  } finally {
+    updating.value = false
+  }
+}
 
 onMounted(async () => {
   try {
@@ -123,12 +156,34 @@ const expiresInfo = computed(() => {
         v-if="node"
         variant="outline"
         size="sm"
+        :disabled="node.status !== 'online' || updating"
+        :title="$t('nodeDetail.updateAgent')"
+        @click="runUpdateAgent()"
+      >
+        <RefreshCw class="h-4 w-4 mr-1" :class="{ 'animate-spin': updating }" />
+        {{ updating ? $t('nodeDetail.updatingAgent') : $t('nodeDetail.updateAgent') }}
+      </Button>
+      <Button
+        v-if="node"
+        variant="outline"
+        size="sm"
         :disabled="node.status !== 'online'"
         @click="openTerminal()"
       >
         <TerminalIcon class="h-4 w-4 mr-1" />
         Open Terminal
       </Button>
+    </div>
+
+    <div
+      v-if="updateMessage"
+      class="mb-4 rounded-md px-3 py-2 text-sm"
+      :style="{
+        backgroundColor: updateMessage.tone === 'error' ? 'var(--color-error)' : 'var(--secondary)',
+        color: updateMessage.tone === 'error' ? 'var(--color-error-foreground)' : 'var(--secondary-foreground)',
+      }"
+    >
+      {{ updateMessage.text }}
     </div>
 
     <div v-if="node" class="space-y-6">
