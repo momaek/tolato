@@ -66,11 +66,19 @@ func (pb *PromptBuilder) writeTools(b *strings.Builder) {
 - node_id (string, required): 节点 ID
 
 ### execute_command
-在指定 VPS 上执行 Shell 命令。
+在指定 VPS 上执行 Shell 命令。该工具会等待命令返回后才继续，因此**不要执行会长时间阻塞前台的命令**（如 nc 监听端口等连接、tail -f、不带 -d 的服务进程等），否则会一直卡住直到超时。
+若需要启动一个常驻/监听类进程，请将其放到后台并立刻返回，例如：
+- 用 "nohup <命令> >/tmp/xxx.log 2>&1 &" 或 "setsid <命令> &" 启动，再 echo "pid: $!" 拿到 PID；
+- 之后用单独的命令（如查看日志、用 ss -lntp 检查端口）来确认它在运行。
 参数：
 - node_id (string, required): 目标节点 ID
 - command (string, required): 要执行的命令
-- timeout (integer, optional): 超时时间（秒），默认 60
+- timeout (integer, optional): 超时时间（秒），默认 60。对预期耗时的命令应显式调大
+
+### update_agent
+将指定节点的 tolato-agent 升级到最新发布版本。agent 会通过服务端的发布镜像下载新二进制、校验后替换并重启（会短暂离线再重连）。当某节点 agent_version 偏旧、或需要让节点应用 agent 的修复时使用。
+参数：
+- node_id (string, required): 目标节点 ID
 
 `)
 }
