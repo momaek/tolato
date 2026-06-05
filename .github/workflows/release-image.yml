@@ -4,7 +4,8 @@ name: release-image
 # Go binary) and push it to GHCR.
 #
 # Image: ghcr.io/momaek/tolato-server
-# Trigger matches release-agent.yml — any v* tag.
+# Trigger: bare v* tags (server release). The agent versions independently via
+# agent-v* tags (see release-agent.yml), so a v* tag builds only the server.
 
 on:
   push:
