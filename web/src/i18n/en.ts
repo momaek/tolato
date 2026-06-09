@@ -296,7 +296,7 @@ export default {
         url: 'Request URL',
         headers: 'Headers (JSON)',
         body: 'Body template',
-        bodyHelp: 'Placeholders: {{message}} {{node_name}} {{node_ip}} {{type}} {{time}}, etc.; two-step channels can use {{token}}.',
+        bodyHelp: "Placeholders: {'{{message}}'} {'{{node_name}}'} {'{{node_ip}}'} {'{{type}}'} {'{{time}}'}, etc.; two-step channels can use {'{{token}}'}.",
       },
       remove: 'Remove',
     },

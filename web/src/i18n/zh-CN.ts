@@ -296,7 +296,7 @@ export default {
         url: '请求 URL',
         headers: '请求头 (JSON)',
         body: '请求体模板',
-        bodyHelp: '可用占位符：{{message}} {{node_name}} {{node_ip}} {{type}} {{time}} 等；两段式可用 {{token}}。',
+        bodyHelp: "可用占位符：{'{{message}}'} {'{{node_name}}'} {'{{node_ip}}'} {'{{type}}'} {'{{time}}'} 等；两段式可用 {'{{token}}'}。",
       },
       remove: '删除',
     },
