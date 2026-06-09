@@ -136,7 +136,10 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			installSystemHandlers(deps, existingNode.ID, clientIP, ac)
 			defer func() {
 				deps.NodeManager.RemoveConn(existingNode.ID)
-				_ = store.SetNodeStatus(existingNode.ID, "offline")
+				// A dropped WS doesn't prove the node is gone (a network blip looks
+				// identical to a crash), so defer the offline decision to the
+				// heartbeat-threshold monitor instead of alerting on every reconnect.
+				deps.Notifier.OnDisconnect(existingNode.ID)
 				log.Printf("Agent disconnected (reconnect): node=%s", existingNode.ID)
 			}()
 
@@ -154,6 +157,9 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			}
 
 			log.Printf("Agent reconnected: node=%s", existingNode.ID)
+			if changed, _ := store.MarkOnline(existingNode.ID); changed {
+				deps.Notifier.NotifyOnline(existingNode.ID)
+			}
 			_ = store.UpdateHeartbeat(existingNode.ID)
 
 			// Block until the router goroutine finishes.
@@ -219,7 +225,9 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			installSystemHandlers(deps, node.ID, clientIP, ac)
 			defer func() {
 				deps.NodeManager.RemoveConn(node.ID)
-				_ = store.SetNodeStatus(node.ID, "offline")
+				// See the reconnect path above: let the monitor's threshold decide
+				// offline so flaps don't fire spurious offline/recovery pairs.
+				deps.Notifier.OnDisconnect(node.ID)
 				log.Printf("Agent disconnected (new): node=%s", node.ID)
 			}()
 
@@ -281,6 +289,11 @@ func handleAgentHeartbeat(deps *Deps, nodeID string, payload json.RawMessage) {
 		return
 	}
 
+	// Detect offline→online recovery (the conditional UPDATE only changes a row
+	// on the actual transition edge), then refresh the heartbeat timestamp.
+	if changed, _ := store.MarkOnline(nodeID); changed {
+		deps.Notifier.NotifyOnline(nodeID)
+	}
 	if err := store.UpdateHeartbeat(nodeID); err != nil {
 		log.Printf("Failed to update heartbeat: %v", err)
 	}

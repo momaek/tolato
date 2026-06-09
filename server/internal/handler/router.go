@@ -11,6 +11,7 @@ import (
 	"github.com/momaek/tolato/server/internal/mcp"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/node"
+	"github.com/momaek/tolato/server/internal/notify"
 	"github.com/momaek/tolato/server/internal/settings"
 	"github.com/momaek/tolato/server/internal/webui"
 )
@@ -24,8 +25,9 @@ type Deps struct {
 	Config      *config.Config
 	NodeManager *node.NodeManager
 	Settings    *settings.Cache
-	GeoIP       *geoip.Service // may be nil when geoip is disabled
-	Version     string         // server build version (e.g. "v0.8.10"), "dev" in local builds
+	GeoIP       *geoip.Service     // may be nil when geoip is disabled
+	Notifier    *notify.Dispatcher // node offline/online notifications
+	Version     string             // server build version (e.g. "v0.8.10"), "dev" in local builds
 }
 
 // ValidateToken validates a JWT token string and returns the claims.
@@ -99,6 +101,10 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.GET("/settings/webfetch", GetWebFetchSettings(deps))
 	protected.PUT("/settings/webfetch", PutWebFetchSettings(deps))
 	protected.POST("/settings/webfetch/verify", VerifyWebFetchSettings(deps))
+	protected.GET("/settings/notify", GetNotifySettings(deps))
+	protected.PUT("/settings/notify", PutNotifySettings(deps))
+	protected.GET("/settings/notify/presets", GetNotifyPresets(deps))
+	protected.POST("/settings/notify/test", TestNotifyChannel(deps))
 
 	// Audit Logs
 	protected.GET("/audit-logs", ListAuditLogs(deps))

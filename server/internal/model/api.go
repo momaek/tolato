@@ -9,7 +9,7 @@ import "time"
 // --- Common ---
 
 type PaginationQuery struct {
-	Page     int `form:"page" json:"page"`         // 1-based, default 1
+	Page     int `form:"page" json:"page"`           // 1-based, default 1
 	PageSize int `form:"page_size" json:"page_size"` // default 20, max 100
 }
 
@@ -77,9 +77,9 @@ type MessageItem struct {
 }
 
 type ToolCallItem struct {
-	ID     string         `json:"id"`
-	Tool   string         `json:"tool"`     // list_nodes, get_node_info, execute_command
-	Args   map[string]any `json:"args"`
+	ID     string          `json:"id"`
+	Tool   string          `json:"tool"` // list_nodes, get_node_info, execute_command
+	Args   map[string]any  `json:"args"`
 	Result *ToolResultItem `json:"result,omitempty"`
 }
 
@@ -124,7 +124,7 @@ type CreateNodeRequest struct {
 
 type CreateNodeResponse struct {
 	Token       string `json:"token"`        // reusable registration token (valid for multiple agents)
-	InstallCmd  string `json:"install_cmd"`   // full install command for copy-paste
+	InstallCmd  string `json:"install_cmd"`  // full install command for copy-paste
 	TokenExpiry string `json:"token_expiry"` // e.g., "24h"
 }
 
@@ -142,9 +142,9 @@ type NodeListItem struct {
 	CPUCores      int        `json:"cpu_cores,omitempty"`       // hardware spec
 	MemoryTotalMB int        `json:"memory_total_mb,omitempty"` // hardware spec
 	DiskTotalGB   int        `json:"disk_total_gb,omitempty"`   // hardware spec
-	CPU           *float64   `json:"cpu,omitempty"`    // current CPU usage %
-	Memory        *float64   `json:"memory,omitempty"` // current memory usage %
-	Disk          *float64   `json:"disk,omitempty"`   // current disk usage %
+	CPU           *float64   `json:"cpu,omitempty"`             // current CPU usage %
+	Memory        *float64   `json:"memory,omitempty"`          // current memory usage %
+	Disk          *float64   `json:"disk,omitempty"`            // current disk usage %
 	Extra         JSONMap    `json:"extra,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 }
@@ -211,8 +211,8 @@ type SecuritySettings struct {
 // GET/PUT /api/settings/agent
 type AgentSettings struct {
 	HeartbeatInterval int `json:"heartbeat_interval"` // seconds, default 30
-	CommandTimeout    int `json:"command_timeout"`     // seconds, default 60
-	OutputMaxLines    int `json:"output_max_lines"`    // default 10000
+	CommandTimeout    int `json:"command_timeout"`    // seconds, default 60
+	OutputMaxLines    int `json:"output_max_lines"`   // default 10000
 }
 
 // GET/PUT /api/settings/chat
@@ -236,6 +236,84 @@ type WebFetchSettings struct {
 	JinaAPIKey string `json:"jina_api_key"` // masked on GET
 	TimeoutSec int    `json:"timeout_sec"`
 	MaxKB      int    `json:"max_kb"`
+}
+
+// --- Notifications (GET/PUT /api/settings/notify) ---
+//
+// Node offline/online notifications. The whole struct is persisted as a single
+// JSON setting under the key "notify.config" (rather than one key per field)
+// because token_sources/channels are variable-length lists.
+//
+// Sensitive values inside TokenSource.Params / Channel.Params (anything whose
+// key contains "secret"/"token"/"password"/"key") are masked on GET and a
+// submitted masked value is treated as "unchanged" on PUT — same pattern as the
+// LLM/WebFetch API keys.
+type NotifySettings struct {
+	// OfflineThresholdSeconds: a node with no heartbeat for this long is marked
+	// offline by the background monitor. <=0 disables the monitor (disconnect
+	// detection still works). Default 90.
+	OfflineThresholdSeconds int `json:"offline_threshold_seconds"`
+	// RecoverNotify toggles offline→online recovery notifications. Default true.
+	RecoverNotify bool `json:"recover_notify"`
+	// StartupGraceSeconds suppresses offline notifications for this long after
+	// server start, so a restart (where all nodes briefly look stale) doesn't
+	// fire a storm. Default 90.
+	StartupGraceSeconds int                 `json:"startup_grace_seconds"`
+	TokenSources        []NotifyTokenSource `json:"token_sources"`
+	Channels            []NotifyChannel     `json:"channels"`
+}
+
+// NotifyTokenSource is an independently configured "exchange credentials for a
+// bearer token" step (e.g. WeCom gettoken, Feishu tenant_access_token).
+// Channels reference it by Name; the resolved token is cached and shared.
+type NotifyTokenSource struct {
+	Name         string             `json:"name"`
+	Request      NotifyHTTPRequest  `json:"request"`
+	Params       map[string]string  `json:"params,omitempty"` // template vars; sensitive values masked on GET
+	Extract      NotifyTokenExtract `json:"extract"`
+	InvalidateOn *NotifyJSONMatch   `json:"invalidate_on,omitempty"` // response match → token stale → refresh+retry
+}
+
+type NotifyHTTPRequest struct {
+	Method  string            `json:"method,omitempty"` // default POST
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    string            `json:"body,omitempty"`
+}
+
+type NotifyTokenExtract struct {
+	TokenPath          string `json:"token_path"`             // dot-path into response JSON, e.g. "access_token"
+	ExpiresPath        string `json:"expires_path,omitempty"` // dot-path to TTL seconds, e.g. "expires_in"
+	TTLFallbackSeconds int    `json:"ttl_fallback_seconds,omitempty"`
+}
+
+// NotifyJSONMatch matches a value at JSONPath (dot-separated) against any of
+// Values. Used for both success detection (success_check) and token-invalid
+// detection (invalidate_on).
+type NotifyJSONMatch struct {
+	JSONPath string `json:"json_path"`
+	Values   []any  `json:"values,omitempty"`
+}
+
+// NotifyChannel is one notification target. All channels share a single webhook
+// engine; Preset fills in default url/body/success_check and the user only
+// supplies Params. Preset "custom" uses Webhook verbatim. TokenSource is empty
+// for single-step channels (Telegram/Discord/Slack) and set for two-step ones.
+type NotifyChannel struct {
+	Name        string             `json:"name"`
+	Enabled     bool               `json:"enabled"`
+	Preset      string             `json:"preset"` // telegram|discord|slack|wecom|feishu|custom
+	TokenSource string             `json:"token_source,omitempty"`
+	Params      map[string]string  `json:"params,omitempty"`  // template vars; sensitive values masked on GET
+	Webhook     *NotifyWebhookSpec `json:"webhook,omitempty"` // overrides preset defaults; required for "custom"
+}
+
+type NotifyWebhookSpec struct {
+	Method       string            `json:"method,omitempty"` // default POST
+	URL          string            `json:"url,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	BodyTemplate string            `json:"body_template,omitempty"`
+	SuccessCheck *NotifyJSONMatch  `json:"success_check,omitempty"` // nil → success = HTTP 2xx
 }
 
 // --- Audit Logs ---

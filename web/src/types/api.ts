@@ -259,6 +259,67 @@ export interface VerifyWebFetchResponse {
   sample?: string
 }
 
+// --- Notifications ---
+
+export interface NotifyJSONMatch {
+  json_path: string
+  values?: unknown[]
+}
+
+export interface NotifyHTTPRequest {
+  method?: string
+  url: string
+  headers?: Record<string, string>
+  body?: string
+}
+
+export interface NotifyTokenExtract {
+  token_path: string
+  expires_path?: string
+  ttl_fallback_seconds?: number
+}
+
+export interface NotifyTokenSource {
+  name: string
+  request: NotifyHTTPRequest
+  params?: Record<string, string>
+  extract: NotifyTokenExtract
+  invalidate_on?: NotifyJSONMatch
+}
+
+export interface NotifyWebhookSpec {
+  method?: string
+  url?: string
+  headers?: Record<string, string>
+  body_template?: string
+  success_check?: NotifyJSONMatch
+}
+
+export interface NotifyChannel {
+  name: string
+  enabled: boolean
+  preset: string
+  token_source?: string
+  params?: Record<string, string>
+  webhook?: NotifyWebhookSpec
+}
+
+export interface NotifySettings {
+  offline_threshold_seconds: number
+  recover_notify: boolean
+  startup_grace_seconds: number
+  token_sources: NotifyTokenSource[]
+  channels: NotifyChannel[]
+}
+
+export interface NotifyPreset {
+  preset: string
+  label: string
+  params: string[]
+  token_source?: NotifyTokenSource
+  source_params?: string[]
+}
+
 // ============================================================================
 // Audit Logs
 // ============================================================================

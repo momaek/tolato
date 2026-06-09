@@ -18,6 +18,8 @@ import type {
   ChatSettings,
   WebFetchSettings,
   VerifyWebFetchResponse,
+  NotifySettings,
+  NotifyPreset,
   AuditLogQuery,
   AuditLogItem,
   PaginatedResponse,
@@ -221,6 +223,24 @@ export async function verifyWebFetch(
 ): Promise<VerifyWebFetchResponse> {
   const res = await api.post<VerifyWebFetchResponse>('/settings/webfetch/verify', payload ?? {})
   return res.data
+}
+
+export async function getNotifySettings(): Promise<NotifySettings> {
+  const res = await api.get<NotifySettings>('/settings/notify')
+  return res.data
+}
+
+export async function updateNotifySettings(data: NotifySettings): Promise<void> {
+  await api.put('/settings/notify', data)
+}
+
+export async function getNotifyPresets(): Promise<NotifyPreset[]> {
+  const res = await api.get<{ presets: NotifyPreset[] }>('/settings/notify/presets')
+  return res.data.presets || []
+}
+
+export async function testNotifyChannel(name: string): Promise<void> {
+  await api.post('/settings/notify/test', { name })
 }
 
 // --- Audit Logs ---
