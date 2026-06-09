@@ -14,4 +14,4 @@ agent/agent
 /server/data/
 /tolato-data/
 # Claude Code preview MCP launch config (per-developer)
-.claude/launch.json
+**/.claude/launch.json

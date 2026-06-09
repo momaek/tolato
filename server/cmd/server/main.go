@@ -16,6 +16,7 @@ import (
 	"github.com/momaek/tolato/server/internal/handler"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/node"
+	"github.com/momaek/tolato/server/internal/notify"
 	"github.com/momaek/tolato/server/internal/settings"
 	"github.com/momaek/tolato/server/internal/store"
 )
@@ -41,6 +42,7 @@ func main() {
 
 	nm := node.NewNodeManager()
 	settingsCache := settings.New()
+	notifier := notify.New(settingsCache)
 
 	var geoSvc *geoip.Service
 	if cfg.GeoIP.Enabled {
@@ -56,6 +58,7 @@ func main() {
 		NodeManager: nm,
 		Settings:    settingsCache,
 		GeoIP:       geoSvc,
+		Notifier:    notifier,
 		Version:     version,
 	}
 
@@ -91,6 +94,8 @@ func main() {
 		}
 	}
 
+	go runOfflineMonitor(rootCtx, settingsCache, notifier)
+
 	<-rootCtx.Done()
 	log.Println("Shutdown signal received, draining...")
 
@@ -116,6 +121,40 @@ func runGeoIPRefresh(ctx context.Context, svc *geoip.Service, interval time.Dura
 			return
 		case <-ticker.C:
 			svc.Refresh()
+		}
+	}
+}
+
+// runOfflineMonitor periodically marks nodes offline when their heartbeat goes
+// stale, catching agents that vanished without a clean WebSocket close
+// (kill -9, network partition, host crash). The conditional UPDATE in
+// store.MarkOffline guarantees each offline notification fires exactly once even
+// if the WS-disconnect path races this loop.
+func runOfflineMonitor(ctx context.Context, s *settings.Cache, n *notify.Dispatcher) {
+	const tick = 30 * time.Second
+	ticker := time.NewTicker(tick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cfg := s.Notify()
+			if cfg.OfflineThresholdSeconds <= 0 {
+				continue // monitor disabled
+			}
+			threshold := time.Duration(cfg.OfflineThresholdSeconds) * time.Second
+			nodes, err := store.ListStaleOnlineNodes(threshold)
+			if err != nil {
+				log.Printf("offline monitor: list failed: %v", err)
+				continue
+			}
+			for _, nd := range nodes {
+				if changed, _ := store.MarkOffline(nd.ID); changed {
+					log.Printf("offline monitor: node %s went stale (no heartbeat > %s)", nd.ID, threshold)
+					n.NotifyOffline(nd.ID)
+				}
+			}
 		}
 	}
 }

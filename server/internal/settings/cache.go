@@ -150,6 +150,20 @@ func (c *Cache) WebFetch() model.WebFetchSettings {
 	return s
 }
 
+// Notify returns notification settings with built-in defaults. The whole
+// struct is stored as a single JSON blob under "notify.config"; missing/blank
+// config just leaves the defaults in place. Read on every offline/online event
+// and on every monitor tick, so REST edits take effect without a restart.
+func (c *Cache) Notify() model.NotifySettings {
+	s := model.NotifySettings{
+		OfflineThresholdSeconds: 90,
+		RecoverNotify:           true,
+		StartupGraceSeconds:     90,
+	}
+	GetJSON(c, "notify.config", &s)
+	return s
+}
+
 // SecurityConfirmEnabled and SecurityList are used by security.Checker.
 func (c *Cache) SecurityConfirmEnabled() bool {
 	var enabled bool

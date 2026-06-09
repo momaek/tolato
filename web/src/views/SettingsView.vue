@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { CheckCircle, AlertCircle, Loader2, Copy, Check, Key, Trash2 } from 'lucide-vue-next'
+import { CheckCircle, AlertCircle, Loader2, Copy, Check, Key, Trash2, Plus, Send } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -43,6 +43,10 @@ import {
   getWebFetchSettings,
   updateWebFetchSettings,
   verifyWebFetch,
+  getNotifySettings,
+  updateNotifySettings,
+  getNotifyPresets,
+  testNotifyChannel,
   getAPIKeys,
   createAPIKey,
   deleteAPIKey,
@@ -55,6 +59,9 @@ import type {
   WebFetchSettings,
   VerifyLLMResponse,
   VerifyWebFetchResponse,
+  NotifySettings,
+  NotifyPreset,
+  NotifyChannel,
 } from '@/types/api'
 
 const { t } = useI18n()
@@ -66,6 +73,7 @@ const tabs = computed(() => [
   { id: 'agent', label: t('settings.tabs.agent') },
   { id: 'chat', label: t('settings.tabs.chat') },
   { id: 'web_fetch', label: t('settings.tabs.webFetch') },
+  { id: 'notify', label: t('settings.tabs.notify') },
   { id: 'api_keys', label: t('settings.tabs.apiKeys') },
 ])
 
@@ -130,6 +138,157 @@ const webFetchSaving = ref(false)
 const webFetchVerifying = ref(false)
 const webFetchVerifyResult = ref<VerifyWebFetchResponse | null>(null)
 
+// Notifications
+type EditChannel = NotifyChannel & { _headers_json?: string }
+const notify = ref<NotifySettings>({
+  offline_threshold_seconds: 90,
+  recover_notify: true,
+  startup_grace_seconds: 90,
+  token_sources: [],
+  channels: [],
+})
+const notifyPresets = ref<NotifyPreset[]>([])
+const notifySaving = ref(false)
+const notifyTesting = ref<string | null>(null)
+
+function presetFor(name: string): NotifyPreset | undefined {
+  return notifyPresets.value.find((p) => p.preset === name)
+}
+
+function isSecretField(key: string): boolean {
+  const k = key.toLowerCase()
+  return k.includes('secret') || k.includes('token') || k.includes('password') || k.includes('key')
+}
+
+// Params for the channel's referenced token source (creating the entry lazily so
+// v-model writes persist). Shared across channels using the same preset.
+function sourceParams(ch: NotifyChannel): Record<string, string> {
+  if (!ch.token_source) return {}
+  let src = notify.value.token_sources.find((s) => s.name === ch.token_source)
+  if (!src) {
+    const tpl = presetFor(ch.preset)?.token_source
+    src = tpl
+      ? JSON.parse(JSON.stringify(tpl))
+      : { name: ch.token_source, request: { url: '' }, extract: { token_path: '' }, params: {} }
+    src!.params = src!.params || {}
+    notify.value.token_sources.push(src!)
+  }
+  if (!src!.params) src!.params = {}
+  return src!.params
+}
+
+function ensureChannelParams(ch: NotifyChannel) {
+  if (!ch.params) ch.params = {}
+  const preset = presetFor(ch.preset)
+  for (const k of preset?.params || []) {
+    if (!(k in ch.params)) ch.params[k] = ''
+  }
+  if (preset?.source_params?.length) {
+    ch.token_source = ch.preset
+    const sp = sourceParams(ch)
+    for (const k of preset.source_params) {
+      if (!(k in sp)) sp[k] = ''
+    }
+  }
+}
+
+function addChannel() {
+  const ch: EditChannel = {
+    name: `channel-${notify.value.channels.length + 1}`,
+    enabled: true,
+    preset: 'telegram',
+    params: {},
+  }
+  ensureChannelParams(ch)
+  notify.value.channels.push(ch)
+}
+
+function onPresetChange(ch: EditChannel) {
+  ch.params = {}
+  ch.token_source = ''
+  if (ch.preset === 'custom') {
+    ch.webhook = ch.webhook || { method: 'POST', url: '', headers: {}, body_template: '' }
+    ch._headers_json = JSON.stringify(ch.webhook.headers || {}, null, 2)
+  } else {
+    ch.webhook = undefined
+    ensureChannelParams(ch)
+  }
+}
+
+function removeChannel(idx: number) {
+  notify.value.channels.splice(idx, 1)
+}
+
+// Serialize the custom-webhook headers textarea into the webhook object.
+function syncHeaders(ch: EditChannel) {
+  if (!ch.webhook) return
+  try {
+    ch.webhook.headers = ch._headers_json ? JSON.parse(ch._headers_json) : {}
+  } catch {
+    // leave previous value; validation happens on save
+  }
+}
+
+function prepareNotifyPayload(): NotifySettings {
+  // Parse custom headers and drop token sources no channel references.
+  const channels = notify.value.channels.map((c) => {
+    const ch = c as EditChannel
+    if (ch.preset === 'custom' && ch.webhook) {
+      try {
+        ch.webhook.headers = ch._headers_json ? JSON.parse(ch._headers_json) : {}
+      } catch {
+        ch.webhook.headers = ch.webhook.headers || {}
+      }
+    }
+    const { _headers_json, ...rest } = ch
+    return rest as NotifyChannel
+  })
+  const usedSources = new Set(channels.map((c) => c.token_source).filter(Boolean))
+  const token_sources = notify.value.token_sources.filter((s) => usedSources.has(s.name))
+  return { ...notify.value, channels, token_sources }
+}
+
+async function loadNotify() {
+  const [data, presets] = await Promise.all([getNotifySettings(), getNotifyPresets()])
+  notifyPresets.value = presets
+  // Hydrate ephemeral editor fields for custom channels.
+  for (const c of data.channels) {
+    const ch = c as EditChannel
+    if (ch.preset === 'custom') {
+      ch._headers_json = JSON.stringify(ch.webhook?.headers || {}, null, 2)
+    }
+  }
+  notify.value = data
+}
+
+async function saveNotify() {
+  notifySaving.value = true
+  try {
+    await updateNotifySettings(prepareNotifyPayload())
+    await loadNotify() // re-mask secrets
+  } catch {
+    toast.error(t('settings.saveFailed'))
+  } finally {
+    notifySaving.value = false
+  }
+}
+
+async function testChannel(ch: NotifyChannel) {
+  notifyTesting.value = ch.name
+  try {
+    // Test runs against the saved config, so persist first.
+    await updateNotifySettings(prepareNotifyPayload())
+    await testNotifyChannel(ch.name)
+    toast.success(t('settings.notify.testSent'))
+    await loadNotify()
+  } catch (e: any) {
+    const msg = e?.response?.data?.message || t('settings.notify.testFailed')
+    toast.error(msg)
+  } finally {
+    notifyTesting.value = null
+  }
+}
+
 // API Keys
 const apiKeys = ref<any[]>([])
 const showCreateKeyDialog = ref(false)
@@ -153,6 +312,7 @@ onMounted(async () => {
     chat.value = chatData
     webFetch.value = webFetchData
     apiKeys.value = await getAPIKeys().catch(() => [])
+    await loadNotify().catch(() => {})
   } catch {
     toast.error(t('settings.failedToLoad'))
   }
@@ -679,6 +839,197 @@ function closeCreateDialog() {
 
         <Button :disabled="webFetchSaving" @click="saveWebFetch">
           {{ webFetchSaving ? $t('common.saving') : $t('common.save') }}
+        </Button>
+      </div>
+
+      <!-- Notifications -->
+      <div v-if="activeTab === 'notify'" class="max-w-2xl space-y-6">
+        <div>
+          <h2 class="text-base font-semibold">{{ $t('settings.notify.title') }}</h2>
+          <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.notify.description') }}
+          </p>
+        </div>
+
+        <Separator />
+
+        <!-- Global options -->
+        <div class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">{{ $t('settings.notify.thresholdLabel') }}</label>
+              <Input v-model.number="notify.offline_threshold_seconds" type="number" :min="0" :max="3600" />
+              <p class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.thresholdHelp') }}</p>
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">{{ $t('settings.notify.graceLabel') }}</label>
+              <Input v-model.number="notify.startup_grace_seconds" type="number" :min="0" :max="3600" />
+              <p class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.graceHelp') }}</p>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm font-medium">{{ $t('settings.notify.recoverLabel') }}</label>
+              <p class="text-sm" style="color: var(--muted-foreground)">{{ $t('settings.notify.recoverHelp') }}</p>
+            </div>
+            <button
+              class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+              :style="{ backgroundColor: notify.recover_notify ? 'var(--primary)' : 'var(--secondary)' }"
+              @click="notify.recover_notify = !notify.recover_notify"
+            >
+              <span
+                class="absolute top-0.5 block h-5 w-5 rounded-full bg-white transition-transform"
+                :class="notify.recover_notify ? 'translate-x-5' : 'translate-x-0.5'"
+              />
+            </button>
+          </div>
+        </div>
+
+        <Separator />
+
+        <!-- Channels -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-semibold">{{ $t('settings.notify.channels') }}</h3>
+              <p class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.channelsHelp') }}</p>
+            </div>
+            <Button variant="outline" size="sm" @click="addChannel">
+              <Plus class="mr-1 h-4 w-4" />
+              {{ $t('settings.notify.addChannel') }}
+            </Button>
+          </div>
+
+          <p v-if="notify.channels.length === 0" class="text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.notify.noChannels') }}
+          </p>
+
+          <div
+            v-for="(ch, idx) in notify.channels"
+            :key="idx"
+            class="space-y-3 rounded-lg border p-4"
+          >
+            <!-- Header row: enable toggle + name + preset + remove -->
+            <div class="flex items-center gap-2">
+              <button
+                class="relative h-5 w-9 shrink-0 rounded-full transition-colors"
+                :style="{ backgroundColor: ch.enabled ? 'var(--primary)' : 'var(--secondary)' }"
+                :title="$t('settings.notify.enabled')"
+                @click="ch.enabled = !ch.enabled"
+              >
+                <span
+                  class="absolute top-0.5 block h-4 w-4 rounded-full bg-white transition-transform"
+                  :class="ch.enabled ? 'translate-x-4' : 'translate-x-0.5'"
+                />
+              </button>
+              <Input v-model="ch.name" :placeholder="$t('settings.notify.channelNamePlaceholder')" class="flex-1" />
+              <Select :model-value="ch.preset" @update:model-value="(v: any) => { ch.preset = v; onPresetChange(ch as any) }">
+                <SelectTrigger class="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="p in notifyPresets" :key="p.preset" :value="p.preset">
+                    {{ p.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Button size="icon-sm" variant="ghost" @click="removeChannel(idx)">
+                <Trash2 class="h-3.5 w-3.5" style="color: var(--color-error-foreground)" />
+              </Button>
+            </div>
+
+            <!-- Preset params -->
+            <div v-if="ch.preset !== 'custom'" class="space-y-3">
+              <div v-if="(presetFor(ch.preset)?.params || []).length" class="space-y-2">
+                <label class="text-xs font-medium" style="color: var(--muted-foreground)">
+                  {{ $t('settings.notify.credentials') }}
+                </label>
+                <div
+                  v-for="k in presetFor(ch.preset)?.params || []"
+                  :key="k"
+                  class="flex items-center gap-2"
+                >
+                  <span class="w-28 shrink-0 text-xs font-mono">{{ k }}</span>
+                  <Input
+                    v-model="ch.params![k]"
+                    :type="isSecretField(k) ? 'password' : 'text'"
+                    class="flex-1"
+                  />
+                </div>
+              </div>
+
+              <!-- Token-exchange step params -->
+              <div v-if="(presetFor(ch.preset)?.source_params || []).length" class="space-y-2">
+                <label class="text-xs font-medium" style="color: var(--muted-foreground)">
+                  {{ $t('settings.notify.tokenStep') }}
+                </label>
+                <p class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.tokenStepHelp') }}</p>
+                <div
+                  v-for="k in presetFor(ch.preset)?.source_params || []"
+                  :key="k"
+                  class="flex items-center gap-2"
+                >
+                  <span class="w-28 shrink-0 text-xs font-mono">{{ k }}</span>
+                  <Input
+                    v-model="sourceParams(ch)[k]"
+                    :type="isSecretField(k) ? 'password' : 'text'"
+                    class="flex-1"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom webhook -->
+            <div v-else class="space-y-2">
+              <div class="flex gap-2">
+                <Select v-model="ch.webhook!.method">
+                  <SelectTrigger class="w-28">
+                    <SelectValue placeholder="POST" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="POST">POST</SelectItem>
+                    <SelectItem value="GET">GET</SelectItem>
+                    <SelectItem value="PUT">PUT</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input v-model="ch.webhook!.url" :placeholder="$t('settings.notify.custom.url')" class="flex-1" />
+              </div>
+              <label class="text-xs font-medium" style="color: var(--muted-foreground)">
+                {{ $t('settings.notify.custom.headers') }}
+              </label>
+              <Textarea
+                :model-value="(ch as any)._headers_json"
+                :rows="3"
+                class="font-mono text-xs"
+                placeholder='{"Content-Type":"application/json"}'
+                @update:model-value="(v: any) => { (ch as any)._headers_json = v; syncHeaders(ch as any) }"
+              />
+              <label class="text-xs font-medium" style="color: var(--muted-foreground)">
+                {{ $t('settings.notify.custom.body') }}
+              </label>
+              <Textarea
+                v-model="ch.webhook!.body_template"
+                :rows="3"
+                class="font-mono text-xs"
+                placeholder='{"text":"{{message}}"}'
+              />
+              <p class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.custom.bodyHelp') }}</p>
+            </div>
+
+            <!-- Per-channel test -->
+            <div class="flex justify-end">
+              <Button variant="outline" size="sm" :disabled="notifyTesting === ch.name" @click="testChannel(ch)">
+                <Loader2 v-if="notifyTesting === ch.name" class="mr-1 h-4 w-4 animate-spin" />
+                <Send v-else class="mr-1 h-4 w-4" />
+                {{ $t('settings.notify.test') }}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <Button :disabled="notifySaving" @click="saveNotify">
+          {{ notifySaving ? $t('common.saving') : $t('common.save') }}
         </Button>
       </div>
 

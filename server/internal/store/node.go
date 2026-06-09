@@ -139,3 +139,39 @@ func UpdateHeartbeat(id string) error {
 func SetNodeStatus(id string, status string) error {
 	return DB.Model(&model.Node{}).Where("id = ?", id).Update("status", status).Error
 }
+
+// MarkOffline flips a node online→offline using a conditional UPDATE and
+// reports whether a real transition happened (RowsAffected==1). This makes the
+// offline notification fire exactly once even when both the WS-disconnect
+// handler and the background monitor race to mark the same node — and it's
+// safe across multiple server instances (the DB row lock arbitrates).
+func MarkOffline(id string) (changed bool, err error) {
+	res := DB.Model(&model.Node{}).
+		Where("id = ? AND status = ?", id, "online").
+		Update("status", "offline")
+	return res.RowsAffected == 1, res.Error
+}
+
+// MarkOnline flips a node offline→online (and refreshes last_heartbeat),
+// reporting whether a real transition happened. Used to drive recovery
+// notifications. Returns false when the node was already online (the common
+// per-heartbeat case), so callers only notify on the actual recovery edge.
+func MarkOnline(id string) (changed bool, err error) {
+	now := time.Now()
+	res := DB.Model(&model.Node{}).
+		Where("id = ? AND status = ?", id, "offline").
+		Updates(map[string]any{"status": "online", "last_heartbeat": &now})
+	return res.RowsAffected == 1, res.Error
+}
+
+// ListStaleOnlineNodes returns nodes still marked online whose last heartbeat
+// (or, if it never sent one, its creation time) is older than threshold. The
+// background monitor uses this to catch agents that vanished without a clean
+// WebSocket close (kill -9, network partition, host crash).
+func ListStaleOnlineNodes(threshold time.Duration) ([]model.Node, error) {
+	cutoff := time.Now().Add(-threshold)
+	var nodes []model.Node
+	err := DB.Where("status = ? AND COALESCE(last_heartbeat, created_at) < ?", "online", cutoff).
+		Find(&nodes).Error
+	return nodes, err
+}
