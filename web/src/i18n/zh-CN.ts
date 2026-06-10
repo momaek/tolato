@@ -298,6 +298,16 @@ export default {
         body: '请求体模板',
         bodyHelp: "可用占位符：{'{{message}}'} {'{{node_name}}'} {'{{node_ip}}'} {'{{type}}'} {'{{time}}'} 等；两段式可用 {'{{token}}'}。",
       },
+      tokenSource: {
+        url: '换取 Token 的 URL',
+        body: "请求体（可用占位符，如 {'{{app_id}}'}）",
+        tokenPath: 'Token 字段路径',
+        expiresPath: '有效期字段路径',
+        ttl: '兜底有效期(秒)',
+        invalidatePath: '失效判定字段',
+        invalidateValues: '失效值(逗号分隔)',
+        help: '发送时若响应「失效判定字段」命中下列值（或 HTTP 401），会自动重换 Token 并重试一次。',
+      },
       remove: '删除',
     },
     apiKeys: {

@@ -62,6 +62,7 @@ import type {
   NotifySettings,
   NotifyPreset,
   NotifyChannel,
+  NotifyTokenSource,
 } from '@/types/api'
 
 const { t } = useI18n()
@@ -140,6 +141,7 @@ const webFetchVerifyResult = ref<VerifyWebFetchResponse | null>(null)
 
 // Notifications
 type EditChannel = NotifyChannel & { _headers_json?: string }
+type EditSource = NotifyTokenSource & { _headers_json?: string }
 const notify = ref<NotifySettings>({
   offline_threshold_seconds: 90,
   recover_notify: true,
@@ -229,6 +231,63 @@ function syncHeaders(ch: EditChannel) {
   }
 }
 
+// --- Custom-webhook token exchange (the independently configurable token step) ---
+
+// A custom channel uses a token step when it references a token source.
+function customTokenEnabled(ch: NotifyChannel): boolean {
+  return !!ch.token_source
+}
+
+function customSource(ch: NotifyChannel): EditSource | undefined {
+  if (!ch.token_source) return undefined
+  return notify.value.token_sources.find((s) => s.name === ch.token_source) as EditSource | undefined
+}
+
+function toggleCustomToken(ch: EditChannel) {
+  if (customTokenEnabled(ch)) {
+    ch.token_source = ''
+    return
+  }
+  // Stable, channel-scoped source name so renaming the channel doesn't orphan it.
+  let n = 1
+  while (notify.value.token_sources.some((s) => s.name === `custom-src-${n}`)) n++
+  const name = `custom-src-${n}`
+  const src: EditSource = {
+    name,
+    request: { method: 'POST', url: '', headers: {}, body: '' },
+    params: {},
+    extract: { token_path: '', expires_path: '', ttl_fallback_seconds: 3600 },
+    invalidate_on: { json_path: '', values: [] },
+    _headers_json: '{}',
+  }
+  notify.value.token_sources.push(src)
+  ch.token_source = name
+}
+
+function syncSourceHeaders(src: EditSource) {
+  try {
+    src.request.headers = src._headers_json ? JSON.parse(src._headers_json) : {}
+  } catch {
+    // keep previous; validated on save
+  }
+}
+
+// invalidate_on.values edited as a comma-separated string; numbers stay numbers.
+function invalidateValuesText(src: NotifyTokenSource): string {
+  return (src.invalidate_on?.values || []).join(',')
+}
+function setInvalidateValues(src: NotifyTokenSource, text: string) {
+  if (!src.invalidate_on) src.invalidate_on = { json_path: '', values: [] }
+  src.invalidate_on.values = text
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((v) => {
+      const n = Number(v)
+      return isNaN(n) ? v : n
+    })
+}
+
 function prepareNotifyPayload(): NotifySettings {
   // Parse custom headers and drop token sources no channel references.
   const channels = notify.value.channels.map((c) => {
@@ -244,7 +303,20 @@ function prepareNotifyPayload(): NotifySettings {
     return rest as NotifyChannel
   })
   const usedSources = new Set(channels.map((c) => c.token_source).filter(Boolean))
-  const token_sources = notify.value.token_sources.filter((s) => usedSources.has(s.name))
+  const token_sources = notify.value.token_sources
+    .filter((s) => usedSources.has(s.name))
+    .map((s) => {
+      const src = s as EditSource
+      if (src._headers_json !== undefined) {
+        try {
+          src.request.headers = src._headers_json ? JSON.parse(src._headers_json) : {}
+        } catch {
+          src.request.headers = src.request.headers || {}
+        }
+      }
+      const { _headers_json, ...rest } = src
+      return rest as NotifyTokenSource
+    })
   return { ...notify.value, channels, token_sources }
 }
 
@@ -257,6 +329,11 @@ async function loadNotify() {
     if (ch.preset === 'custom') {
       ch._headers_json = JSON.stringify(ch.webhook?.headers || {}, null, 2)
     }
+  }
+  // Hydrate token-source header editors (custom token steps).
+  for (const s of data.token_sources) {
+    const src = s as EditSource
+    src._headers_json = JSON.stringify(src.request?.headers || {}, null, 2)
   }
   notify.value = data
 }
@@ -1015,6 +1092,89 @@ function closeCreateDialog() {
                 placeholder='{"text":"{{message}}"}'
               />
               <p class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.custom.bodyHelp') }}</p>
+
+              <!-- Optional token-exchange step -->
+              <div class="mt-2 rounded-md border border-dashed p-3">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <label class="text-xs font-medium">{{ $t('settings.notify.tokenStep') }}</label>
+                    <p class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.tokenStepHelp') }}</p>
+                  </div>
+                  <button
+                    class="relative h-5 w-9 shrink-0 rounded-full transition-colors"
+                    :style="{ backgroundColor: customTokenEnabled(ch) ? 'var(--primary)' : 'var(--secondary)' }"
+                    @click="toggleCustomToken(ch as any)"
+                  >
+                    <span
+                      class="absolute top-0.5 block h-4 w-4 rounded-full bg-white transition-transform"
+                      :class="customTokenEnabled(ch) ? 'translate-x-4' : 'translate-x-0.5'"
+                    />
+                  </button>
+                </div>
+
+                <div v-if="customSource(ch)" class="mt-3 space-y-2">
+                  <div class="flex gap-2">
+                    <Select v-model="customSource(ch)!.request.method">
+                      <SelectTrigger class="w-28">
+                        <SelectValue placeholder="POST" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="POST">POST</SelectItem>
+                        <SelectItem value="GET">GET</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      v-model="customSource(ch)!.request.url"
+                      :placeholder="$t('settings.notify.tokenSource.url')"
+                      class="flex-1"
+                    />
+                  </div>
+                  <label class="text-xs font-medium" style="color: var(--muted-foreground)">
+                    {{ $t('settings.notify.custom.headers') }}
+                  </label>
+                  <Textarea
+                    :model-value="(customSource(ch) as any)._headers_json"
+                    :rows="2"
+                    class="font-mono text-xs"
+                    placeholder='{"Content-Type":"application/json"}'
+                    @update:model-value="(v: any) => { (customSource(ch) as any)._headers_json = v; syncSourceHeaders(customSource(ch)!) }"
+                  />
+                  <label class="text-xs font-medium" style="color: var(--muted-foreground)">
+                    {{ $t('settings.notify.tokenSource.body') }}
+                  </label>
+                  <Textarea
+                    v-model="customSource(ch)!.request.body"
+                    :rows="2"
+                    class="font-mono text-xs"
+                    placeholder='{"app_id":"...","app_secret":"..."}'
+                  />
+                  <div class="grid grid-cols-3 gap-2">
+                    <div class="space-y-1">
+                      <label class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.tokenSource.tokenPath') }}</label>
+                      <Input v-model="customSource(ch)!.extract.token_path" placeholder="access_token" />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.tokenSource.expiresPath') }}</label>
+                      <Input v-model="customSource(ch)!.extract.expires_path" placeholder="expires_in" />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.tokenSource.ttl') }}</label>
+                      <Input v-model.number="customSource(ch)!.extract.ttl_fallback_seconds" type="number" :min="0" />
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <div class="space-y-1">
+                      <label class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.tokenSource.invalidatePath') }}</label>
+                      <Input :model-value="customSource(ch)!.invalidate_on?.json_path || ''" placeholder="errcode" @update:model-value="(v: any) => { const s = customSource(ch)!; s.invalidate_on = s.invalidate_on || { json_path: '', values: [] }; s.invalidate_on.json_path = v }" />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.tokenSource.invalidateValues') }}</label>
+                      <Input :model-value="invalidateValuesText(customSource(ch)!)" placeholder="42001,40014" @update:model-value="(v: any) => setInvalidateValues(customSource(ch)!, v)" />
+                    </div>
+                  </div>
+                  <p class="text-xs" style="color: var(--muted-foreground)">{{ $t('settings.notify.tokenSource.help') }}</p>
+                </div>
+              </div>
             </div>
 
             <!-- Per-channel test -->

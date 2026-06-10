@@ -298,6 +298,16 @@ export default {
         body: 'Body template',
         bodyHelp: "Placeholders: {'{{message}}'} {'{{node_name}}'} {'{{node_ip}}'} {'{{type}}'} {'{{time}}'}, etc.; two-step channels can use {'{{token}}'}.",
       },
+      tokenSource: {
+        url: 'Token exchange URL',
+        body: "Request body (placeholders ok, e.g. {'{{app_id}}'})",
+        tokenPath: 'Token field path',
+        expiresPath: 'Expiry field path',
+        ttl: 'Fallback TTL (s)',
+        invalidatePath: 'Invalidate field',
+        invalidateValues: 'Invalid values (comma)',
+        help: 'On send, if the invalidate field matches any of these values (or HTTP 401), the token is refreshed and the send is retried once.',
+      },
       remove: 'Remove',
     },
     apiKeys: {
