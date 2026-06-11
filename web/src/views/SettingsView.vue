@@ -564,10 +564,11 @@ function closeCreateDialog() {
           v-for="tab in tabs"
           :key="tab.id"
           class="rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors"
-          :style="{
-            backgroundColor: activeTab === tab.id ? 'var(--secondary)' : 'transparent',
-            color: activeTab === tab.id ? 'var(--foreground)' : 'var(--muted-foreground)',
-          }"
+          :class="
+            activeTab === tab.id
+              ? 'bg-secondary text-foreground'
+              : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          "
           @click="activeTab = tab.id"
         >
           {{ tab.label }}

@@ -177,4 +177,10 @@
   code, pre, .font-mono {
     font-family: 'Geist Mono', ui-monospace, monospace;
   }
+  /* Tailwind v4 preflight sets buttons to cursor: default; restore the
+     pointer affordance for anything clickable that isn't disabled. */
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
 }

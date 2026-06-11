@@ -181,16 +181,14 @@ async function copyPrompt() {
          flex-1 sibling consuming the remaining space). -->
     <div class="mt-auto shrink-0 px-3 pb-4 pt-1 space-y-1">
       <button
-        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
-        style="color: var(--sidebar-foreground); opacity: 0.7"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
         @click="toggleLocale"
       >
         <Languages class="h-4 w-4" />
         {{ getLocale() === 'en' ? '中文' : 'English' }}
       </button>
       <button
-        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
-        style="color: var(--sidebar-foreground); opacity: 0.7"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
         @click="toggleTheme"
       >
         <Sun v-if="theme === 'dark'" class="h-4 w-4" />
