@@ -173,7 +173,8 @@ claude mcp add --transport http tolato https://tolato.example.com/mcp \
 | 工具 | 作用 |
 |---|---|
 | `list_nodes` | 列出所有节点,带状态、区域、实时 CPU/内存/磁盘 |
-| `get_node` | 单节点详情(硬件、OS/kernel、agent 版本、metrics) |
+| `get_node` | 单节点详情(硬件、OS/kernel、agent 版本、metrics、`extra` 备注元数据) |
+| `edit_node` | 更新节点的别名和 `extra` 备注元数据(供应商、到期日、笔记等)。readonly key 直接拒绝。 |
 | `execute_command` | 在节点上执行 shell 命令。readonly key 直接拒绝;敏感命令(rm、reboot 等)返回 `needs_confirmation`,需要重试时带上 `confirm: true`;黑名单命令直接拒绝。所有调用都会写审计日志,`source = "mcp"`。 |
 | `web_fetch` | 通过服务器配置的 Jina Reader 抓取公开 URL,返回 Markdown |
 

@@ -47,6 +47,36 @@ func catalog() []tool {
 			},
 		},
 		{
+			Name: "edit_node",
+			Description: "Update editable metadata for a node. Read-only API keys cannot call this. " +
+				"All update fields are optional — pass only the ones you want to change. " +
+				"`extra` is partial-merged into the existing extra map: keys you supply overwrite, omitted keys are kept, " +
+				"and an explicit null value deletes that key. " +
+				"Conventional keys for `extra`: provider (string), plan (string), expires_at (ISO date YYYY-MM-DD), " +
+				"monthly_cost (number), currency (string, e.g. USD/CNY), billing_cycle (string, e.g. monthly/yearly), " +
+				"renewal_url (string), account_email (string), notes (string, freeform markdown). " +
+				"Prefer these keys for consistency, but you may add others when the user provides info that doesn't fit.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"node_id": map[string]any{
+						"type":        "string",
+						"description": "Node ID returned by list_nodes.",
+					},
+					"alias": map[string]any{
+						"type":        "string",
+						"description": "Optional new alias (display name). Pass empty string to clear.",
+					},
+					"extra": map[string]any{
+						"type":                 "object",
+						"description":          "Partial map of metadata to merge. See conventional keys in the tool description.",
+						"additionalProperties": true,
+					},
+				},
+				"required": []string{"node_id"},
+			},
+		},
+		{
 			Name: "execute_command",
 			Description: "Run a shell command on a node and return stdout/stderr/exit_code. " +
 				"Read-only API keys cannot call this. Commands flagged as sensitive (rm, reboot, etc.) " +
@@ -103,6 +133,8 @@ func (s *server) dispatch(ctx context.Context, caller callerContext, params tool
 		return s.toolListNodes()
 	case "get_node":
 		return s.toolGetNode(params.Arguments)
+	case "edit_node":
+		return s.toolEditNode(caller, params.Arguments)
 	case "execute_command":
 		return s.toolExecuteCommand(ctx, caller, params.Arguments)
 	case "web_fetch":
@@ -139,6 +171,71 @@ func (s *server) toolGetNode(raw json.RawMessage) (any, bool, error) {
 		return errPayload("node not found: " + args.NodeID), true, nil
 	}
 	return nodeDetail(*n, s.nodes), false, nil
+}
+
+func (s *server) toolEditNode(caller callerContext, raw json.RawMessage) (any, bool, error) {
+	var args struct {
+		NodeID string          `json:"node_id"`
+		Alias  *string         `json:"alias"`
+		Extra  json.RawMessage `json:"extra"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, false, fmt.Errorf("invalid arguments: %w", err)
+	}
+	if args.NodeID == "" {
+		return errPayload("node_id is required"), true, nil
+	}
+	if caller.Permission == "readonly" {
+		return errPayload("read-only API keys cannot edit nodes"), true, nil
+	}
+
+	var extraPatch map[string]any
+	if len(args.Extra) > 0 {
+		if err := json.Unmarshal(args.Extra, &extraPatch); err != nil {
+			return nil, false, fmt.Errorf("invalid extra: %w", err)
+		}
+	}
+	if args.Alias == nil && extraPatch == nil {
+		return errPayload("no fields to update (provide alias and/or extra)"), true, nil
+	}
+
+	n, err := store.GetNodeByID(args.NodeID)
+	if err != nil {
+		return errPayload("node not found: " + args.NodeID), true, nil
+	}
+
+	updates := make(map[string]any)
+	if args.Alias != nil {
+		updates["alias"] = *args.Alias
+	}
+	if extraPatch != nil {
+		merged := model.JSONMap{}
+		for k, v := range n.Extra {
+			merged[k] = v
+		}
+		for k, v := range extraPatch {
+			if v == nil {
+				delete(merged, k)
+			} else {
+				merged[k] = v
+			}
+		}
+		updates["extra"] = merged
+	}
+
+	if err := store.UpdateNode(args.NodeID, updates); err != nil {
+		return errPayload("update failed: " + err.Error()), true, nil
+	}
+	resp := map[string]any{"id": args.NodeID, "ok": true}
+	if updated, err := store.GetNodeByID(args.NodeID); err == nil {
+		if updated.Alias != nil {
+			resp["alias"] = *updated.Alias
+		}
+		if len(updated.Extra) > 0 {
+			resp["extra"] = updated.Extra
+		}
+	}
+	return resp, false, nil
 }
 
 func (s *server) toolExecuteCommand(ctx context.Context, caller callerContext, raw json.RawMessage) (any, bool, error) {
@@ -262,6 +359,9 @@ func nodeListItem(n model.Node, nm *node.NodeManager) map[string]any {
 	if n.ASN != "" {
 		item["asn"] = n.ASN
 	}
+	if len(n.Extra) > 0 {
+		item["extra"] = n.Extra
+	}
 	if metrics := nm.GetMetrics(n.ID); metrics != nil {
 		item["cpu"] = metrics.CPU
 		item["memory"] = metrics.Memory
@@ -298,6 +398,9 @@ func nodeDetail(n model.Node, nm *node.NodeManager) map[string]any {
 	}
 	if n.ASN != "" {
 		info["asn"] = n.ASN
+	}
+	if len(n.Extra) > 0 {
+		info["extra"] = n.Extra
 	}
 	if n.LastHeartbeat != nil {
 		info["last_heartbeat"] = n.LastHeartbeat

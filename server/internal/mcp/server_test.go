@@ -83,7 +83,7 @@ func TestToolsList(t *testing.T) {
 	if !ok {
 		t.Fatalf("tools is not an array: %v", result)
 	}
-	want := map[string]bool{"list_nodes": false, "get_node": false, "execute_command": false, "web_fetch": false}
+	want := map[string]bool{"list_nodes": false, "get_node": false, "edit_node": false, "execute_command": false, "web_fetch": false}
 	for _, raw := range tools {
 		tm := raw.(map[string]any)
 		if _, present := want[tm["name"].(string)]; present {

@@ -172,7 +172,8 @@ Tools exposed:
 | Tool | What it does |
 |---|---|
 | `list_nodes` | All nodes with status, region, and live CPU/mem/disk |
-| `get_node` | Single-node detail (hardware, OS/kernel, agent version, metrics) |
+| `get_node` | Single-node detail (hardware, OS/kernel, agent version, metrics, `extra` metadata/notes) |
+| `edit_node` | Update a node's alias and `extra` metadata (provider, expiry, notes, …). Read-only keys are rejected. |
 | `execute_command` | Run a shell command on a node. Read-only keys are rejected; sensitive commands (rm, reboot, …) return `needs_confirmation` and require `confirm: true` on retry; blacklisted commands are refused. Every call is written to the audit log with `source = "mcp"`. |
 | `web_fetch` | Fetch a public URL via the server's configured Jina Reader and return Markdown |
 
