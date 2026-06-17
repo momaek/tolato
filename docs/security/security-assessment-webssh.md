@@ -112,6 +112,31 @@ The Update Framework（TUF）强调用签名元数据、版本/回滚保护等�
 
 Tolato 不一定需要完整引入 TUF，但 agent update 至少应具备 signed manifest、artifact digest、公钥校验和回滚防护。
 
+### 3.5 对照 Nezha（哪吒监控）实际 CVE 的核验
+
+Nezha 是与 Tolato 架构同类的开源监控/agent 控制面（dashboard + agent + WebSSH + 命令下发）。2025 年底起 Nezha 一方面被实际用作后渗透 RAT（安全厂商对受害者的头号建议是「务必关闭 Web SSH 功能」），另一方面被披露一连串高危 CVE。这些真实漏洞可作为 Tolato 威胁模型的**事后验证基线**。本节据此逐项核验 Tolato 代码（2026-06-17，代码级静态核验）。
+
+| Nezha 漏洞 | 根因 | Tolato 对应处 | 核验结论 |
+|---|---|---|---|
+| 实际攻击：WebSSH 被当作隐蔽 RAT 滥用 | Web SSH 功能本身被滥用 | `/ws/terminal` | **印证 §5.1**：WebSSH 是头号风险面（P0） |
+| CVE-2026-46716（9.9 跨租户 RCE） | cron 路由挂在 `commonHandler`（任意登录用户）而非 `adminHandler`，叠加权限恒真绕过 → 给全局 ServerShared 每台机器下发命令 | `router.go` 路由分组 | **不存在**：敏感路由均在 `protected` + `JWTAuth()` 组（`router.go:72-125`）；JWT 为 all-or-nothing 管理员，无 member 档可错放 |
+| CVE-2026-53519（9.1 未认证任意文件读） | 前端 fallback 用 `strings.HasPrefix(path,"/dashboard")` 子串匹配 → `/dashboard../etc/passwd` 穿越，且从真实 OS 文件系统取文件 | `webui.go` NoRoute SPA fallback（`webui.go:34-51`） | **不受影响**：服务对象是 `embed.FS`（仅含前端打包产物，碰不到宿主文件）；`http.FileServer` + `io/fs.ValidPath` 拒绝含 `..` 的路径；此处 `HasPrefix` 仅用于把 `/api/`、`/ws/` 排除出 fallback，并非文件访问边界 |
+| CVE-2026-46717（RoleMember 可达 SSRF） | notification 路由挂错 handler，反射内网响应体 | `release.go` ReleaseProxy（无认证 proxy，`release.go:20-57`） | **基本安全**：target host 被固定 upstream 前缀钉死，`*path` 只能往 path 拼，改不了 host/scheme；遗留轻微带宽/DoS 面，归入 §5.9 |
+| CVE-2026-48119（agent 伪造他人 service 结果） | 缺少 agent→service 归属校验 | agent 回包处理 | 单租户模型下不构成「跨租户」伪造；节点冒充仍受 §5.5 约束（需目标 node secret） |
+| CVE-2026-47124（WS 跨租户遥测泄露） | WS 认证后缺消息级授权 | WS `CheckOrigin`（`middleware/origin.go:24-46`） | CheckOrigin 用 `EqualFold(u.Host, r.Host)` **精确比较**，非子串；单租户下无跨租户数据隔离需求 |
+
+核验副产物：在比对「子串匹配替代严格校验」这一根因模式时，发现 HTTP CORS 同源判断存在同类子串 bug，详见 §5.11。
+
+**总体判断**：Tolato 在 Nezha 实际被攻击/披露的几个最危险点（未认证文件读、路由授权、CSWSH origin、跨租户 RCE）上反而是干净的，安全基线优于 Nezha 当时。核心待加固项仍为本报告原有结论中的 WebSSH/`file_op` 能力面（高权限、弱护栏、无审计），且其前置条件为有效管理员 JWT——属「待加固」而非「未授权可打」。
+
+参考：
+
+- <https://www.ithome.com.tw/news/171636>
+- <https://siliconangle.com/2025/12/22/ontinue-warns-attackers-abusing-nezha-monitoring-tool-stealthy-remote-access-trojan/>
+- <https://advisories.gitlab.com/golang/github.com/nezhahq/nezha/CVE-2026-46716/>
+- <https://www.thehackerwire.com/nezha-monitoring-unauthenticated-file-read-cve-2026-53519/>
+- <https://advisories.gitlab.com/golang/github.com/nezhahq/nezha/CVE-2026-48119/>
+
 ---
 
 ## 4. 权限与能力矩阵
@@ -258,6 +283,17 @@ Tolato 不一定需要完整引入 TUF，但 agent update 至少应具备 signed
   - 未见统一 CSP/HSTS/X-Frame-Options 等安全 header。
 - 注意：未证明已存在可利用 XSS；应定性为高影响渲染防御缺口。
 
+### 5.11 CORS 同源判断使用子串匹配（已修复）
+
+- 严重性：当前 Low（JWT 经 `Authorization` 头传递，非 cookie，跨域页面拿不到 token）；若按 §7 把 JWT 迁移到 cookie，则升为 High
+- 优先级：P2（本次已修复）
+- 证据：
+  - 修复前 `corsMiddleware` 用 `strings.Contains(origin, c.Request.Host)` 判同源：`server/internal/handler/router.go`
+  - 配合 `Access-Control-Allow-Credentials: true`
+- 风险：`https://<host>.evil.com` 之类 origin 会被子串命中、判为同源并放行。当前因凭据走 `Authorization` 头、跨域页面无法读取受保护响应，实际可利用性低；但与 §7「JWT 迁移到 HttpOnly cookie」建议直接冲突——一旦迁移即变为可利用的凭据/数据泄露面。
+- 修复：改为解析 origin 后用 `strings.EqualFold(u.Host, c.Request.Host)` 精确比较，与 WS `CheckOrigin`（`server/internal/middleware/origin.go`）保持一致。
+- 关联：与 Nezha CVE-2026-53519 同属「子串匹配替代严格校验」错误类别（见 §3.5）。
+
 ---
 
 ## 6. 运行态数据与 Secret 管理发现
@@ -270,12 +306,13 @@ Tolato 不一定需要完整引入 TUF，但 agent update 至少应具备 signed
 - `server/data/tolato.db-shm`
 - `server/data/tolato.db-wal`
 
-本次未读取其内容。由于 DB/WAL 可能包含 agent secret、registration token、settings secret、审计输出、conversation/tool output，建议立即：
+**更正（2026-06-17，经维护者确认）**：被跟踪的是**本地开发用的假数据库**，其中不含真实 secret。因此本条的实际性质是**仓库卫生问题**（运行态文件不应被跟踪，否则每次本地运行都产生 diff 噪音），而非凭据泄露；初稿中「立即轮换凭据」对本仓库不适用。
 
-1. 停止跟踪运行态 DB/WAL/SHM。
-2. 确认历史是否已推送；必要时做 secret 扫描与历史清理评估。
-3. 轮换可能进入 DB/WAL 的凭据：JWT secret、agent secret、registration token、LLM/Jina/notify tokens、API keys、admin password。
-4. 提交报告时只 stage 报告文件，避免误提交运行态数据变化。
+处置：
+
+1. 已停止跟踪运行态 DB/WAL/SHM（commit `cb9c84f`，`git rm --cached`，本地文件保留）；`.gitignore` 早已含 `/server/data/`，对已跟踪文件无效是本次需手动移除的原因。
+2. 仅当未来确有真实运行态 DB 被误提交时，才需要 secret 扫描、历史清理与凭据轮换。
+3. 提交报告/代码时只 stage 目标文件，避免误提交运行态数据变化。
 
 ### 6.2 Settings 明文存储
 
@@ -284,6 +321,8 @@ Tolato 不一定需要完整引入 TUF，但 agent update 至少应具备 signed
 - LLM/Jina key GET 有 masking，但 PUT 保存路径仍是 settings：`server/internal/handler/setting.go:49-96`、`server/internal/handler/setting.go:284-333`
 
 `EncryptKey` 存在于 config，但本次未发现其对 settings secret 的实际加密落地。不能写成“默认 encrypt key 可解密所有 secret”；应写成“未见关键 settings 的 at-rest encryption 使用”。
+
+**更正（2026-06-17，经维护者确认）**：config 中的 `JWTSecret`、`EncryptKey` 默认值是**开源仓库的占位符**，并非泄露的真实密钥。真实风险点不在「仓库泄露了真 secret」，而在「生产部署是否强制覆盖这些占位符」。建议的加固：服务启动时若检测到仍为默认占位符，应拒绝启动或打出显著告警，避免生产环境忘记替换。
 
 ---
 
