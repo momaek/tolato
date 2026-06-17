@@ -110,6 +110,7 @@ type AuditLog struct {
 	ID          uint      `json:"id" gorm:"primaryKey;autoIncrement"`
 	NodeID      string    `json:"node_id" gorm:"type:text;not null;index"`
 	NodeName    string    `json:"node_name" gorm:"type:text"`
+	Actor       string    `json:"actor,omitempty" gorm:"type:text;index"` // JWT username for webui/terminal; empty for api/mcp (see api_key_id)
 	Command     string    `json:"command" gorm:"type:text;not null"`
 	ExitCode    *int      `json:"exit_code,omitempty"`
 	Stdout      *string   `json:"stdout,omitempty" gorm:"type:text"`
