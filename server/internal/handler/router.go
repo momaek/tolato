@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -181,8 +182,10 @@ func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 			if len(allowedOrigins) == 1 && allowedOrigins[0] == "*" {
 				allowed = true
 			} else {
-				// Same-origin: always allowed
-				if strings.Contains(origin, c.Request.Host) {
+				// Same-origin: compare the origin's host against the request
+				// Host exactly. A substring match here would let
+				// `https://<host>.evil.com` pass, so parse and compare hosts.
+				if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, c.Request.Host) {
 					allowed = true
 				}
 				// Check whitelist

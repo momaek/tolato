@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -58,10 +59,12 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 			writeTermError(conn, "invalid auth message")
 			return
 		}
-		if _, err := deps.ValidateToken(authMsg.Payload.Token); err != nil {
+		claims, err := deps.ValidateToken(authMsg.Payload.Token)
+		if err != nil {
 			writeTermError(conn, "invalid or expired token")
 			return
 		}
+		username := claims.Username
 		_ = conn.SetReadDeadline(time.Time{})
 		_ = writeTerm(conn, model.WSTermTypeAuthOK, nil)
 
@@ -96,6 +99,11 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
+		nodeName := n.Name
+		if n.Alias != nil && *n.Alias != "" {
+			nodeName = *n.Alias
+		}
+
 		cols := openEnv.Payload.Cols
 		rows := openEnv.Payload.Rows
 		if cols == 0 {
@@ -119,6 +127,16 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 		defer ptyStream.Close()
 
 		_ = writeTerm(conn, model.WSTermTypeReady, model.WSTermReadyPayload{SessionID: ptyStream.ID})
+
+		// Audit: session opened (best-effort). Recorded up front so a session
+		// that is killed before clean teardown still leaves a trace.
+		_ = store.CreateAuditLog(&model.AuditLog{
+			NodeID:   nodeID,
+			NodeName: nodeName,
+			Actor:    username,
+			Command:  "[terminal session opened]",
+			Source:   "terminal",
+		})
 
 		startedAt := time.Now()
 		var exitCode int
@@ -186,7 +204,7 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 				case model.WSTermTypeFileOp:
 					var p model.WSTermFileOpPayload
 					_ = json.Unmarshal(msg.Payload, &p)
-					go handleFileOp(ac, &p, writeToBrowser)
+					go handleFileOp(ac, &p, writeToBrowser, nodeID, nodeName, username)
 				}
 			}
 		}
@@ -211,14 +229,11 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 		// Audit log (best-effort).
 		dur := int64(time.Since(startedAt).Seconds())
 		ec := exitCode
-		nodeName := n.Name
-		if n.Alias != nil && *n.Alias != "" {
-			nodeName = *n.Alias
-		}
 		_ = store.CreateAuditLog(&model.AuditLog{
 			NodeID:   nodeID,
 			NodeName: nodeName,
-			Command:  "[terminal session]",
+			Actor:    username,
+			Command:  "[terminal session closed]",
 			ExitCode: &ec,
 			DurationMS: func() *int64 { v := dur * 1000; return &v }(),
 			Source:   "terminal",
@@ -229,9 +244,25 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 // handleFileOp issues a one-shot Request against the agent; the response is
 // forwarded back to the browser as a file_result message tagged with the
 // browser-supplied ReqID.
-func handleFileOp(ac *node.AgentConn, p *model.WSTermFileOpPayload, writeToBrowser func(string, any) error) {
+func handleFileOp(ac *node.AgentConn, p *model.WSTermFileOpPayload, writeToBrowser func(string, any) error, nodeID, nodeName, actor string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Audit every file op (best-effort). The op + path are the security-
+	// relevant fields; errMsg is empty on success.
+	auditOp := func(errMsg string) {
+		entry := &model.AuditLog{
+			NodeID:   nodeID,
+			NodeName: nodeName,
+			Actor:    actor,
+			Command:  fmt.Sprintf("file:%s %s", p.Op, p.Path),
+			Source:   "terminal/file_op",
+		}
+		if errMsg != "" {
+			entry.Stderr = &errMsg
+		}
+		_ = store.CreateAuditLog(entry)
+	}
 
 	reply, err := ac.Request(ctx, model.AgentTypeFileOp, model.AgentFileOpPayload{
 		Op:     p.Op,
@@ -242,6 +273,7 @@ func handleFileOp(ac *node.AgentConn, p *model.WSTermFileOpPayload, writeToBrows
 		Length: p.Length,
 	}, 30*time.Second)
 	if err != nil {
+		auditOp(err.Error())
 		_ = writeToBrowser(model.WSTermTypeFileResult, model.WSTermFileResultPayload{
 			ReqID:  p.ReqID,
 			Result: model.AgentFileResultPayload{OK: false, Error: err.Error()},
@@ -250,6 +282,11 @@ func handleFileOp(ac *node.AgentConn, p *model.WSTermFileOpPayload, writeToBrows
 	}
 	var res model.AgentFileResultPayload
 	_ = reply.Decode(&res)
+	if res.OK {
+		auditOp("")
+	} else {
+		auditOp(res.Error)
+	}
 	_ = writeToBrowser(model.WSTermTypeFileResult, model.WSTermFileResultPayload{
 		ReqID:  p.ReqID,
 		Result: res,
