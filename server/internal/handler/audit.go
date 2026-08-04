@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/momaek/tolato/server/internal/authz"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/store"
 )
@@ -37,7 +38,38 @@ func ListAuditLogs(deps *Deps) gin.HandlerFunc {
 			}
 		}
 
-		logs, total, err := store.ListAuditLogs(q.Page, q.PageSize, q.NodeID, q.Keyword, fromTime, toTime)
+		// Audit rows quote command output verbatim, so a row about a node the
+		// caller can't see would leak that machine's contents. Scope the query
+		// to the visible set rather than filtering afterwards, so paging stays
+		// meaningful.
+		visibleIDs, unrestricted, err := authz.VisibleNodeIDs(subjectOf(c))
+		if err != nil {
+			internalError(c, "failed to check permissions")
+			return
+		}
+		if !unrestricted && len(visibleIDs) == 0 {
+			c.JSON(http.StatusOK, model.PaginatedResponse{
+				Items: []model.AuditLogItem{}, Total: 0, Page: q.Page, PageSize: q.PageSize, TotalPages: 0,
+			})
+			return
+		}
+		// A node_id filter must itself be inside the visible set, or it becomes
+		// a way to probe for nodes by watching result counts.
+		if q.NodeID != nil && *q.NodeID != "" && !unrestricted {
+			allowed := false
+			for _, id := range visibleIDs {
+				if id == *q.NodeID {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				notFound(c, "node not found")
+				return
+			}
+		}
+
+		logs, total, err := store.ListAuditLogsScoped(q.Page, q.PageSize, q.NodeID, q.Keyword, fromTime, toTime, visibleIDs, unrestricted)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error:   "internal_error",

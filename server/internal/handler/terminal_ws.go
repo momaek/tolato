@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/momaek/tolato/server/internal/authz"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/store"
@@ -84,6 +85,20 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 		nodeID := openEnv.Payload.NodeID
 		if nodeID == "" {
 			writeTermError(conn, "node_id required")
+			return
+		}
+
+		// A terminal is unrestricted shell access, so it needs operator on this
+		// specific node. Checked before the PTY is opened, and phrased as "not
+		// found" so the socket can't be used to probe which nodes exist.
+		allowed, err := authz.Can(authz.SubjectOf(user), nodeID, model.LevelOperator)
+		if err != nil {
+			writeTermError(conn, "failed to check permissions")
+			return
+		}
+		if !allowed {
+			log.Printf("[terminal_ws] user %s denied terminal on node %s", user.Username, nodeID)
+			writeTermError(conn, "node not found")
 			return
 		}
 

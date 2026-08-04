@@ -124,6 +124,56 @@ type UpdateUserRequest struct {
 	Password    *string `json:"password,omitempty"` // admin reset; no current-password check
 }
 
+// --- Groups and grants ---
+
+type UserGroupItem struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	MemberIDs   []string  `json:"member_ids"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type NodeGroupItem struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	MemberIDs   []string  `json:"member_ids"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// POST/PUT for both group kinds. MemberIDs replaces the membership wholesale
+// when present; omit it to leave membership untouched.
+type GroupRequest struct {
+	Name        *string   `json:"name,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	MemberIDs   *[]string `json:"member_ids,omitempty"`
+}
+
+// GrantItem carries resolved subject/object names so the UI can render a grant
+// without cross-referencing three more endpoints.
+type GrantItem struct {
+	ID          string    `json:"id"`
+	SubjectType string    `json:"subject_type"`
+	SubjectID   string    `json:"subject_id"`
+	SubjectName string    `json:"subject_name"`
+	ObjectType  string    `json:"object_type"`
+	ObjectID    string    `json:"object_id,omitempty"`
+	ObjectName  string    `json:"object_name"`
+	Level       string    `json:"level"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// POST /api/grants — granting the same subject on the same object again edits
+// the level rather than creating a duplicate.
+type CreateGrantRequest struct {
+	SubjectType string `json:"subject_type" binding:"required"` // user, user_group
+	SubjectID   string `json:"subject_id" binding:"required"`
+	ObjectType  string `json:"object_type" binding:"required"` // node, node_group, all
+	ObjectID    string `json:"object_id"`                      // empty when object_type is "all"
+	Level       string `json:"level" binding:"required"`       // viewer, operator, manager
+}
+
 // --- Conversations ---
 
 // POST /api/conversations
@@ -205,6 +255,9 @@ type UpdateConversationRequest struct {
 // POST /api/nodes — generates a reusable registration token
 type CreateNodeRequest struct {
 	Alias *string `json:"alias,omitempty"` // optional alias prefix for nodes registered with this token
+	// NodeGroupID enrols every node registered with this token into that group,
+	// so the grants already on the group apply the moment the agent connects.
+	NodeGroupID *string `json:"node_group_id,omitempty"`
 }
 
 type CreateNodeResponse struct {
@@ -232,6 +285,8 @@ type NodeListItem struct {
 	Disk          *float64   `json:"disk,omitempty"`            // current disk usage %
 	Extra         JSONMap    `json:"extra,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
+	Groups        []string   `json:"groups,omitempty"`   // node group names
+	MyLevel       string     `json:"my_level,omitempty"` // caller's effective level
 }
 
 // GET /api/nodes/:id
@@ -253,6 +308,8 @@ type NodeDetail struct {
 	Extra         JSONMap    `json:"extra,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
+	Groups        []string   `json:"groups,omitempty"`   // node group names
+	MyLevel       string     `json:"my_level,omitempty"` // caller's effective level
 
 	// Real-time metrics from heartbeat cache
 	Metrics *NodeMetrics `json:"metrics,omitempty"`

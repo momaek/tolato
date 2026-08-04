@@ -29,6 +29,13 @@ function openTerminal() {
 }
 
 const node = ref<NodeDetail | null>(null)
+
+// The server reports the caller's effective level on this node; the UI only
+// mirrors it. Absent means viewer-or-less, so the safe default is to hide.
+const canOperate = computed(
+  () => node.value?.my_level === 'operator' || node.value?.my_level === 'manager',
+)
+const canManage = computed(() => node.value?.my_level === 'manager')
 const commands = ref<NodeCommandItem[]>([])
 const loading = ref(true)
 
@@ -153,7 +160,7 @@ const expiresInfo = computed(() => {
       </Badge>
       <div class="flex-1" />
       <Button
-        v-if="node"
+        v-if="node && canManage"
         variant="outline"
         size="sm"
         :disabled="node.status !== 'online' || updating"
@@ -164,7 +171,7 @@ const expiresInfo = computed(() => {
         {{ updating ? $t('nodeDetail.updatingAgent') : $t('nodeDetail.updateAgent') }}
       </Button>
       <Button
-        v-if="node"
+        v-if="node && canOperate"
         variant="outline"
         size="sm"
         :disabled="node.status !== 'online'"

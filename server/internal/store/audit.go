@@ -13,9 +13,18 @@ func CreateAuditLog(log *model.AuditLog) error {
 
 // ListAuditLogs returns paginated audit logs with optional filters.
 func ListAuditLogs(page, pageSize int, nodeID, keyword *string, from, to *time.Time) ([]model.AuditLog, int64, error) {
+	return ListAuditLogsScoped(page, pageSize, nodeID, keyword, from, to, nil, true)
+}
+
+// ListAuditLogsScoped is ListAuditLogs restricted to a set of node ids.
+// unrestricted skips the restriction (admins, and grants on "all").
+func ListAuditLogsScoped(page, pageSize int, nodeID, keyword *string, from, to *time.Time, visibleNodeIDs []string, unrestricted bool) ([]model.AuditLog, int64, error) {
 	var total int64
 	query := DB.Model(&model.AuditLog{})
 
+	if !unrestricted {
+		query = query.Where("node_id IN ?", visibleNodeIDs)
+	}
 	if nodeID != nil && *nodeID != "" {
 		query = query.Where("node_id = ?", *nodeID)
 	}

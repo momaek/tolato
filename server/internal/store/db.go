@@ -25,6 +25,11 @@ func InitDB(dsn string) error {
 	// Auto-migrate all models
 	if err := db.AutoMigrate(
 		&model.User{},
+		&model.UserGroup{},
+		&model.UserGroupMember{},
+		&model.NodeGroup{},
+		&model.NodeGroupMember{},
+		&model.Grant{},
 		&model.Conversation{},
 		&model.Message{},
 		&model.Node{},

@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Server, FileText, Settings, Users, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink } from 'lucide-vue-next'
+import { MessageSquare, Server, FileText, Settings, Users, ShieldCheck, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink } from 'lucide-vue-next'
 import { useTheme } from '@/composables/useTheme'
 import { setLocale, getLocale } from '@/i18n'
 import {
@@ -34,7 +34,10 @@ const navItems = computed(() => [
   { label: t('sidebar.nodes'), icon: Server, path: '/nodes' },
   { label: t('sidebar.auditLog'), icon: FileText, path: '/audit' },
   ...(appStore.isAdmin
-    ? [{ label: t('sidebar.users'), icon: Users, path: '/users' }]
+    ? [
+        { label: t('sidebar.users'), icon: Users, path: '/users' },
+        { label: t('sidebar.permissions'), icon: ShieldCheck, path: '/permissions' },
+      ]
     : []),
   { label: t('sidebar.settings'), icon: Settings, path: '/settings' },
 ])

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/momaek/tolato/server/internal/authz"
 	"github.com/momaek/tolato/server/internal/llm"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/node"
@@ -16,25 +17,81 @@ import (
 )
 
 // ToolExecutor handles the execution of AI tool calls.
+//
+// It carries the subject the conversation runs as. Every node-touching tool is
+// checked against that subject, so the assistant can never reach further than
+// the person talking to it — even if the model invents a node id.
 type ToolExecutor struct {
 	nodeManager     *node.NodeManager
 	securityChecker *security.Checker
 	settings        *settings.Cache
 	truncateLines   int
+	subject         authz.Subject
 }
 
-// NewToolExecutor creates a new ToolExecutor.
-func NewToolExecutor(nm *node.NodeManager, sc *security.Checker, sCache *settings.Cache, truncateLines int) *ToolExecutor {
+// NewToolExecutor creates a new ToolExecutor acting as `subject`.
+func NewToolExecutor(nm *node.NodeManager, sc *security.Checker, sCache *settings.Cache, truncateLines int, subject authz.Subject) *ToolExecutor {
 	return &ToolExecutor{
 		nodeManager:     nm,
 		securityChecker: sc,
 		settings:        sCache,
 		truncateLines:   truncateLines,
+		subject:         subject,
 	}
 }
 
-// ToolDefs returns the LLM tool definitions for the AI.
+// errNoSuchNode is what every tool reports for a node the subject may not
+// touch. It is deliberately identical to the genuine "not found" message: the
+// assistant is a conversational surface, and confirming that a node exists but
+// is off-limits tells the user exactly what to go asking for.
+func errNoSuchNode(nodeID string) *model.ToolResultItem {
+	return &model.ToolResultItem{Data: map[string]any{"error": fmt.Sprintf("node not found: %s", nodeID)}}
+}
+
+// requireLevel gates a tool on the subject's level for one node. The returned
+// result is non-nil when the call must be refused.
+func (te *ToolExecutor) requireLevel(nodeID, want string) *model.ToolResultItem {
+	if nodeID == "" {
+		return &model.ToolResultItem{Data: map[string]any{"error": "node_id is required"}}
+	}
+	ok, err := authz.Can(te.subject, nodeID, want)
+	if err != nil {
+		return &model.ToolResultItem{Data: map[string]any{"error": "failed to check permissions"}}
+	}
+	if !ok {
+		return errNoSuchNode(nodeID)
+	}
+	return nil
+}
+
+// ToolDefs returns the full tool set. Prefer ToolDefsFor, which trims the tools
+// the caller isn't allowed to use.
 func ToolDefs() []llm.ToolDefinition {
+	return ToolDefsFor(true)
+}
+
+// ToolDefsFor returns the tool definitions offered to a conversation.
+//
+// Node-mutating tools (edit_node_info, update_agent) are omitted entirely for
+// non-admins rather than offered and then refused. Withholding the tool is the
+// stronger guarantee: the model can't call what it was never told about, so
+// there is no refusal for it to argue with or work around.
+func ToolDefsFor(isAdmin bool) []llm.ToolDefinition {
+	defs := allToolDefs()
+	if isAdmin {
+		return defs
+	}
+	out := make([]llm.ToolDefinition, 0, len(defs))
+	for _, d := range defs {
+		if d.Name == "edit_node_info" || d.Name == "update_agent" {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+func allToolDefs() []llm.ToolDefinition {
 	return []llm.ToolDefinition{
 		{
 			Name:        "list_nodes",
@@ -212,9 +269,20 @@ func (te *ToolExecutor) executeSingle(ctx context.Context, tc llm.ToolCall) *mod
 		return te.executeListNodes()
 	case "get_node_info":
 		nodeID, _ := tc.Args["node_id"].(string)
+		if denied := te.requireLevel(nodeID, model.LevelViewer); denied != nil {
+			return denied
+		}
 		return te.executeGetNodeInfo(nodeID)
 	case "edit_node_info":
 		nodeID, _ := tc.Args["node_id"].(string)
+		// Belt and braces: the tool isn't offered to non-admins, so reaching
+		// here means the model fabricated a call to a tool it wasn't given.
+		if !te.subject.IsAdmin {
+			return errNoSuchNode(nodeID)
+		}
+		if denied := te.requireLevel(nodeID, model.LevelManager); denied != nil {
+			return denied
+		}
 		var aliasPtr *string
 		if a, ok := tc.Args["alias"].(string); ok {
 			aliasPtr = &a
@@ -228,9 +296,18 @@ func (te *ToolExecutor) executeSingle(ctx context.Context, tc llm.ToolCall) *mod
 		if t, ok := tc.Args["timeout"].(float64); ok && t > 0 {
 			timeout = int(t)
 		}
+		if denied := te.requireLevel(nodeID, model.LevelOperator); denied != nil {
+			return denied
+		}
 		return te.executeCommand(ctx, nodeID, command, timeout)
 	case "update_agent":
 		nodeID, _ := tc.Args["node_id"].(string)
+		if !te.subject.IsAdmin {
+			return errNoSuchNode(nodeID)
+		}
+		if denied := te.requireLevel(nodeID, model.LevelManager); denied != nil {
+			return denied
+		}
 		return te.executeUpdateAgent(ctx, nodeID)
 	case "web_fetch":
 		url, _ := tc.Args["url"].(string)
@@ -242,7 +319,15 @@ func (te *ToolExecutor) executeSingle(ctx context.Context, tc llm.ToolCall) *mod
 }
 
 func (te *ToolExecutor) executeListNodes() *model.ToolResultItem {
-	nodes, _, err := store.ListNodes(1, 100, "")
+	visibleIDs, unrestricted, err := authz.VisibleNodeIDs(te.subject)
+	if err != nil {
+		return &model.ToolResultItem{Data: map[string]any{"error": "failed to check permissions"}}
+	}
+	if !unrestricted && len(visibleIDs) == 0 {
+		return &model.ToolResultItem{Data: []map[string]any{}}
+	}
+
+	nodes, _, err := store.ListNodesScoped(1, 100, "", visibleIDs, unrestricted)
 	if err != nil {
 		return &model.ToolResultItem{Data: map[string]any{"error": err.Error()}}
 	}

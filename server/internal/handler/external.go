@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/momaek/tolato/server/internal/authz"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/security"
@@ -33,10 +34,20 @@ type ExecuteCommandRequest struct {
 	Confirm bool   `json:"confirm"`
 }
 
-// ExternalListNodes returns all nodes for external API consumers.
+// ExternalListNodes returns the nodes the API key's owner may see.
 func ExternalListNodes(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		nodes, _, err := store.ListNodes(1, 200, "")
+		visibleIDs, unrestricted, err := authz.VisibleNodeIDs(subjectOf(c))
+		if err != nil {
+			internalError(c, "failed to check permissions")
+			return
+		}
+		if !unrestricted && len(visibleIDs) == 0 {
+			c.JSON(http.StatusOK, []model.NodeListItem{})
+			return
+		}
+
+		nodes, _, err := store.ListNodesScoped(1, 200, "", visibleIDs, unrestricted)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: "db_error", Message: "Failed to list nodes"})
 			return
@@ -71,6 +82,9 @@ func ExternalListNodes(deps *Deps) gin.HandlerFunc {
 func ExternalGetNode(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if !requireNodeLevel(c, id, model.LevelViewer) {
+			return
+		}
 		n, err := store.GetNodeByID(id)
 		if err != nil {
 			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: "not_found", Message: "Node not found"})
@@ -106,12 +120,17 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 		permission := c.GetString("api_key_permission")
 		apiKeyID := c.GetString("api_key_id")
 
-		// Readonly keys cannot execute commands
+		// A key's reach is the intersection of its own tier and its owner's
+		// permissions: readonly never executes, and writable only executes where
+		// the owner personally holds operator.
 		if permission != model.APIKeyWritable {
 			c.JSON(http.StatusForbidden, model.ErrorResponse{
 				Error:   "forbidden",
 				Message: "Read-only API keys cannot execute commands",
 			})
+			return
+		}
+		if !requireNodeLevel(c, nodeID, model.LevelOperator) {
 			return
 		}
 
@@ -311,6 +330,9 @@ func GetLLMModels(deps *Deps) gin.HandlerFunc {
 func ListNodeCommands(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		nodeID := c.Param("id")
+		if !requireNodeLevel(c, nodeID, model.LevelViewer) {
+			return
+		}
 		var query model.PaginationQuery
 		if err := c.ShouldBindQuery(&query); err != nil {
 			query.Page = 1

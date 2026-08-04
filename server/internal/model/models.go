@@ -87,6 +87,108 @@ type User struct {
 // IsAdmin reports whether the user holds the global admin role.
 func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
 
+// --- Core: Groups and grants ---
+
+// Node permission levels, ordered least to most capable. Each level implies
+// the ones before it.
+const (
+	// LevelViewer can see the node in listings and read its state and history.
+	LevelViewer = "viewer"
+	// LevelOperator can additionally run commands on it (chat, terminal, file ops).
+	LevelOperator = "operator"
+	// LevelManager can additionally edit, upgrade and delete it — and only ever
+	// through the web UI.
+	LevelManager = "manager"
+)
+
+// levelRank orders the levels for comparison. Absent from the map means "no
+// access at all", which is distinct from viewer.
+var levelRank = map[string]int{
+	LevelViewer:   1,
+	LevelOperator: 2,
+	LevelManager:  3,
+}
+
+// LevelAtLeast reports whether have is sufficient for want. An unknown or empty
+// level never satisfies anything.
+func LevelAtLeast(have, want string) bool {
+	h, ok := levelRank[have]
+	if !ok {
+		return false
+	}
+	w, ok := levelRank[want]
+	if !ok {
+		return false
+	}
+	return h >= w
+}
+
+// IsValidLevel reports whether s names a real permission level.
+func IsValidLevel(s string) bool {
+	_, ok := levelRank[s]
+	return ok
+}
+
+// HigherLevel returns whichever of the two levels grants more. Used to fold the
+// several grants that may match one (user, node) pair into an effective level.
+func HigherLevel(a, b string) string {
+	if levelRank[a] >= levelRank[b] {
+		return a
+	}
+	return b
+}
+
+// Grant subject and object types.
+const (
+	SubjectUser      = "user"
+	SubjectUserGroup = "user_group"
+
+	ObjectNode      = "node"
+	ObjectNodeGroup = "node_group"
+	ObjectAll       = "all"
+)
+
+type UserGroup struct {
+	ID          string    `json:"id" gorm:"primaryKey;type:text"`
+	Name        string    `json:"name" gorm:"type:text;not null;uniqueIndex"`
+	Description string    `json:"description" gorm:"type:text"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+type UserGroupMember struct {
+	UserGroupID string `json:"user_group_id" gorm:"primaryKey;type:text"`
+	UserID      string `json:"user_id" gorm:"primaryKey;type:text;index"`
+}
+
+type NodeGroup struct {
+	ID          string    `json:"id" gorm:"primaryKey;type:text"`
+	Name        string    `json:"name" gorm:"type:text;not null;uniqueIndex"`
+	Description string    `json:"description" gorm:"type:text"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+type NodeGroupMember struct {
+	NodeGroupID string `json:"node_group_id" gorm:"primaryKey;type:text"`
+	NodeID      string `json:"node_id" gorm:"primaryKey;type:text;index"`
+}
+
+// Grant binds a subject (a user, or a group of users) to an object (a node, a
+// group of nodes, or every node) at a permission level.
+//
+// Nodes have no owner column: who may touch a machine is expressed entirely
+// through group membership and these rows, so a departing user never leaves
+// orphaned machines behind.
+type Grant struct {
+	ID          string    `json:"id" gorm:"primaryKey;type:text"`
+	SubjectType string    `json:"subject_type" gorm:"type:text;not null;uniqueIndex:idx_grant_subject_object"`
+	SubjectID   string    `json:"subject_id" gorm:"type:text;not null;uniqueIndex:idx_grant_subject_object"`
+	ObjectType  string    `json:"object_type" gorm:"type:text;not null;uniqueIndex:idx_grant_subject_object"`
+	ObjectID    string    `json:"object_id" gorm:"type:text;not null;default:'';uniqueIndex:idx_grant_subject_object"` // empty when ObjectType is "all"
+	Level       string    `json:"level" gorm:"type:text;not null"`
+	CreatedBy   string    `json:"created_by" gorm:"type:text"` // granting admin, for the audit trail
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
 // --- Core: Conversations ---
 
 type Conversation struct {
@@ -147,6 +249,11 @@ type Node struct {
 type RegistrationToken struct {
 	ID          string    `json:"id" gorm:"primaryKey;type:text"`           // token value itself
 	AliasPrefix *string   `json:"alias_prefix,omitempty" gorm:"type:text"` // optional alias prefix for nodes registered with this token
+	// NodeGroupID, when set, puts every node enrolled with this token into that
+	// group. This is the main way machines acquire permissions: the grants on
+	// the group already exist, so a freshly installed agent is reachable by the
+	// right people the moment it comes online, with no change to install scripts.
+	NodeGroupID *string   `json:"node_group_id,omitempty" gorm:"type:text"`
 	ExpiresAt   time.Time `json:"expires_at" gorm:"not null"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
@@ -165,7 +272,7 @@ type AuditLog struct {
 	Stderr      *string   `json:"stderr,omitempty" gorm:"type:text"`
 	DurationMS  *int64    `json:"duration_ms,omitempty"`
 	Confirmed   bool      `json:"confirmed" gorm:"default:false"`             // required 2FA confirmation
-	Source      string    `json:"source" gorm:"type:text;not null;default:'webui'"` // webui, api, mcp
+	Source      string    `json:"source" gorm:"type:text;not null;default:'webui'"` // webui, terminal, api, cli
 	APIKeyID    *string   `json:"api_key_id,omitempty" gorm:"type:text"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime;index"`
 }

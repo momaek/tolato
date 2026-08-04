@@ -10,7 +10,6 @@ import (
 	"github.com/momaek/tolato/server/internal/auth"
 	"github.com/momaek/tolato/server/internal/config"
 	"github.com/momaek/tolato/server/internal/geoip"
-	"github.com/momaek/tolato/server/internal/mcp"
 	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/node"
@@ -108,6 +107,19 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.GET("/auth/me", CurrentUser(deps))
 	protected.PUT("/auth/password", ChangeOwnPassword(deps))
 
+	// User groups, node groups and grants — the permission model's admin surface
+	admin.GET("/user-groups", ListUserGroups(deps))
+	admin.POST("/user-groups", CreateUserGroup(deps))
+	admin.PUT("/user-groups/:id", UpdateUserGroup(deps))
+	admin.DELETE("/user-groups/:id", DeleteUserGroup(deps))
+	admin.GET("/node-groups", ListNodeGroups(deps))
+	admin.POST("/node-groups", CreateNodeGroup(deps))
+	admin.PUT("/node-groups/:id", UpdateNodeGroup(deps))
+	admin.DELETE("/node-groups/:id", DeleteNodeGroup(deps))
+	admin.GET("/grants", ListGrants(deps))
+	admin.POST("/grants", CreateGrant(deps))
+	admin.DELETE("/grants/:id", DeleteGrant(deps))
+
 	// User management
 	admin.GET("/users", ListUsers(deps))
 	admin.POST("/users", CreateUser(deps))
@@ -175,14 +187,6 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	v1.GET("/nodes", ExternalListNodes(deps))
 	v1.GET("/nodes/:id", ExternalGetNode(deps))
 	v1.POST("/nodes/:id/execute", ExternalExecuteCommand(deps))
-
-	// MCP endpoint for Claude Code / other MCP clients. Streamable HTTP
-	// transport over JSON-RPC 2.0; reuses the same API-key auth as /api/v1.
-	mcpGroup := r.Group("/mcp")
-	mcpGroup.Use(middleware.APIKeyAuth())
-	mcpHandler := mcp.Handler(deps.NodeManager, deps.Settings)
-	mcpGroup.POST("", mcpHandler)
-	mcpGroup.GET("", mcpHandler) // returns 405 with a useful body
 
 	// Agent install script: 302 → GitHub raw (configurable via server.install_script_url).
 	// curl -fsSL follows the redirect transparently.

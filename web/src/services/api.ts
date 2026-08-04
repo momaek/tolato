@@ -37,6 +37,10 @@ import type {
   OIDCSettingsResponse,
   OIDCStatusResponse,
   VerifyOIDCResponse,
+  GroupItem,
+  GroupRequest,
+  GrantItem,
+  CreateGrantRequest,
 } from '@/types/api'
 import router from '@/router'
 
@@ -105,6 +109,57 @@ export async function updateOIDCSettings(data: OIDCSettings): Promise<void> {
 export async function verifyOIDC(data: OIDCSettings): Promise<VerifyOIDCResponse> {
   const res = await api.post<VerifyOIDCResponse>('/settings/oidc/verify', data)
   return res.data
+}
+
+// --- Groups and grants (admin only) ---
+
+export async function getUserGroups(): Promise<GroupItem[]> {
+  const res = await api.get<{ items: GroupItem[] }>('/user-groups')
+  return res.data.items ?? []
+}
+
+export async function createUserGroup(data: GroupRequest): Promise<GroupItem> {
+  const res = await api.post<GroupItem>('/user-groups', data)
+  return res.data
+}
+
+export async function updateUserGroup(id: string, data: GroupRequest): Promise<void> {
+  await api.put(`/user-groups/${id}`, data)
+}
+
+export async function deleteUserGroup(id: string): Promise<void> {
+  await api.delete(`/user-groups/${id}`)
+}
+
+export async function getNodeGroups(): Promise<GroupItem[]> {
+  const res = await api.get<{ items: GroupItem[] }>('/node-groups')
+  return res.data.items ?? []
+}
+
+export async function createNodeGroup(data: GroupRequest): Promise<GroupItem> {
+  const res = await api.post<GroupItem>('/node-groups', data)
+  return res.data
+}
+
+export async function updateNodeGroup(id: string, data: GroupRequest): Promise<void> {
+  await api.put(`/node-groups/${id}`, data)
+}
+
+export async function deleteNodeGroup(id: string): Promise<void> {
+  await api.delete(`/node-groups/${id}`)
+}
+
+export async function getGrants(): Promise<GrantItem[]> {
+  const res = await api.get<{ items: GrantItem[] }>('/grants')
+  return res.data.items ?? []
+}
+
+export async function createGrant(data: CreateGrantRequest): Promise<void> {
+  await api.post('/grants', data)
+}
+
+export async function deleteGrant(id: string): Promise<void> {
+  await api.delete(`/grants/${id}`)
 }
 
 // --- User management (admin only) ---

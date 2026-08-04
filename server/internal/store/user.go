@@ -70,8 +70,18 @@ func DeleteUser(id string) error {
 //
 // Audit logs are deliberately kept — they carry an actor username snapshot, so
 // the record of what ran on which node outlives the account.
+//
+// Group memberships and grants go too: a rule naming a user id that resolves to
+// nobody is dead weight, and would silently come back to life if that id were
+// ever reused.
 func DeleteUserCascade(id string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := RemoveUserFromAllGroups(tx, id); err != nil {
+			return err
+		}
+		if err := DeleteGrantsForSubject(tx, model.SubjectUser, id); err != nil {
+			return err
+		}
 		if err := tx.Where("user_id = ?", id).Delete(&model.Conversation{}).Error; err != nil {
 			return err
 		}

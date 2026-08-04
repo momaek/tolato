@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/momaek/tolato/server/internal/agent"
+	"github.com/momaek/tolato/server/internal/authz"
 	"github.com/momaek/tolato/server/internal/llm"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/security"
@@ -307,9 +308,13 @@ func handleUserMessage(ctx context.Context, deps *Deps, user *model.User, loops 
 		llmCfg.Model = *evt.Model
 	}
 
-	llmClient := llm.NewClient(llmCfg, agent.ToolDefs())
+	subject := authz.SubjectOf(user)
+
+	// The tool set is trimmed to the caller's role, so a member's conversation
+	// is never even offered the node-mutating tools.
+	llmClient := llm.NewClient(llmCfg, agent.ToolDefsFor(subject.IsAdmin))
 	secChecker := security.NewChecker(deps.Settings)
-	toolExec := agent.NewToolExecutor(deps.NodeManager, secChecker, deps.Settings, chatSettings.OutputTruncateLines)
+	toolExec := agent.NewToolExecutor(deps.NodeManager, secChecker, deps.Settings, chatSettings.OutputTruncateLines, subject)
 	promptBuilder := agent.NewPromptBuilder()
 
 	// Decide whether to auto-generate a title for this conversation. Done
@@ -333,7 +338,7 @@ func handleUserMessage(ctx context.Context, deps *Deps, user *model.User, loops 
 		MaxRounds:      llmSettings.MaxRounds,
 		ContextRounds:  chatSettings.ContextRounds,
 		GetNodeInfos: func() []agent.NodeInfo {
-			return getNodeInfos(deps)
+			return getNodeInfos(deps, subject)
 		},
 		GetCustomPrompt: func() string {
 			cs := deps.Settings.Chat()
@@ -476,8 +481,24 @@ func chatWriteLoop(session *ChatSession, eventCh chan any) {
 
 // Helper functions
 
-func getNodeInfos(deps *Deps) []agent.NodeInfo {
-	nodes, _, err := store.ListNodes(1, 200, "")
+// getNodeInfos builds the machine inventory injected into the model's system
+// prompt, restricted to what this user may see.
+//
+// This is the primary defence, not the per-tool checks: a node the user has no
+// grant on never enters the model's context, so it cannot be named in a
+// suggestion, leaked in a summary, or reasoned about at all. The checks inside
+// the tool executor exist for the case where the model invents an id anyway.
+func getNodeInfos(deps *Deps, subject authz.Subject) []agent.NodeInfo {
+	visibleIDs, unrestricted, err := authz.VisibleNodeIDs(subject)
+	if err != nil {
+		log.Printf("[chat_ws] node visibility lookup failed: %v", err)
+		return nil
+	}
+	if !unrestricted && len(visibleIDs) == 0 {
+		return nil
+	}
+
+	nodes, _, err := store.ListNodesScoped(1, 200, "", visibleIDs, unrestricted)
 	if err != nil {
 		return nil
 	}

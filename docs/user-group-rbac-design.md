@@ -1,6 +1,7 @@
 # Tolato 用户体系与 Group 权限设计
 
-> 状态：**设计稿，待评审**。撰写日期：2026-08-04，基于 commit `f126361`。
+> 状态：**已全部实现**（P1–P4）。撰写日期：2026-08-04，基于 commit `f126361`。
+> 实现与设计的差异见文末「§9 实现记录」。
 > 前置阅读：[multi-tenancy-assessment.md](multi-tenancy-assessment.md)（2026-06 的三档方案评估）。
 > 本文对应当时的「方案 B+」——多用户 + 组权限，但**不做**互不信任的 SaaS 租户隔离。
 
@@ -263,11 +264,11 @@ JWT Claims 从 `{username}` 扩展为 `{user_id, username, role}`。`JWTAuth()` 
 | 期 | 内容 | 量级 |
 |----|------|------|
 | **P1 账号体系** ✅ | users 表、bcrypt 登录、JWT 带 user_id/role、引导迁移、用户管理 API+页面、对话归属、审计带 user_id、API Key 两档+绑 owner | 已完成 |
-| **P2 分组与授权** | 六张新表、authz 包、REST 层强制点 1–3、6、8、注册 token 绑组、管理 API+页面 | ~4–5 天 |
-| **P3 执行面收口** | 终端 WS（点4）、chat 上下文预过滤 + 按角色裁剪工具集（点5）、API Key 两档制 + 绑 owner（点7） | ~3 天 |
-| **P3.5 CLI + Skill** | `tolato` CLI、下线 `/mcp` 与 `internal/mcp`、`skills/tolato/SKILL.md`、v1 审计补 user_id/source | ~2 天 |
+| **P2 分组与授权** ✅ | 五张新表、authz 包、REST 层强制点 1–3、6、8、注册 token 绑组、管理 API+页面 | 已完成 |
+| **P3 执行面收口** ✅ | 终端 WS（点4）、chat 上下文预过滤 + 按角色裁剪工具集（点5）、API Key 两档制 + 绑 owner（点7） | 已完成 |
+| **P3.5 CLI + Skill** ✅ | `tolato` CLI、下线 `/mcp` 与 `internal/mcp`、`skills/tolato/SKILL.md`、v1 审计补 user_id/source | 已完成 |
 | **P3.6 OIDC** ✅ | go-oidc 接入、Settings 页配置 + verify + 热生效、auth_source/oidc_subject、自动建号、账号采纳（组映射留给 P2） | 已完成 |
-| **P4 打磨** | `my_level` 字段与按钮显隐、审计过滤细化、文档 | ~1–2 天 |
+| **P4 打磨** ✅ | `my_level` 字段与按钮显隐、审计过滤细化、文档 | 已完成 |
 
 P1 独立可发布（等价于评估文档的方案 B）；P2/P3 必须一起发（只发 P2 会出现「列表看不见但终端连得上」的假隔离）。总量约 2–2.5 周，与当年评估的方案 C 估算一致，但砍掉了 Settings 拆分和租户隔离两块最重的部分。
 
@@ -283,3 +284,16 @@ P1 独立可发布（等价于评估文档的方案 B）；P2/P3 必须一起发
 8. **节点属性修改只留一个入口**——Web UI 会话（manager 级别或 admin）。CLI / API Key / member 的 AI 对话一律无此能力，攻击面最小化。
 9. **MCP 换成 CLI + Skill**——CLI 的能力面被 `/api/v1` 端点面硬约束，比 MCP 工具层自行实现权限检查更不容易出错；Skill 只是使用说明，零权限逻辑。
 10. **API Key 两档而非三档**——readonly / writable 覆盖全部真实场景；「admin 级 key」这种大杀器不该存在。
+
+
+## 9. 实现记录
+
+实现过程中与设计稿的差异，均为收紧而非放宽：
+
+1. **少一张表**。设计稿写「六张新表」，实际五张：`user_groups`、`user_group_members`、`node_groups`、`node_group_members`、`grants`。原先把 Grant 的唯一索引单独算了一张。
+2. **OIDC 组映射未做**。它依赖用户组，而 OIDC 先于 P2 落地；产品上简单接入已够用，后续需要时再补 `group_claim` + 映射表即可（表已就绪）。
+3. **AI 对话的工具集按角色裁剪，而非调用时拒绝**。`edit_node_info` 和 `update_agent` 对 member **根本不注入**，模型看不到就无从调用；工具分发层仍保留 admin + manager 双重校验作为兜底。
+4. **API Key 的能力是「档位 ∩ owner 权限」**。writable key 也只能在 owner 拥有 operator 的节点上执行；owner 停用则 key 立即失效。
+5. **删除的级联比设计稿更彻底**。删用户 → 同时清其组成员身份与 grants；删节点 / 节点组 → 同时清 grants，节点组还会解绑注册 token。避免 id 复用时权限「诈尸」。
+6. **列表分页在 SQL 层按可见集过滤**（`ListNodesScoped` / `ListAuditLogsScoped`），而不是取出后再筛——否则只有两台机器权限的用户会翻到大量空页。
+7. **无权限一律 404**，包括审计日志按 node_id 过滤时，避免用结果数量探测节点存在性。

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/momaek/tolato/server/internal/authz"
 	"github.com/momaek/tolato/server/internal/config"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/store"
@@ -52,7 +53,14 @@ func CreateNode(deps *Deps) gin.HandlerFunc {
 			req = model.CreateNodeRequest{}
 		}
 
-		token, err := store.CreateRegistrationToken(req.Alias, deps.Config.Security.AgentTokenExpiry)
+		if req.NodeGroupID != nil && *req.NodeGroupID != "" {
+			if _, err := store.GetNodeGroupByID(*req.NodeGroupID); err != nil {
+				badRequest(c, "no such node group")
+				return
+			}
+		}
+
+		token, err := store.CreateRegistrationToken(req.Alias, req.NodeGroupID, deps.Config.Security.AgentTokenExpiry)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error:   "internal_error",
@@ -93,12 +101,42 @@ func ListNodes(deps *Deps) gin.HandlerFunc {
 
 		status := c.Query("status")
 
-		nodes, total, err := store.ListNodes(q.Page, q.PageSize, status)
+		// Permission filtering happens on ids, so paging has to run over the
+		// visible set rather than over every node — otherwise a member with two
+		// nodes out of a hundred would page through mostly-empty results.
+		visibleIDs, unrestricted, err := authz.VisibleNodeIDs(subjectOf(c))
+		if err != nil {
+			internalError(c, "failed to check permissions")
+			return
+		}
+		if !unrestricted && len(visibleIDs) == 0 {
+			c.JSON(http.StatusOK, model.PaginatedResponse{
+				Items: []model.NodeListItem{}, Total: 0, Page: q.Page, PageSize: q.PageSize, TotalPages: 0,
+			})
+			return
+		}
+
+		nodes, total, err := store.ListNodesScoped(q.Page, q.PageSize, status, visibleIDs, unrestricted)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error:   "internal_error",
 				Message: "failed to list nodes",
 			})
+			return
+		}
+
+		pageIDs := make([]string, 0, len(nodes))
+		for i := range nodes {
+			pageIDs = append(pageIDs, nodes[i].ID)
+		}
+		levels, err := authz.LevelsForNodes(subjectOf(c), pageIDs)
+		if err != nil {
+			internalError(c, "failed to check permissions")
+			return
+		}
+		groupNames, err := store.GroupNamesByNode()
+		if err != nil {
+			internalError(c, "failed to load node groups")
 			return
 		}
 
@@ -119,6 +157,8 @@ func ListNodes(deps *Deps) gin.HandlerFunc {
 				DiskTotalGB:   n.DiskTotalGB,
 				Extra:         n.Extra,
 				LastHeartbeat: n.LastHeartbeat,
+				Groups:        groupNames[n.ID],
+				MyLevel:       levels[n.ID],
 			}
 
 			// Attach cached metrics if online
@@ -150,6 +190,9 @@ func ListNodes(deps *Deps) gin.HandlerFunc {
 func GetNode(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if !requireNodeLevel(c, id, model.LevelViewer) {
+			return
+		}
 
 		n, err := store.GetNodeByID(id)
 		if err != nil {
@@ -157,6 +200,17 @@ func GetNode(deps *Deps) gin.HandlerFunc {
 				Error:   "not_found",
 				Message: "node not found",
 			})
+			return
+		}
+
+		level, _, err := authz.NodeLevel(subjectOf(c), id)
+		if err != nil {
+			internalError(c, "failed to check permissions")
+			return
+		}
+		groupNames, err := store.GroupNamesByNode()
+		if err != nil {
+			internalError(c, "failed to load node groups")
 			return
 		}
 
@@ -179,6 +233,8 @@ func GetNode(deps *Deps) gin.HandlerFunc {
 			LastHeartbeat: n.LastHeartbeat,
 			CreatedAt:     n.CreatedAt,
 			Metrics:       deps.NodeManager.GetMetrics(n.ID),
+			Groups:        groupNames[n.ID],
+			MyLevel:       level,
 		}
 
 		c.JSON(http.StatusOK, detail)
@@ -189,6 +245,9 @@ func GetNode(deps *Deps) gin.HandlerFunc {
 func UpdateNode(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if !requireNodeLevel(c, id, model.LevelManager) {
+			return
+		}
 
 		var req model.UpdateNodeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -263,6 +322,9 @@ func mergeNodeExtra(nodeID string, patch map[string]any) (model.JSONMap, error) 
 func DeleteNode(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if !requireNodeLevel(c, id, model.LevelManager) {
+			return
+		}
 
 		// Remove connection if online
 		deps.NodeManager.RemoveConn(id)
@@ -285,12 +347,7 @@ func DeleteNode(deps *Deps) gin.HandlerFunc {
 func UpdateNodeAgent(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-
-		if _, err := store.GetNodeByID(id); err != nil {
-			c.JSON(http.StatusNotFound, model.ErrorResponse{
-				Error:   "not_found",
-				Message: "node not found",
-			})
+		if !requireNodeLevel(c, id, model.LevelManager) {
 			return
 		}
 

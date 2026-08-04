@@ -60,6 +60,14 @@ func CreateConversation(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
+		// A conversation can pin a default node; validate it, or the picker
+		// becomes a way to confirm which node ids exist.
+		if req.DefaultNodeID != nil && *req.DefaultNodeID != "" {
+			if !requireNodeLevel(c, *req.DefaultNodeID, model.LevelViewer) {
+				return
+			}
+		}
+
 		conv := &model.Conversation{
 			ID:            uuid.New().String(),
 			UserID:        middleware.CurrentUserID(c),
@@ -184,6 +192,9 @@ func UpdateConversation(deps *Deps) gin.HandlerFunc {
 			updates["model"] = *req.Model
 		}
 		if req.DefaultNodeID != nil {
+			if *req.DefaultNodeID != "" && !requireNodeLevel(c, *req.DefaultNodeID, model.LevelViewer) {
+				return
+			}
 			updates["default_node_id"] = *req.DefaultNodeID
 		}
 

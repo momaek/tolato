@@ -32,7 +32,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useNodesStore } from '@/stores/nodes'
-import type { CreateNodeResponse } from '@/types/api'
+import type { CreateNodeResponse, NodeListItem } from '@/types/api'
+import { useAppStore } from '@/stores/app'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -42,6 +43,17 @@ const nodesStore = useNodesStore()
 // view, work in multiple terminals at once, and not lose state when they
 // navigate elsewhere. Token rides along via localStorage; the SPA's auth
 // guard auto-routes the new tab into /nodes/:id/terminal.
+const appStore = useAppStore()
+
+// The server stamps each node with the caller's effective level. The UI only
+// reflects it — an absent level means viewer-or-less, so actions stay hidden.
+function canOperate(node: NodeListItem) {
+  return node.my_level === 'operator' || node.my_level === 'manager'
+}
+function canManage(node: NodeListItem) {
+  return node.my_level === 'manager'
+}
+
 function openTerminal(nodeId: string) {
   const href = router.resolve(`/nodes/${nodeId}/terminal`).href
   window.open(href, '_blank', 'noopener')
@@ -241,7 +253,7 @@ async function handleDeleteNode(id: string) {
           <Rows3 class="h-4 w-4" />
         </Button>
       </div>
-      <Dialog v-model:open="dialogOpen" @update:open="resetDialog">
+      <Dialog v-if="appStore.isAdmin" v-model:open="dialogOpen" @update:open="resetDialog">
         <DialogTrigger as-child>
           <Button>
             <Plus class="mr-2 h-4 w-4" />
@@ -379,6 +391,7 @@ async function handleDeleteNode(id: string) {
             <TableCell>
               <div class="flex items-center justify-end gap-1">
                 <Button
+                  v-if="canOperate(node)"
                   variant="ghost"
                   size="icon"
                   :title="$t('nodes.openTerminal')"
@@ -396,6 +409,7 @@ async function handleDeleteNode(id: string) {
                   <Eye class="h-4 w-4" />
                 </Button>
                 <Button
+                  v-if="canManage(node)"
                   variant="ghost"
                   size="sm"
                   class="text-destructive"

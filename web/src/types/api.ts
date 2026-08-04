@@ -78,6 +78,46 @@ export interface OIDCStatusResponse {
   enabled: boolean
 }
 
+// --- Groups and grants ---
+
+export type NodeLevel = 'viewer' | 'operator' | 'manager'
+export type SubjectType = 'user' | 'user_group'
+export type ObjectType = 'node' | 'node_group' | 'all'
+
+export interface GroupItem {
+  id: string
+  name: string
+  description?: string
+  member_ids: string[]
+  created_at: string
+}
+
+export interface GroupRequest {
+  name?: string
+  description?: string
+  member_ids?: string[]
+}
+
+export interface GrantItem {
+  id: string
+  subject_type: SubjectType
+  subject_id: string
+  subject_name: string
+  object_type: ObjectType
+  object_id?: string
+  object_name: string
+  level: NodeLevel
+  created_at: string
+}
+
+export interface CreateGrantRequest {
+  subject_type: SubjectType
+  subject_id: string
+  object_type: ObjectType
+  object_id?: string
+  level: NodeLevel
+}
+
 export interface CreateUserRequest {
   username: string
   password: string
@@ -187,6 +227,7 @@ export interface UpdateConversationRequest {
 // ============================================================================
 
 export interface CreateNodeRequest {
+  node_group_id?: string // enrol nodes registered with this token into a group
   alias?: string
 }
 
@@ -215,6 +256,8 @@ export interface NodeListItem {
   disk?: number
   extra?: NodeExtra
   last_heartbeat?: string
+  groups?: string[]     // node group names
+  my_level?: NodeLevel  // caller's effective level; absent means no access
 }
 
 // NodeExtra is a free-form bag of metadata. Conventional keys are surfaced as
@@ -251,6 +294,8 @@ export interface NodeDetail {
   last_heartbeat?: string
   created_at: string
   metrics?: NodeMetrics
+  groups?: string[]     // node group names
+  my_level?: NodeLevel  // caller's effective level
 }
 
 export interface NodeMetrics {
