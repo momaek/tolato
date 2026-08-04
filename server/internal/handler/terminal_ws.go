@@ -59,12 +59,12 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 			writeTermError(conn, "invalid auth message")
 			return
 		}
-		claims, err := deps.ValidateToken(authMsg.Payload.Token)
+		user, err := deps.AuthenticateToken(authMsg.Payload.Token)
 		if err != nil {
 			writeTermError(conn, "invalid or expired token")
 			return
 		}
-		username := claims.Username
+		username := user.Username
 		_ = conn.SetReadDeadline(time.Time{})
 		_ = writeTerm(conn, model.WSTermTypeAuthOK, nil)
 
@@ -133,6 +133,7 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 		_ = store.CreateAuditLog(&model.AuditLog{
 			NodeID:   nodeID,
 			NodeName: nodeName,
+			UserID:   user.ID,
 			Actor:    username,
 			Command:  "[terminal session opened]",
 			Source:   "terminal",
@@ -204,7 +205,7 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 				case model.WSTermTypeFileOp:
 					var p model.WSTermFileOpPayload
 					_ = json.Unmarshal(msg.Payload, &p)
-					go handleFileOp(ac, &p, writeToBrowser, nodeID, nodeName, username)
+					go handleFileOp(ac, &p, writeToBrowser, nodeID, nodeName, user.ID, username)
 				}
 			}
 		}
@@ -232,6 +233,7 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 		_ = store.CreateAuditLog(&model.AuditLog{
 			NodeID:   nodeID,
 			NodeName: nodeName,
+			UserID:   user.ID,
 			Actor:    username,
 			Command:  "[terminal session closed]",
 			ExitCode: &ec,
@@ -244,7 +246,7 @@ func TerminalWSHandler(deps *Deps) gin.HandlerFunc {
 // handleFileOp issues a one-shot Request against the agent; the response is
 // forwarded back to the browser as a file_result message tagged with the
 // browser-supplied ReqID.
-func handleFileOp(ac *node.AgentConn, p *model.WSTermFileOpPayload, writeToBrowser func(string, any) error, nodeID, nodeName, actor string) {
+func handleFileOp(ac *node.AgentConn, p *model.WSTermFileOpPayload, writeToBrowser func(string, any) error, nodeID, nodeName, userID, actor string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -254,6 +256,7 @@ func handleFileOp(ac *node.AgentConn, p *model.WSTermFileOpPayload, writeToBrows
 		entry := &model.AuditLog{
 			NodeID:   nodeID,
 			NodeName: nodeName,
+			UserID:   userID,
 			Actor:    actor,
 			Command:  fmt.Sprintf("file:%s %s", p.Op, p.Path),
 			Source:   "terminal/file_op",

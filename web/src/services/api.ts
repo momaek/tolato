@@ -26,6 +26,13 @@ import type {
   PaginationQuery,
   NodeCommandItem,
   ToolCallOutputResponse,
+  UserItem,
+  CreateUserRequest,
+  UpdateUserRequest,
+  ChangePasswordRequest,
+  APIKeyListItem,
+  CreateAPIKeyRequest,
+  CreateAPIKeyResponse,
 } from '@/types/api'
 import router from '@/router'
 
@@ -63,6 +70,36 @@ api.interceptors.response.use(
 export async function login(data: LoginRequest): Promise<LoginResponse> {
   const res = await api.post<LoginResponse>('/auth/login', data)
   return res.data
+}
+
+export async function getCurrentUser(): Promise<UserItem> {
+  const res = await api.get<UserItem>('/auth/me')
+  return res.data
+}
+
+export async function changeOwnPassword(data: ChangePasswordRequest): Promise<void> {
+  await api.put('/auth/password', data)
+}
+
+// --- User management (admin only) ---
+
+export async function getUsers(): Promise<UserItem[]> {
+  const res = await api.get<{ items: UserItem[] }>('/users')
+  return res.data.items ?? []
+}
+
+export async function createUser(data: CreateUserRequest): Promise<UserItem> {
+  const res = await api.post<UserItem>('/users', data)
+  return res.data
+}
+
+export async function updateUser(id: string, data: UpdateUserRequest): Promise<UserItem> {
+  const res = await api.put<UserItem>(`/users/${id}`, data)
+  return res.data
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await api.delete(`/users/${id}`)
 }
 
 export interface VersionInfo {
@@ -252,13 +289,13 @@ export async function getAuditLogs(query: AuditLogQuery): Promise<PaginatedRespo
 
 // --- API Keys ---
 
-export async function getAPIKeys(): Promise<any[]> {
-  const res = await api.get('/api-keys')
+export async function getAPIKeys(): Promise<APIKeyListItem[]> {
+  const res = await api.get<APIKeyListItem[]>('/api-keys')
   return res.data
 }
 
-export async function createAPIKey(data: { name: string; permission: string }): Promise<any> {
-  const res = await api.post('/api-keys', data)
+export async function createAPIKey(data: CreateAPIKeyRequest): Promise<CreateAPIKeyResponse> {
+  const res = await api.post<CreateAPIKeyResponse>('/api-keys', data)
   return res.data
 }
 

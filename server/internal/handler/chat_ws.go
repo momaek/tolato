@@ -77,8 +77,9 @@ func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 		}
 
 		// Validate JWT token
-		if _, err := deps.ValidateToken(authMsg.Payload.Token); err != nil {
-			log.Printf("[chat_ws] invalid token")
+		user, err := deps.AuthenticateToken(authMsg.Payload.Token)
+		if err != nil {
+			log.Printf("[chat_ws] rejected connection: %v", err)
 			_ = conn.WriteJSON(model.WSMessage{
 				Type:    model.WSTypeError,
 				Payload: model.WSErrorEvent{Message: "invalid or expired token"},
@@ -155,7 +156,7 @@ func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 		defer cancel()
 
 		// Reader loop: reads messages from frontend
-		chatReadLoop(ctx, session, deps, loops, eventCh, &runnersWG)
+		chatReadLoop(ctx, session, deps, user, loops, eventCh, &runnersWG)
 	}
 }
 
@@ -234,7 +235,7 @@ type chatInbound struct {
 	Payload        json.RawMessage `json:"payload,omitempty"`
 }
 
-func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup) {
+func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, user *model.User, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup) {
 	conn := session.Conn()
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -256,7 +257,7 @@ func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, loops *
 				log.Printf("[chat_ws] bad user_message payload: %v", err)
 				continue
 			}
-			handleUserMessage(ctx, deps, loops, eventCh, runnersWG, msg.ConversationID, evt)
+			handleUserMessage(ctx, deps, user, loops, eventCh, runnersWG, msg.ConversationID, evt)
 		case model.WSTypeConfirmResponse:
 			var evt model.WSConfirmResponseEvent
 			if err := json.Unmarshal(msg.Payload, &evt); err != nil {
@@ -272,9 +273,23 @@ func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, loops *
 	}
 }
 
-func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup, convID string, evt model.WSUserMessageEvent) {
+func handleUserMessage(ctx context.Context, deps *Deps, user *model.User, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup, convID string, evt model.WSUserMessageEvent) {
 	if convID == "" {
 		log.Printf("[chat_ws] user_message missing conversation_id")
+		return
+	}
+
+	// Conversations are private, and the ID arrives from the client — so the
+	// socket being authenticated isn't enough. Without this check any logged-in
+	// user could append to (and read the replies of) somebody else's chat by
+	// guessing its ID.
+	owns, err := store.ConversationBelongsTo(user.ID, convID)
+	if err != nil || !owns {
+		log.Printf("[chat_ws] user %s denied access to conv %s (err=%v)", user.Username, convID, err)
+		select {
+		case eventCh <- agent.ErrorEvent{ConversationID: convID, Message: "conversation not found"}:
+		case <-ctx.Done():
+		}
 		return
 	}
 
@@ -305,7 +320,7 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 		runnersWG.Add(1)
 		go func() {
 			defer runnersWG.Done()
-			generateAndEmitTitle(ctx, llmCfg, convID, evt.Content, eventCh)
+			generateAndEmitTitle(ctx, llmCfg, user.ID, convID, evt.Content, eventCh)
 		}()
 	}
 

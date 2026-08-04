@@ -52,6 +52,7 @@ func ListAuditLogs(deps *Deps) gin.HandlerFunc {
 				ID:         l.ID,
 				NodeID:     l.NodeID,
 				NodeName:   l.NodeName,
+				Actor:      l.Actor,
 				Command:    l.Command,
 				ExitCode:   l.ExitCode,
 				Stdout:     l.Stdout,

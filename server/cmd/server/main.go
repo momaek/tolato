@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/momaek/tolato/server/internal/auth"
 	"github.com/momaek/tolato/server/internal/config"
 	"github.com/momaek/tolato/server/internal/geoip"
 	"github.com/momaek/tolato/server/internal/handler"
@@ -38,6 +39,12 @@ func main() {
 
 	if err := store.InitDB(cfg.Database.DSN); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	// Seeds the first admin from the config credentials on a fresh or upgraded
+	// database. A no-op once any user exists.
+	if err := auth.Bootstrap(cfg.Auth.Username, cfg.Auth.Password); err != nil {
+		log.Fatalf("Failed to bootstrap the initial admin: %v", err)
 	}
 
 	nm := node.NewNodeManager()

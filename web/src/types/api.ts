@@ -32,6 +32,46 @@ export interface LoginRequest {
 export interface LoginResponse {
   token: string
   expires_at: string // ISO 8601
+  user: UserItem
+}
+
+// --- Users ---
+
+export type UserRole = 'admin' | 'member'
+export type UserStatus = 'active' | 'disabled'
+export type AuthSource = 'local' | 'oidc'
+
+export interface UserItem {
+  id: string
+  username: string
+  display_name: string
+  email?: string
+  role: UserRole
+  status: UserStatus
+  auth_source: AuthSource
+  last_login_at?: string
+  created_at: string
+}
+
+export interface CreateUserRequest {
+  username: string
+  password: string
+  display_name?: string
+  email?: string
+  role?: UserRole
+}
+
+export interface UpdateUserRequest {
+  display_name?: string
+  email?: string
+  role?: UserRole
+  status?: UserStatus
+  password?: string
+}
+
+export interface ChangePasswordRequest {
+  current_password: string
+  new_password: string
 }
 
 // ============================================================================
@@ -335,13 +375,14 @@ export interface AuditLogItem {
   id: number
   node_id: string
   node_name: string
+  actor?: string // username that ran it
   command: string
   exit_code?: number
   stdout?: string
   stderr?: string
   duration_ms?: number
   confirmed: boolean
-  source: 'webui' | 'api' | 'mcp'
+  source: 'webui' | 'terminal' | 'terminal/file_op' | 'api' | 'cli'
   created_at: string
 }
 
@@ -376,7 +417,7 @@ export interface SensitiveOperationError {
 // API Key Management
 // ============================================================================
 
-export type APIKeyPermission = 'readonly' | 'standard' | 'admin'
+export type APIKeyPermission = 'readonly' | 'writable'
 
 export interface CreateAPIKeyRequest {
   name: string
@@ -395,6 +436,7 @@ export interface CreateAPIKeyResponse {
 export interface APIKeyListItem {
   id: string
   name: string
+  owner_username?: string // present for admins, who see every user's keys
   key_prefix: string
   permission: APIKeyPermission
   status: 'active' | 'revoked'

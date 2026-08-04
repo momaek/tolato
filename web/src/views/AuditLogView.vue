@@ -135,6 +135,7 @@ function formatTime(iso: string) {
             <TableHead class="w-8" />
             <TableHead>{{ $t('common.time') }}</TableHead>
             <TableHead>{{ $t('auditLog.node') }}</TableHead>
+            <TableHead>{{ $t('auditLog.actor') }}</TableHead>
             <TableHead>{{ $t('auditLog.command') }}</TableHead>
             <TableHead>{{ $t('common.status') }}</TableHead>
             <TableHead>{{ $t('auditLog.confirmed') }}</TableHead>
@@ -157,6 +158,13 @@ function formatTime(iso: string) {
                 {{ formatTime(log.created_at) }}
               </TableCell>
               <TableCell>{{ log.node_name }}</TableCell>
+              <TableCell class="whitespace-nowrap text-sm">
+                <span v-if="log.actor">{{ log.actor }}</span>
+                <span v-else style="color: var(--muted-foreground)">—</span>
+                <Badge v-if="log.source !== 'webui'" variant="outline" class="ml-1.5 text-[10px]">
+                  {{ log.source }}
+                </Badge>
+              </TableCell>
               <TableCell class="max-w-md truncate font-mono text-sm">
                 {{ log.command }}
               </TableCell>
@@ -178,7 +186,7 @@ function formatTime(iso: string) {
             </TableRow>
             <!-- Expanded output -->
             <TableRow v-if="expandedRows.has(log.id) && (log.stdout || log.stderr)">
-              <TableCell :colspan="6" class="p-0">
+              <TableCell :colspan="7" class="p-0">
                 <div class="mx-6 my-2 rounded-lg p-3 text-xs font-mono" style="background-color: var(--secondary)">
                   <div v-if="log.stdout" class="whitespace-pre-wrap break-all" style="color: var(--foreground)">
                     <div class="mb-1 text-[10px] font-sans font-medium" style="color: var(--muted-foreground)">{{ $t('auditLog.stdout') }}</div>
@@ -200,7 +208,7 @@ function formatTime(iso: string) {
             </TableRow>
           </template>
           <TableRow v-if="logs.length === 0">
-            <TableCell :colspan="6" class="py-8 text-center" style="color: var(--muted-foreground)">
+            <TableCell :colspan="7" class="py-8 text-center" style="color: var(--muted-foreground)">
               {{ loading ? $t('common.loading') : $t('auditLog.noLogs') }}
             </TableCell>
           </TableRow>

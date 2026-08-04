@@ -44,6 +44,12 @@ const router = createRouter({
           component: () => import('@/views/AuditLogView.vue'),
         },
         {
+          path: 'users',
+          name: 'users',
+          component: () => import('@/views/UsersView.vue'),
+          meta: { requiresAdmin: true },
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/SettingsView.vue'),
@@ -61,6 +67,11 @@ router.beforeEach(async (to) => {
   }
   if (to.path === '/login' && appStore.isAuthenticated) {
     return '/'
+  }
+  // Cosmetic guard — it keeps a member from landing on a page whose every
+  // request would 403. The server is what actually enforces the role.
+  if (to.meta.requiresAdmin && !appStore.isAdmin) {
+    return '/chat'
   }
 })
 

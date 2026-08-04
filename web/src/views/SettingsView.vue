@@ -50,8 +50,11 @@ import {
   getAPIKeys,
   createAPIKey,
   deleteAPIKey,
+  changeOwnPassword,
 } from '@/services/api'
+import { useAppStore } from '@/stores/app'
 import type {
+  APIKeyPermission,
   LLMSettings,
   SecuritySettings,
   AgentSettings,
@@ -66,17 +69,29 @@ import type {
 } from '@/types/api'
 
 const { t } = useI18n()
-const activeTab = ref('llm')
+const appStore = useAppStore()
+const isAdmin = computed(() => appStore.isAdmin)
 
+// Everything that configures the instance is admin-only, reads included: these
+// payloads carry masked provider keys and webhook URLs. Members get their own
+// account and their own API keys, nothing else. Hiding the tabs is a courtesy —
+// each endpoint behind them is gated server-side too.
 const tabs = computed(() => [
-  { id: 'llm', label: t('settings.tabs.llm') },
-  { id: 'security', label: t('settings.tabs.security') },
-  { id: 'agent', label: t('settings.tabs.agent') },
-  { id: 'chat', label: t('settings.tabs.chat') },
-  { id: 'web_fetch', label: t('settings.tabs.webFetch') },
-  { id: 'notify', label: t('settings.tabs.notify') },
+  ...(isAdmin.value
+    ? [
+        { id: 'llm', label: t('settings.tabs.llm') },
+        { id: 'security', label: t('settings.tabs.security') },
+        { id: 'agent', label: t('settings.tabs.agent') },
+        { id: 'chat', label: t('settings.tabs.chat') },
+        { id: 'web_fetch', label: t('settings.tabs.webFetch') },
+        { id: 'notify', label: t('settings.tabs.notify') },
+      ]
+    : []),
   { id: 'api_keys', label: t('settings.tabs.apiKeys') },
+  { id: 'account', label: t('settings.tabs.account') },
 ])
+
+const activeTab = ref(isAdmin.value ? 'llm' : 'api_keys')
 
 // LLM
 const llm = ref<LLMSettings>({
@@ -370,12 +385,18 @@ async function testChannel(ch: NotifyChannel) {
 const apiKeys = ref<any[]>([])
 const showCreateKeyDialog = ref(false)
 const newKeyName = ref('')
-const newKeyPermission = ref('standard')
+const newKeyPermission = ref<APIKeyPermission>('readonly')
 const createdKey = ref<string | null>(null)
 const keyCopied = ref(false)
 
 onMounted(async () => {
   try {
+    apiKeys.value = await getAPIKeys().catch(() => [])
+
+    // The instance settings endpoints are admin-only; a member requesting them
+    // would collect a row of 403s and the "failed to load" toast.
+    if (!isAdmin.value) return
+
     const [llmData, secData, agentData, chatData, webFetchData] = await Promise.all([
       getLLMSettings(),
       getSecuritySettings(),
@@ -388,12 +409,39 @@ onMounted(async () => {
     agent.value = agentData
     chat.value = chatData
     webFetch.value = webFetchData
-    apiKeys.value = await getAPIKeys().catch(() => [])
     await loadNotify().catch(() => {})
   } catch {
     toast.error(t('settings.failedToLoad'))
   }
 })
+
+// --- Account (self-service) ---
+
+const pw = ref({ current: '', next: '', confirm: '' })
+const pwSaving = ref(false)
+
+const canChangePassword = computed(
+  () => pw.value.current.length > 0 && pw.value.next.length >= 8 && pw.value.confirm.length > 0,
+)
+
+async function handleChangePassword() {
+  if (!canChangePassword.value) return
+  if (pw.value.next !== pw.value.confirm) {
+    toast.error(t('settings.account.passwordMismatch'))
+    return
+  }
+  pwSaving.value = true
+  try {
+    await changeOwnPassword({ current_password: pw.value.current, new_password: pw.value.next })
+    pw.value = { current: '', next: '', confirm: '' }
+    toast.success(t('settings.account.passwordChanged'))
+  } catch (err) {
+    const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+    toast.error(message || t('settings.account.failedToChange'))
+  } finally {
+    pwSaving.value = false
+  }
+}
 
 async function handleVerifyLLM() {
   verifying.value = true
@@ -525,7 +573,7 @@ async function handleCreateKey() {
     createdKey.value = res.key
     apiKeys.value = await getAPIKeys()
     newKeyName.value = ''
-    newKeyPermission.value = 'standard'
+    newKeyPermission.value = 'readonly'
   } catch {
     toast.error(t('settings.saveFailed'))
   }
@@ -1215,6 +1263,7 @@ function closeCreateDialog() {
           <TableHeader>
             <TableRow>
               <TableHead>{{ $t('common.name') }}</TableHead>
+              <TableHead v-if="isAdmin">{{ $t('settings.apiKeys.owner') }}</TableHead>
               <TableHead>{{ $t('settings.apiKeys.key') }}</TableHead>
               <TableHead>{{ $t('settings.apiKeys.permission') }}</TableHead>
               <TableHead>{{ $t('common.status') }}</TableHead>
@@ -1225,6 +1274,7 @@ function closeCreateDialog() {
           <TableBody>
             <TableRow v-for="key in apiKeys" :key="key.id">
               <TableCell class="font-medium">{{ key.name }}</TableCell>
+              <TableCell v-if="isAdmin" class="text-sm">{{ key.owner_username || '—' }}</TableCell>
               <TableCell class="font-mono text-xs">{{ key.key_prefix }}...</TableCell>
               <TableCell><Badge variant="secondary">{{ key.permission }}</Badge></TableCell>
               <TableCell>
@@ -1247,12 +1297,67 @@ function closeCreateDialog() {
               </TableCell>
             </TableRow>
             <TableRow v-if="apiKeys.length === 0">
-              <TableCell :colspan="6" class="text-center py-8 text-sm" style="color: var(--muted-foreground)">
+              <TableCell :colspan="isAdmin ? 7 : 6" class="text-center py-8 text-sm" style="color: var(--muted-foreground)">
                 {{ $t('settings.apiKeys.noKeys') }}
               </TableCell>
             </TableRow>
           </TableBody>
         </Table>
+      </div>
+
+
+      <div v-if="activeTab === 'account'" class="max-w-2xl space-y-6">
+        <div>
+          <h2 class="text-base font-semibold">{{ $t('settings.account.title') }}</h2>
+          <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.account.description') }}
+          </p>
+        </div>
+
+        <div class="space-y-2 text-sm">
+          <div class="flex gap-2">
+            <span style="color: var(--muted-foreground)">{{ $t('settings.account.signedInAs') }}</span>
+            <span class="font-medium">{{ appStore.user?.username }}</span>
+          </div>
+          <div class="flex gap-2">
+            <span style="color: var(--muted-foreground)">{{ $t('settings.account.role') }}</span>
+            <Badge variant="secondary">
+              {{ isAdmin ? $t('users.roleAdmin') : $t('users.roleMember') }}
+            </Badge>
+          </div>
+        </div>
+
+        <Separator />
+
+        <template v-if="appStore.user?.auth_source === 'oidc'">
+          <p class="text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.account.ssoNoPassword') }}
+          </p>
+        </template>
+        <template v-else>
+          <div class="space-y-4">
+            <h3 class="text-sm font-semibold">{{ $t('settings.account.changePassword') }}</h3>
+            <div>
+              <label class="text-sm font-medium">{{ $t('settings.account.currentPassword') }}</label>
+              <Input v-model="pw.current" type="password" class="mt-1.5" autocomplete="current-password" />
+            </div>
+            <div>
+              <label class="text-sm font-medium">{{ $t('settings.account.newPassword') }}</label>
+              <Input v-model="pw.next" type="password" class="mt-1.5" autocomplete="new-password" />
+              <p class="mt-1 text-xs" style="color: var(--muted-foreground)">
+                {{ $t('users.passwordHint') }}
+              </p>
+            </div>
+            <div>
+              <label class="text-sm font-medium">{{ $t('settings.account.confirmPassword') }}</label>
+              <Input v-model="pw.confirm" type="password" class="mt-1.5" autocomplete="new-password" />
+            </div>
+            <Button :disabled="!canChangePassword || pwSaving" @click="handleChangePassword">
+              <Loader2 v-if="pwSaving" class="mr-2 h-4 w-4 animate-spin" />
+              {{ $t('settings.account.changePassword') }}
+            </Button>
+          </div>
+        </template>
       </div>
 
       <!-- Create API Key Dialog -->
@@ -1276,8 +1381,7 @@ function closeCreateDialog() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="readonly">{{ $t('settings.apiKeys.readonly') }}</SelectItem>
-                    <SelectItem value="standard">{{ $t('settings.apiKeys.standard') }}</SelectItem>
-                    <SelectItem value="admin">{{ $t('settings.apiKeys.admin') }}</SelectItem>
+                    <SelectItem value="writable">{{ $t('settings.apiKeys.writable') }}</SelectItem>
                   </SelectContent>
                 </Select>
                 <p class="text-xs" style="color: var(--muted-foreground)">

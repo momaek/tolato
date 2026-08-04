@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Server, FileText, Settings, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink } from 'lucide-vue-next'
+import { MessageSquare, Server, FileText, Settings, Users, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink } from 'lucide-vue-next'
 import { useTheme } from '@/composables/useTheme'
 import { setLocale, getLocale } from '@/i18n'
 import {
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { getVersionInfo, type VersionInfo } from '@/services/api'
+import { useAppStore } from '@/stores/app'
 
 const REPO_URL = 'https://github.com/momaek/tolato'
 const appVersion = __APP_VERSION__
@@ -26,11 +27,15 @@ import ConversationList from './ConversationList.vue'
 
 const route = useRoute()
 const router = useRouter()
+const appStore = useAppStore()
 
 const navItems = computed(() => [
   { label: t('sidebar.chat'), icon: MessageSquare, path: '/chat' },
   { label: t('sidebar.nodes'), icon: Server, path: '/nodes' },
   { label: t('sidebar.auditLog'), icon: FileText, path: '/audit' },
+  ...(appStore.isAdmin
+    ? [{ label: t('sidebar.users'), icon: Users, path: '/users' }]
+    : []),
   { label: t('sidebar.settings'), icon: Settings, path: '/settings' },
 ])
 

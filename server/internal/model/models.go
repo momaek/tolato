@@ -44,10 +44,55 @@ func (m *JSONMap) Scan(value any) error {
 // Database Models (GORM)
 // ============================================================================
 
+// --- Core: Users ---
+
+// Role values. Only two exist by design: every finer-grained distinction is
+// expressed with node grants rather than more global roles.
+const (
+	RoleAdmin  = "admin"
+	RoleMember = "member"
+)
+
+// User status values.
+const (
+	UserStatusActive   = "active"
+	UserStatusDisabled = "disabled"
+)
+
+// Auth source values. Local users authenticate with PasswordHash; oidc users
+// have no local password and are matched by OIDCSubject.
+const (
+	AuthSourceLocal = "local"
+	AuthSourceOIDC  = "oidc"
+)
+
+type User struct {
+	ID           string  `json:"id" gorm:"primaryKey;type:text"`
+	Username     string  `json:"username" gorm:"type:text;not null;uniqueIndex"`
+	PasswordHash string  `json:"-" gorm:"type:text"` // bcrypt; empty for OIDC users
+	DisplayName  string  `json:"display_name" gorm:"type:text"`
+	Email        string  `json:"email" gorm:"type:text"`
+	Role         string  `json:"role" gorm:"type:text;not null;default:'member'"`  // admin, member
+	Status       string  `json:"status" gorm:"type:text;not null;default:'active'"` // active, disabled
+	AuthSource   string  `json:"auth_source" gorm:"type:text;not null;default:'local'"`
+	OIDCSubject  *string `json:"-" gorm:"type:text;uniqueIndex"` // sub claim, nil for local users
+
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt   time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+// IsAdmin reports whether the user holds the global admin role.
+func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
+
 // --- Core: Conversations ---
 
 type Conversation struct {
 	ID        string    `json:"id" gorm:"primaryKey;type:text"`
+	// UserID is the owner — conversations are private, never listed across users.
+	// The empty default exists only so AutoMigrate can add the column to a table
+	// that already has rows; Bootstrap immediately adopts those into the first admin.
+	UserID    string    `json:"user_id" gorm:"type:text;not null;default:'';index"`
 	Title     string    `json:"title" gorm:"type:text;not null;default:'新对话'"`
 	Model     string    `json:"model" gorm:"type:text"` // LLM model used
 	DefaultNodeID *string `json:"default_node_id,omitempty" gorm:"type:text"`
@@ -110,7 +155,8 @@ type AuditLog struct {
 	ID          uint      `json:"id" gorm:"primaryKey;autoIncrement"`
 	NodeID      string    `json:"node_id" gorm:"type:text;not null;index"`
 	NodeName    string    `json:"node_name" gorm:"type:text"`
-	Actor       string    `json:"actor,omitempty" gorm:"type:text;index"` // JWT username for webui/terminal; empty for api/mcp (see api_key_id)
+	UserID      string    `json:"user_id,omitempty" gorm:"type:text;index"` // acting user; for api/cli it's the key owner
+	Actor       string    `json:"actor,omitempty" gorm:"type:text;index"`   // username snapshot for display; survives user deletion
 	Command     string    `json:"command" gorm:"type:text;not null"`
 	ExitCode    *int      `json:"exit_code,omitempty"`
 	Stdout      *string   `json:"stdout,omitempty" gorm:"type:text"`
@@ -132,12 +178,21 @@ type Setting struct {
 
 // --- Core: External API Keys ---
 
+// API key permission tiers. Two by design — a key is either read-only or it can
+// also run commands. Neither tier can ever modify node attributes; that lives in
+// the web UI alone.
+const (
+	APIKeyReadonly = "readonly"
+	APIKeyWritable = "writable"
+)
+
 type APIKey struct {
 	ID          string    `json:"id" gorm:"primaryKey;type:text"`
 	Name        string    `json:"name" gorm:"type:text;not null"`
+	OwnerUserID string    `json:"owner_user_id" gorm:"type:text;not null;default:'';index"` // key acts as this user; caps its reach
 	KeyHash     string    `json:"-" gorm:"type:text;not null;uniqueIndex"` // hashed key, never expose
 	KeyPrefix   string    `json:"key_prefix" gorm:"type:text"`            // first 8 chars for display
-	Permission  string    `json:"permission" gorm:"type:text;not null"`   // readonly, standard, admin
+	Permission  string    `json:"permission" gorm:"type:text;not null"`   // readonly, writable
 	Status      string    `json:"status" gorm:"type:text;not null;default:'active'"` // active, revoked
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/store"
 	"gorm.io/gorm"
@@ -23,6 +24,29 @@ const (
 	previewMaxLines = 80
 	previewMaxBytes = 12000
 )
+
+// ownsConversation guards the sub-resource routes, whose store lookups key on
+// the conversation ID alone. It writes the 404 itself and reports whether the
+// caller may continue — a conversation owned by somebody else is indistinguishable
+// from one that doesn't exist.
+func ownsConversation(c *gin.Context, convID string) bool {
+	ok, err := store.ConversationBelongsTo(middleware.CurrentUserID(c), convID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+			Error:   "internal_error",
+			Message: "failed to verify conversation",
+		})
+		return false
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, model.ErrorResponse{
+			Error:   "not_found",
+			Message: "conversation not found",
+		})
+		return false
+	}
+	return true
+}
 
 // CreateConversation handles POST /api/conversations.
 func CreateConversation(deps *Deps) gin.HandlerFunc {
@@ -38,6 +62,7 @@ func CreateConversation(deps *Deps) gin.HandlerFunc {
 
 		conv := &model.Conversation{
 			ID:            uuid.New().String(),
+			UserID:        middleware.CurrentUserID(c),
 			Title:         req.Title,
 			Model:         req.Model,
 			DefaultNodeID: req.DefaultNodeID,
@@ -72,7 +97,7 @@ func ListConversations(deps *Deps) gin.HandlerFunc {
 			q.PageSize = 20
 		}
 
-		convs, total, err := store.ListConversations(q.Page, q.PageSize)
+		convs, total, err := store.ListConversations(middleware.CurrentUserID(c), q.Page, q.PageSize)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error:   "internal_error",
@@ -112,7 +137,7 @@ func GetConversation(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 
-		conv, err := store.GetConversationByID(id)
+		conv, err := store.GetConversationByID(middleware.CurrentUserID(c), id)
 		if err != nil {
 			c.JSON(http.StatusNotFound, model.ErrorResponse{
 				Error:   "not_found",
@@ -170,7 +195,8 @@ func UpdateConversation(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
-		if err := store.UpdateConversation(id, updates); err != nil {
+		userID := middleware.CurrentUserID(c)
+		if err := store.UpdateConversation(userID, id, updates); err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error:   "internal_error",
 				Message: "failed to update conversation",
@@ -178,7 +204,14 @@ func UpdateConversation(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
-		conv, _ := store.GetConversationByID(id)
+		conv, err := store.GetConversationByID(userID, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, model.ErrorResponse{
+				Error:   "not_found",
+				Message: "conversation not found",
+			})
+			return
+		}
 		c.JSON(http.StatusOK, conv)
 	}
 }
@@ -188,7 +221,7 @@ func DeleteConversation(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 
-		if err := store.DeleteConversation(id); err != nil {
+		if err := store.DeleteConversation(middleware.CurrentUserID(c), id); err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error:   "internal_error",
 				Message: "failed to delete conversation",
@@ -207,6 +240,10 @@ func DeleteMessage(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		convID := c.Param("id")
 		msgID := c.Param("messageId")
+
+		if !ownsConversation(c, convID) {
+			return
+		}
 
 		if err := store.DeleteMessage(convID, msgID); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -234,6 +271,10 @@ func GetToolCallOutput(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		convID := c.Param("id")
 		toolCallID := c.Param("toolCallId")
+
+		if !ownsConversation(c, convID) {
+			return
+		}
 
 		m, err := store.GetToolResultByCallID(convID, toolCallID)
 		if err != nil {

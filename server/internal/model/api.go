@@ -37,6 +37,45 @@ type LoginRequest struct {
 type LoginResponse struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
+	User      UserItem  `json:"user"`
+}
+
+// PUT /api/auth/password — self-service change, proves the current password.
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+}
+
+// --- Users (admin-managed) ---
+
+type UserItem struct {
+	ID          string     `json:"id"`
+	Username    string     `json:"username"`
+	DisplayName string     `json:"display_name"`
+	Email       string     `json:"email,omitempty"`
+	Role        string     `json:"role"`        // admin, member
+	Status      string     `json:"status"`      // active, disabled
+	AuthSource  string     `json:"auth_source"` // local, oidc
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// POST /api/users
+type CreateUserRequest struct {
+	Username    string `json:"username" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Role        string `json:"role"` // defaults to member
+}
+
+// PUT /api/users/:id — every field optional; omitted fields are left alone.
+type UpdateUserRequest struct {
+	DisplayName *string `json:"display_name,omitempty"`
+	Email       *string `json:"email,omitempty"`
+	Role        *string `json:"role,omitempty"`
+	Status      *string `json:"status,omitempty"`
+	Password    *string `json:"password,omitempty"` // admin reset; no current-password check
 }
 
 // --- Conversations ---
@@ -331,12 +370,13 @@ type AuditLogItem struct {
 	ID         uint      `json:"id"`
 	NodeID     string    `json:"node_id"`
 	NodeName   string    `json:"node_name"`
+	Actor      string    `json:"actor,omitempty"` // username that ran it
 	Command    string    `json:"command"`
 	ExitCode   *int      `json:"exit_code,omitempty"`
 	Stdout     *string   `json:"stdout,omitempty"`
 	Stderr     *string   `json:"stderr,omitempty"`
 	DurationMS *int64    `json:"duration_ms,omitempty"`
 	Confirmed  bool      `json:"confirmed"`
-	Source     string    `json:"source"` // webui, api, mcp
+	Source     string    `json:"source"` // webui, terminal, api, cli
 	CreatedAt  time.Time `json:"created_at"`
 }
