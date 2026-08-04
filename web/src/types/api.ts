@@ -53,6 +53,31 @@ export interface UserItem {
   created_at: string
 }
 
+export interface OIDCSettings {
+  enabled: boolean
+  issuer: string
+  client_id: string
+  client_secret: string // masked on GET; leave the mask to keep the stored value
+  scopes?: string[]
+  admin_emails?: string[]
+  allow_signup: boolean
+}
+
+export interface OIDCSettingsResponse extends OIDCSettings {
+  redirect_url: string // read-only; register this with the identity provider
+}
+
+export interface VerifyOIDCResponse {
+  success: boolean
+  issuer?: string
+  authorization_endpoint?: string
+  error?: string
+}
+
+export interface OIDCStatusResponse {
+  enabled: boolean
+}
+
 export interface CreateUserRequest {
   username: string
   password: string

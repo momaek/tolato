@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/momaek/tolato/server/internal/auth"
 	"github.com/momaek/tolato/server/internal/config"
 	"github.com/momaek/tolato/server/internal/geoip"
 	"github.com/momaek/tolato/server/internal/mcp"
@@ -30,6 +31,7 @@ type Deps struct {
 	Settings    *settings.Cache
 	GeoIP       *geoip.Service     // may be nil when geoip is disabled
 	Notifier    *notify.Dispatcher // node offline/online notifications
+	OIDC        *auth.OIDCManager  // caches the discovered SSO provider
 	Version     string             // server build version (e.g. "v0.8.10"), "dev" in local builds
 }
 
@@ -86,8 +88,12 @@ func SetupRouter(deps *Deps) *gin.Engine {
 
 	api := r.Group("/api")
 
-	// Auth (no JWT required)
+	// Auth (no JWT required). The SSO endpoints are necessarily public: they
+	// are what a not-yet-signed-in browser walks through.
 	api.POST("/auth/login", LoginHandler(deps))
+	api.GET("/auth/oidc/status", OIDCStatus(deps))
+	api.GET("/auth/oidc/login", OIDCLogin(deps))
+	api.GET("/auth/oidc/callback", OIDCCallback(deps))
 
 	// JWT-protected routes
 	protected := api.Group("")
@@ -141,6 +147,9 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	admin.PUT("/settings/notify", PutNotifySettings(deps))
 	admin.GET("/settings/notify/presets", GetNotifyPresets(deps))
 	admin.POST("/settings/notify/test", TestNotifyChannel(deps))
+	admin.GET("/settings/oidc", GetOIDCSettings(deps))
+	admin.PUT("/settings/oidc", PutOIDCSettings(deps))
+	admin.POST("/settings/oidc/verify", VerifyOIDCSettings(deps))
 
 	// Audit Logs
 	protected.GET("/audit-logs", ListAuditLogs(deps))

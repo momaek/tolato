@@ -46,6 +46,52 @@ type ChangePasswordRequest struct {
 	NewPassword     string `json:"new_password" binding:"required"`
 }
 
+// --- OIDC / single sign-on ---
+//
+// Stored as one JSON blob under the setting key "oidc.config" and edited from
+// the admin UI, so enabling SSO needs no config-file change or restart.
+//
+// ClientSecret is masked on GET (e.g. "abcd****wxyz"). On PUT, a value still
+// containing the "****" sentinel means "unchanged" and the stored secret is
+// kept — same pattern as the LLM and web-fetch API keys.
+type OIDCSettings struct {
+	Enabled bool `json:"enabled"`
+	// Issuer is the IdP base URL; its /.well-known/openid-configuration is
+	// fetched for endpoint discovery.
+	Issuer       string `json:"issuer"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"` // masked on GET
+	// Scopes requested at authorization. "openid" is always added.
+	Scopes []string `json:"scopes,omitempty"`
+	// AdminEmails lists verified email addresses provisioned as admins on first
+	// sign-in. Everyone else becomes a member.
+	AdminEmails []string `json:"admin_emails,omitempty"`
+	// AllowSignup gates whether an unrecognized subject may create an account.
+	// Off means only users who already exist locally can sign in via SSO.
+	AllowSignup bool `json:"allow_signup"`
+}
+
+// GET /api/settings/oidc — adds the read-only callback URL for the admin to
+// register with the IdP.
+type OIDCSettingsResponse struct {
+	OIDCSettings
+	RedirectURL string `json:"redirect_url"`
+}
+
+// POST /api/settings/oidc/verify
+type VerifyOIDCResponse struct {
+	Success               bool   `json:"success"`
+	Issuer                string `json:"issuer,omitempty"`
+	AuthorizationEndpoint string `json:"authorization_endpoint,omitempty"`
+	Error                 string `json:"error,omitempty"`
+}
+
+// GET /api/auth/oidc/status — unauthenticated; drives the login page's SSO
+// button. Deliberately exposes nothing but whether SSO is on.
+type OIDCStatusResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
 // --- Users (admin-managed) ---
 
 type UserItem struct {

@@ -28,6 +28,16 @@ func GetUserByUsername(username string) (*model.User, error) {
 	return &u, nil
 }
 
+// GetUserByEmail returns a user by email address, matched case-insensitively
+// because IdPs are inconsistent about the casing they send.
+func GetUserByEmail(email string) (*model.User, error) {
+	var u model.User
+	if err := DB.Where("lower(email) = lower(?) AND email <> ''", email).First(&u).Error; err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 // GetUserByOIDCSubject returns a user by their IdP subject claim.
 func GetUserByOIDCSubject(sub string) (*model.User, error) {
 	var u model.User

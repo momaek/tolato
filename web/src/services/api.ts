@@ -33,6 +33,10 @@ import type {
   APIKeyListItem,
   CreateAPIKeyRequest,
   CreateAPIKeyResponse,
+  OIDCSettings,
+  OIDCSettingsResponse,
+  OIDCStatusResponse,
+  VerifyOIDCResponse,
 } from '@/types/api'
 import router from '@/router'
 
@@ -79,6 +83,28 @@ export async function getCurrentUser(): Promise<UserItem> {
 
 export async function changeOwnPassword(data: ChangePasswordRequest): Promise<void> {
   await api.put('/auth/password', data)
+}
+
+// --- Single sign-on ---
+
+/** Unauthenticated: drives the SSO button on the login page. */
+export async function getOIDCStatus(): Promise<OIDCStatusResponse> {
+  const res = await api.get<OIDCStatusResponse>('/auth/oidc/status')
+  return res.data
+}
+
+export async function getOIDCSettings(): Promise<OIDCSettingsResponse> {
+  const res = await api.get<OIDCSettingsResponse>('/settings/oidc')
+  return res.data
+}
+
+export async function updateOIDCSettings(data: OIDCSettings): Promise<void> {
+  await api.put('/settings/oidc', data)
+}
+
+export async function verifyOIDC(data: OIDCSettings): Promise<VerifyOIDCResponse> {
+  const res = await api.post<VerifyOIDCResponse>('/settings/oidc/verify', data)
+  return res.data
 }
 
 // --- User management (admin only) ---

@@ -43,6 +43,15 @@ export const useAppStore = defineStore('app', () => {
     setUser(res.user)
   }
 
+  // Adopts a token minted by the single sign-on callback, then fetches the
+  // identity behind it. Unlike login() there are no credentials to post — the
+  // server already authenticated the user against the identity provider.
+  async function adoptToken(newToken: string) {
+    token.value = newToken
+    localStorage.setItem('token', newToken)
+    setUser(await getCurrentUser())
+  }
+
   // Refreshes the cached identity from the server. Called on app start so a
   // role change made while the user was away takes effect on the next load.
   async function refreshUser() {
@@ -69,6 +78,7 @@ export const useAppStore = defineStore('app', () => {
     isAdmin,
     login,
     logout,
+    adoptToken,
     refreshUser,
   }
 })

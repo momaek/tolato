@@ -66,6 +66,7 @@ func main() {
 		Settings:    settingsCache,
 		GeoIP:       geoSvc,
 		Notifier:    notifier,
+		OIDC:        auth.NewOIDCManager(),
 		Version:     version,
 	}
 

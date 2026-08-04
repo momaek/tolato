@@ -75,7 +75,9 @@ type User struct {
 	Role         string  `json:"role" gorm:"type:text;not null;default:'member'"`  // admin, member
 	Status       string  `json:"status" gorm:"type:text;not null;default:'active'"` // active, disabled
 	AuthSource   string  `json:"auth_source" gorm:"type:text;not null;default:'local'"`
-	OIDCSubject  *string `json:"-" gorm:"type:text;uniqueIndex"` // sub claim, nil for local users
+	// OIDCSubject is the IdP's `sub` claim. The column name is pinned because
+	// GORM's default naming would split the initialism into "o_id_c_subject".
+	OIDCSubject *string `json:"-" gorm:"column:oidc_subject;type:text;uniqueIndex"`
 
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`

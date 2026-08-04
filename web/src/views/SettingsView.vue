@@ -51,6 +51,9 @@ import {
   createAPIKey,
   deleteAPIKey,
   changeOwnPassword,
+  getOIDCSettings,
+  updateOIDCSettings,
+  verifyOIDC,
 } from '@/services/api'
 import { useAppStore } from '@/stores/app'
 import type {
@@ -66,6 +69,8 @@ import type {
   NotifyPreset,
   NotifyChannel,
   NotifyTokenSource,
+  OIDCSettings,
+  VerifyOIDCResponse,
 } from '@/types/api'
 
 const { t } = useI18n()
@@ -85,6 +90,7 @@ const tabs = computed(() => [
         { id: 'chat', label: t('settings.tabs.chat') },
         { id: 'web_fetch', label: t('settings.tabs.webFetch') },
         { id: 'notify', label: t('settings.tabs.notify') },
+        { id: 'oidc', label: t('settings.tabs.oidc') },
       ]
     : []),
   { id: 'api_keys', label: t('settings.tabs.apiKeys') },
@@ -410,10 +416,90 @@ onMounted(async () => {
     chat.value = chatData
     webFetch.value = webFetchData
     await loadNotify().catch(() => {})
+    await loadOIDC().catch(() => {})
   } catch {
     toast.error(t('settings.failedToLoad'))
   }
 })
+
+// --- Single sign-on (OIDC) ---
+
+const oidc = ref<OIDCSettings>({
+  enabled: false,
+  issuer: '',
+  client_id: '',
+  client_secret: '',
+  scopes: [],
+  admin_emails: [],
+  allow_signup: true,
+})
+const oidcRedirectURL = ref('')
+const oidcAdminEmailsInput = ref('')
+const oidcScopesInput = ref('')
+const oidcVerifyResult = ref<VerifyOIDCResponse | null>(null)
+const oidcVerifying = ref(false)
+const oidcSaving = ref(false)
+const oidcRedirectCopied = ref(false)
+
+async function loadOIDC() {
+  const data = await getOIDCSettings()
+  oidcRedirectURL.value = data.redirect_url
+  oidc.value = {
+    enabled: data.enabled,
+    issuer: data.issuer,
+    client_id: data.client_id,
+    client_secret: data.client_secret,
+    scopes: data.scopes ?? [],
+    admin_emails: data.admin_emails ?? [],
+    allow_signup: data.allow_signup,
+  }
+  oidcAdminEmailsInput.value = (data.admin_emails ?? []).join(', ')
+  oidcScopesInput.value = (data.scopes ?? []).join(' ')
+}
+
+/** Splits a comma/whitespace separated field into a clean list. */
+function splitList(raw: string, separator: RegExp): string[] {
+  return raw.split(separator).map((v) => v.trim()).filter(Boolean)
+}
+
+function oidcPayload(): OIDCSettings {
+  return {
+    ...oidc.value,
+    admin_emails: splitList(oidcAdminEmailsInput.value, /[,\s]+/),
+    scopes: splitList(oidcScopesInput.value, /[,\s]+/),
+  }
+}
+
+async function handleVerifyOIDC() {
+  oidcVerifying.value = true
+  oidcVerifyResult.value = null
+  try {
+    oidcVerifyResult.value = await verifyOIDC(oidcPayload())
+  } catch {
+    oidcVerifyResult.value = { success: false, error: t('settings.oidc.verifyFailed') }
+  } finally {
+    oidcVerifying.value = false
+  }
+}
+
+async function saveOIDC() {
+  oidcSaving.value = true
+  try {
+    await updateOIDCSettings(oidcPayload())
+    await loadOIDC() // re-mask the secret
+  } catch (err) {
+    const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+    toast.error(message || t('settings.saveFailed'))
+  } finally {
+    oidcSaving.value = false
+  }
+}
+
+async function copyRedirectURL() {
+  await navigator.clipboard.writeText(oidcRedirectURL.value)
+  oidcRedirectCopied.value = true
+  setTimeout(() => (oidcRedirectCopied.value = false), 1500)
+}
 
 // --- Account (self-service) ---
 
@@ -1243,6 +1329,139 @@ function closeCreateDialog() {
       </div>
 
       <!-- API Keys -->
+
+      <!-- Single sign-on -->
+      <div v-if="activeTab === 'oidc'" class="max-w-2xl space-y-6">
+        <div>
+          <h2 class="text-base font-semibold">{{ $t('settings.oidc.title') }}</h2>
+          <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.description') }}
+          </p>
+        </div>
+
+        <div class="flex items-center justify-between rounded-lg border p-3" style="border-color: var(--border)">
+          <div>
+            <p class="text-sm font-medium">{{ $t('settings.oidc.enable') }}</p>
+            <p class="text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.oidc.enableHelp') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+            :style="{ backgroundColor: oidc.enabled ? 'var(--primary)' : 'var(--secondary)' }"
+            @click="oidc.enabled = !oidc.enabled"
+          >
+            <span
+              class="absolute top-0.5 block h-5 w-5 rounded-full bg-white transition-transform"
+              :class="oidc.enabled ? 'translate-x-5' : 'translate-x-0.5'"
+            />
+          </button>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium">{{ $t('settings.oidc.redirectUrl') }}</label>
+          <div class="flex gap-2">
+            <Input :model-value="oidcRedirectURL" readonly class="font-mono text-xs" />
+            <Button variant="outline" size="icon" @click="copyRedirectURL">
+              <Check v-if="oidcRedirectCopied" class="h-4 w-4" />
+              <Copy v-else class="h-4 w-4" />
+            </Button>
+          </div>
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.redirectUrlHelp') }}
+          </p>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium">{{ $t('settings.oidc.issuer') }}</label>
+          <Input v-model="oidc.issuer" placeholder="https://accounts.example.com" />
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.issuerHelp') }}
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-1.5">
+            <label class="text-sm font-medium">{{ $t('settings.oidc.clientId') }}</label>
+            <Input v-model="oidc.client_id" autocomplete="off" />
+          </div>
+          <div class="space-y-1.5">
+            <label class="text-sm font-medium">{{ $t('settings.oidc.clientSecret') }}</label>
+            <Input v-model="oidc.client_secret" type="password" autocomplete="new-password" />
+          </div>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium">{{ $t('settings.oidc.scopes') }}</label>
+          <Input v-model="oidcScopesInput" placeholder="openid profile email" />
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.scopesHelp') }}
+          </p>
+        </div>
+
+        <Separator />
+
+        <div class="flex items-center justify-between rounded-lg border p-3" style="border-color: var(--border)">
+          <div>
+            <p class="text-sm font-medium">{{ $t('settings.oidc.allowSignup') }}</p>
+            <p class="text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.oidc.allowSignupHelp') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+            :style="{ backgroundColor: oidc.allow_signup ? 'var(--primary)' : 'var(--secondary)' }"
+            @click="oidc.allow_signup = !oidc.allow_signup"
+          >
+            <span
+              class="absolute top-0.5 block h-5 w-5 rounded-full bg-white transition-transform"
+              :class="oidc.allow_signup ? 'translate-x-5' : 'translate-x-0.5'"
+            />
+          </button>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium">{{ $t('settings.oidc.adminEmails') }}</label>
+          <Input v-model="oidcAdminEmailsInput" placeholder="boss@example.com, ops@example.com" />
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.adminEmailsHelp') }}
+          </p>
+        </div>
+
+        <div
+          v-if="oidcVerifyResult"
+          class="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm"
+          :style="{
+            backgroundColor: oidcVerifyResult.success ? 'var(--color-success)' : 'var(--color-error)',
+            color: oidcVerifyResult.success ? 'var(--color-success-foreground)' : 'var(--color-error-foreground)',
+            borderColor: 'transparent',
+          }"
+        >
+          <CheckCircle v-if="oidcVerifyResult.success" class="mt-0.5 h-4 w-4 shrink-0" />
+          <AlertCircle v-else class="mt-0.5 h-4 w-4 shrink-0" />
+          <div class="min-w-0">
+            <p v-if="oidcVerifyResult.success">{{ $t('settings.oidc.verifyOk') }}</p>
+            <p v-else class="break-words">{{ oidcVerifyResult.error }}</p>
+            <p v-if="oidcVerifyResult.authorization_endpoint" class="mt-1 break-all font-mono text-xs opacity-80">
+              {{ oidcVerifyResult.authorization_endpoint }}
+            </p>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <Button variant="outline" :disabled="oidcVerifying || !oidc.issuer" @click="handleVerifyOIDC">
+            <Loader2 v-if="oidcVerifying" class="mr-2 h-4 w-4 animate-spin" />
+            {{ $t('common.verify') }}
+          </Button>
+          <Button :disabled="oidcSaving" @click="saveOIDC">
+            <Loader2 v-if="oidcSaving" class="mr-2 h-4 w-4 animate-spin" />
+            {{ oidcSaving ? $t('common.saving') : $t('common.save') }}
+          </Button>
+        </div>
+      </div>
+
       <div v-if="activeTab === 'api_keys'" class="max-w-3xl space-y-6">
         <div class="flex items-center justify-between">
           <div>

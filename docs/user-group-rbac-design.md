@@ -192,8 +192,9 @@ JWT Claims 从 `{username}` 扩展为 `{user_id, username, role}`。`JWTAuth()` 
 - 单 Provider。协议用标准 Authorization Code Flow，discovery 走 issuer 的 `/.well-known/openid-configuration`，库用 `coreos/go-oidc`。
 - 端点：`GET /api/auth/oidc/login`（302 到 IdP）+ `GET /api/auth/oidc/callback`（换 token、验签、发本站 JWT）。前端登录页在 OIDC 启用时显示「SSO 登录」按钮。
 - **用户匹配与自动建号**：`users` 表加 `auth_source`（`local` | `oidc`）和 `oidc_subject`（唯一索引）。按 `sub` 匹配；首登自动建号，默认角色 `member`。可配 `admin_emails` 白名单：命中者建号即 admin。
-- **组映射（可选，与本设计的用户组直接打通）**：配置 `group_claim`（如 `groups`）+ 映射表 `{IdP组名: Tolato用户组}`。每次登录时按 claim **同步**该用户的映射组成员身份（加入命中的、移出未命中的映射组；手工加入的非映射组不受影响）。IdP 里调整用户的组，下次登录 Tolato 权限自动跟上。
-- OIDC 用户不可改密码（无本地密码）；被 IdP 停用的用户在 JWT 过期（24h）后自然失效，admin 也可手工 disable 立即生效。
+- **账号采纳**：首登时若存在同「已验证邮箱」的本地账号，直接接管该账号（保留其 ID、对话、API Key），并清空本地密码——已有管理员切到 SSO 不会变成一个空的新账号。未验证的邮箱不作为归属证据。
+- **组映射：暂不实现**。它依赖尚未落地的用户组（P2），且简单接入已能满足需求。将来做 P2 时再补 `group_claim` + 映射表。
+- OIDC 用户不可改密码（无本地密码），管理员也不能给其设置密码；被 IdP 停用的用户由 admin 手工 disable 即时生效（JWTAuth 每请求重读状态）。
 
 ### 5.2 节点分组
 
@@ -261,11 +262,11 @@ JWT Claims 从 `{username}` 扩展为 `{user_id, username, role}`。`JWTAuth()` 
 
 | 期 | 内容 | 量级 |
 |----|------|------|
-| **P1 账号体系** | users 表、bcrypt 登录、JWT 带 user_id/role、引导迁移、用户管理 API+页面、对话归属、审计带 user_id | ~3–4 天 |
+| **P1 账号体系** ✅ | users 表、bcrypt 登录、JWT 带 user_id/role、引导迁移、用户管理 API+页面、对话归属、审计带 user_id、API Key 两档+绑 owner | 已完成 |
 | **P2 分组与授权** | 六张新表、authz 包、REST 层强制点 1–3、6、8、注册 token 绑组、管理 API+页面 | ~4–5 天 |
 | **P3 执行面收口** | 终端 WS（点4）、chat 上下文预过滤 + 按角色裁剪工具集（点5）、API Key 两档制 + 绑 owner（点7） | ~3 天 |
 | **P3.5 CLI + Skill** | `tolato` CLI、下线 `/mcp` 与 `internal/mcp`、`skills/tolato/SKILL.md`、v1 审计补 user_id/source | ~2 天 |
-| **P3.6 OIDC** | go-oidc 接入、Settings 页配置 + verify + 热生效、auth_source/oidc_subject、自动建号、组映射同步 | ~2–3 天 |
+| **P3.6 OIDC** ✅ | go-oidc 接入、Settings 页配置 + verify + 热生效、auth_source/oidc_subject、自动建号、账号采纳（组映射留给 P2） | 已完成 |
 | **P4 打磨** | `my_level` 字段与按钮显隐、审计过滤细化、文档 | ~1–2 天 |
 
 P1 独立可发布（等价于评估文档的方案 B）；P2/P3 必须一起发（只发 P2 会出现「列表看不见但终端连得上」的假隔离）。总量约 2–2.5 周，与当年评估的方案 C 估算一致，但砍掉了 Settings 拆分和租户隔离两块最重的部分。
