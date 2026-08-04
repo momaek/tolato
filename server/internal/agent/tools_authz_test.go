@@ -42,11 +42,3 @@ func TestToolDefsForTrimsMutatingToolsFromMembers(t *testing.T) {
 			len(adminTools), len(memberTools))
 	}
 }
-
-// ToolDefs is the legacy entry point and must keep returning everything, so
-// nothing silently loses a capability.
-func TestToolDefsReturnsFullSet(t *testing.T) {
-	if len(ToolDefs()) != len(ToolDefsFor(true)) {
-		t.Error("ToolDefs and ToolDefsFor(true) disagree on the full tool set")
-	}
-}

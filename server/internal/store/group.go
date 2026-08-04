@@ -198,7 +198,3 @@ func GroupIDsByNode() (map[string][]string, error) {
 	return out, nil
 }
 
-// RemoveNodeFromAllGroups clears a deleted node's memberships.
-func RemoveNodeFromAllGroups(nodeID string) error {
-	return DB.Where("node_id = ?", nodeID).Delete(&model.NodeGroupMember{}).Error
-}

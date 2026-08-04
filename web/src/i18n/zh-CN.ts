@@ -106,6 +106,9 @@ export default {
   },
 
   nodes: {
+    enrolIntoGroup: '加入节点组',
+    noGroup: '不加入分组',
+    enrolIntoGroupHelp: '用这条命令安装的机器会自动加入该组，直接继承组上已有的授权。',
     title: '节点',
     searchPlaceholder: '搜索节点...',
     addNode: '添加节点',
@@ -174,6 +177,7 @@ export default {
   },
 
   nodeDetail: {
+    nodeGroup: '节点组',
     hostname: '主机名',
     ip: 'IP',
     os: '操作系统',

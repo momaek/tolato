@@ -158,6 +158,14 @@ const expiresInfo = computed(() => {
           {{ $t('nodeDetail.expiresInDays', { days: expiresInfo.days }) }}
         </template>
       </Badge>
+      <Badge
+        v-for="g in node?.groups ?? []"
+        :key="g"
+        variant="outline"
+        :title="$t('nodeDetail.nodeGroup')"
+      >
+        {{ g }}
+      </Badge>
       <div class="flex-1" />
       <Button
         v-if="node && canManage"

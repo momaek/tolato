@@ -64,12 +64,6 @@ func (te *ToolExecutor) requireLevel(nodeID, want string) *model.ToolResultItem 
 	return nil
 }
 
-// ToolDefs returns the full tool set. Prefer ToolDefsFor, which trims the tools
-// the caller isn't allowed to use.
-func ToolDefs() []llm.ToolDefinition {
-	return ToolDefsFor(true)
-}
-
 // ToolDefsFor returns the tool definitions offered to a conversation.
 //
 // Node-mutating tools (edit_node_info, update_agent) are omitted entirely for

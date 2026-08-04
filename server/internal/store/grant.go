@@ -42,12 +42,6 @@ func DeleteGrantsForSubject(tx *gorm.DB, subjectType, subjectID string) error {
 		Delete(&model.Grant{}).Error
 }
 
-// DeleteGrantsForObject drops every grant naming a node or node group.
-func DeleteGrantsForObject(objectType, objectID string) error {
-	return DB.Where("object_type = ? AND object_id = ?", objectType, objectID).
-		Delete(&model.Grant{}).Error
-}
-
 // GrantsForSubjects returns every grant held by the given user and their
 // groups. One query, so evaluating a request's permissions is a single round
 // trip rather than one per object.

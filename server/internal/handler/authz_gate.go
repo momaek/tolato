@@ -1,12 +1,9 @@
 package handler
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/momaek/tolato/server/internal/authz"
 	"github.com/momaek/tolato/server/internal/middleware"
-	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/store"
 )
 
@@ -42,30 +39,4 @@ func requireNodeLevel(c *gin.Context, nodeID, want string) bool {
 		return false
 	}
 	return true
-}
-
-// visibleNodeFilter returns a predicate for "may this caller see this node",
-// resolved once per request rather than per row.
-func visibleNodeFilter(c *gin.Context) (func(nodeID string) bool, error) {
-	ids, unrestricted, err := authz.VisibleNodeIDs(subjectOf(c))
-	if err != nil {
-		return nil, err
-	}
-	if unrestricted {
-		return func(string) bool { return true }, nil
-	}
-	set := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		set[id] = struct{}{}
-	}
-	return func(nodeID string) bool {
-		_, ok := set[nodeID]
-		return ok
-	}, nil
-}
-
-// forbidden writes a 403. Used where the resource itself isn't secret and only
-// the action is refused — group and settings administration, not nodes.
-func forbidden(c *gin.Context, msg string) {
-	c.JSON(http.StatusForbidden, model.ErrorResponse{Error: "forbidden", Message: msg})
 }

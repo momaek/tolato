@@ -106,6 +106,9 @@ export default {
   },
 
   nodes: {
+    enrolIntoGroup: 'Enrol into node group',
+    noGroup: 'No group',
+    enrolIntoGroupHelp: 'Machines installed with this command join the group, inheriting the grants already on it.',
     title: 'Nodes',
     searchPlaceholder: 'Search nodes...',
     addNode: 'Add Node',
@@ -174,6 +177,7 @@ export default {
   },
 
   nodeDetail: {
+    nodeGroup: 'Node group',
     hostname: 'Hostname',
     ip: 'IP',
     os: 'OS',

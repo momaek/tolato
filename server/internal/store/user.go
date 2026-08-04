@@ -59,11 +59,6 @@ func UpdateUser(id string, updates map[string]any) error {
 	return DB.Model(&model.User{}).Where("id = ?", id).Updates(updates).Error
 }
 
-// DeleteUser removes a user row.
-func DeleteUser(id string) error {
-	return DB.Where("id = ?", id).Delete(&model.User{}).Error
-}
-
 // DeleteUserCascade removes a user together with the resources that only make
 // sense while the account exists: their private conversations (and, by FK
 // cascade, the messages inside them) and the API keys that acted as them.
