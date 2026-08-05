@@ -126,6 +126,10 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	admin.PUT("/users/:id", UpdateUser(deps))
 	admin.DELETE("/users/:id", DeleteUser(deps))
 
+	// The grant list resolved into effective access, from either direction.
+	admin.GET("/users/:id/access", UserAccess(deps))
+	admin.GET("/nodes/:id/access", NodeAccess(deps))
+
 	// Conversations
 	protected.POST("/conversations", CreateConversation(deps))
 	protected.GET("/conversations", ListConversations(deps))

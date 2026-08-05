@@ -177,6 +177,9 @@ export default {
   },
 
   nodeDetail: {
+    whoCanAccess: 'Who can access',
+    accessNone: 'Nobody can reach this node yet.',
+    viaAdminRole: 'admin role',
     nodeGroup: 'Node group',
     hostname: 'Hostname',
     ip: 'IP',
@@ -386,6 +389,11 @@ export default {
   },
 
   users: {
+    viewAccess: 'View access',
+    accessFor: 'Access for {name}',
+    accessViaAdminRole: 'Administrators reach every node by role, without needing grants.',
+    accessNone: 'This user has no access to any node yet.',
+    failedToLoadAccess: 'Failed to load access.',
     title: 'Users',
     description: 'Accounts that can sign in to this instance.',
     addUser: 'Add User',

@@ -118,6 +118,24 @@ export interface CreateGrantRequest {
   level: NodeLevel
 }
 
+export interface NodeAccessItem {
+  node_id: string
+  node_name: string
+  level: NodeLevel
+}
+
+export interface UserAccessResponse {
+  via_admin_role: boolean
+  items: NodeAccessItem[]
+}
+
+export interface UserAccessItem {
+  user_id: string
+  username: string
+  level: NodeLevel
+  via_admin_role: boolean
+}
+
 export interface CreateUserRequest {
   username: string
   password: string

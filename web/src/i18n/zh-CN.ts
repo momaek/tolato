@@ -177,6 +177,9 @@ export default {
   },
 
   nodeDetail: {
+    whoCanAccess: '谁能访问',
+    accessNone: '目前没有人能访问这台机器。',
+    viaAdminRole: '管理员角色',
     nodeGroup: '节点组',
     hostname: '主机名',
     ip: 'IP',
@@ -386,6 +389,11 @@ export default {
   },
 
   users: {
+    viewAccess: '查看可访问范围',
+    accessFor: '{name} 可访问的机器',
+    accessViaAdminRole: '管理员凭角色即可访问全部节点，无需授权。',
+    accessNone: '该用户目前无法访问任何机器。',
+    failedToLoadAccess: '加载可访问范围失败。',
     title: '用户',
     description: '可以登录本实例的账号。',
     addUser: '新建用户',

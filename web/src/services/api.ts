@@ -41,6 +41,8 @@ import type {
   GroupRequest,
   GrantItem,
   CreateGrantRequest,
+  UserAccessResponse,
+  UserAccessItem,
 } from '@/types/api'
 import router from '@/router'
 
@@ -160,6 +162,18 @@ export async function createGrant(data: CreateGrantRequest): Promise<void> {
 
 export async function deleteGrant(id: string): Promise<void> {
   await api.delete(`/grants/${id}`)
+}
+
+/** What one user can reach, with grants resolved. Admin only. */
+export async function getUserAccess(id: string): Promise<UserAccessResponse> {
+  const res = await api.get<UserAccessResponse>(`/users/${id}/access`)
+  return res.data
+}
+
+/** Who can reach one node, with grants resolved. Admin only. */
+export async function getNodeAccess(id: string): Promise<UserAccessItem[]> {
+  const res = await api.get<{ items: UserAccessItem[] }>(`/nodes/${id}/access`)
+  return res.data.items ?? []
 }
 
 // --- User management (admin only) ---

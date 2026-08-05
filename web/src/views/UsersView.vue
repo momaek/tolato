@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { UserPlus, Trash2, KeyRound, Loader2 } from 'lucide-vue-next'
+import { UserPlus, Trash2, KeyRound, Loader2, ServerCog } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -29,9 +29,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getUsers, createUser, updateUser, deleteUser } from '@/services/api'
+import { getUsers, createUser, updateUser, deleteUser, getUserAccess } from '@/services/api'
 import { useAppStore } from '@/stores/app'
-import type { UserItem, UserRole } from '@/types/api'
+import type { UserItem, UserRole, NodeAccessItem } from '@/types/api'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -142,6 +142,31 @@ async function handleReset() {
   }
 }
 
+// --- Effective access ("what can this person reach?") ---
+//
+// The grant list says what rules exist; this answers what they add up to for
+// one person, which is the question when onboarding or offboarding someone.
+
+const accessTarget = ref<UserItem | null>(null)
+const accessLoading = ref(false)
+const accessViaAdminRole = ref(false)
+const accessItems = ref<NodeAccessItem[]>([])
+
+async function openAccess(user: UserItem) {
+  accessTarget.value = user
+  accessLoading.value = true
+  accessItems.value = []
+  try {
+    const res = await getUserAccess(user.id)
+    accessViaAdminRole.value = res.via_admin_role
+    accessItems.value = res.items
+  } catch (err) {
+    reportError(err, t('users.failedToLoadAccess'))
+  } finally {
+    accessLoading.value = false
+  }
+}
+
 // --- Delete ---
 
 const deleteTarget = ref<UserItem | null>(null)
@@ -244,6 +269,14 @@ function formatDate(value?: string) {
                 {{ user.status === 'active' ? $t('users.disable') : $t('users.enable') }}
               </Button>
               <Button
+                size="icon-sm"
+                variant="ghost"
+                :title="$t('users.viewAccess')"
+                @click="openAccess(user)"
+              >
+                <ServerCog class="h-3.5 w-3.5" />
+              </Button>
+              <Button
                 v-if="user.auth_source === 'local'"
                 size="icon-sm"
                 variant="ghost"
@@ -331,6 +364,42 @@ function formatDate(value?: string) {
             <Loader2 v-if="resetting" class="mr-2 h-4 w-4 animate-spin" />
             {{ $t('users.resetPassword') }}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Effective access -->
+    <Dialog :open="!!accessTarget" @update:open="(v) => { if (!v) accessTarget = null }">
+      <DialogContent class="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{{ $t('users.accessFor', { name: accessTarget?.username }) }}</DialogTitle>
+        </DialogHeader>
+
+        <div v-if="accessLoading" class="flex justify-center py-8">
+          <Loader2 class="h-5 w-5 animate-spin" style="color: var(--muted-foreground)" />
+        </div>
+        <template v-else>
+          <p v-if="accessViaAdminRole" class="text-sm" style="color: var(--muted-foreground)">
+            {{ $t('users.accessViaAdminRole') }}
+          </p>
+          <p v-else-if="accessItems.length === 0" class="text-sm" style="color: var(--muted-foreground)">
+            {{ $t('users.accessNone') }}
+          </p>
+          <div v-if="accessItems.length > 0" class="max-h-72 overflow-y-auto">
+            <div
+              v-for="item in accessItems"
+              :key="item.node_id"
+              class="flex items-center justify-between border-b py-2 text-sm last:border-0"
+              style="border-color: var(--border)"
+            >
+              <span>{{ item.node_name }}</span>
+              <Badge variant="secondary">{{ $t('permissions.level' + item.level.charAt(0).toUpperCase() + item.level.slice(1)) }}</Badge>
+            </div>
+          </div>
+        </template>
+
+        <DialogFooter>
+          <Button variant="outline" @click="accessTarget = null">{{ $t('common.done') }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

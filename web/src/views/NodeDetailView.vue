@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Server, Cpu, HardDrive, Activity, Terminal as TerminalIcon, Info, Calendar, RefreshCw } from 'lucide-vue-next'
+import { ArrowLeft, Server, Cpu, HardDrive, Activity, Terminal as TerminalIcon, Info, Calendar, RefreshCw, Users as UsersIcon, Loader2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -14,8 +14,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getNode, getNodeCommands, updateNodeAgent } from '@/services/api'
-import type { NodeDetail, NodeCommandItem } from '@/types/api'
+import { getNode, getNodeCommands, updateNodeAgent, getNodeAccess } from '@/services/api'
+import type { NodeDetail, NodeCommandItem, UserAccessItem } from '@/types/api'
+import { useAppStore } from '@/stores/app'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -36,6 +44,26 @@ const canOperate = computed(
   () => node.value?.my_level === 'operator' || node.value?.my_level === 'manager',
 )
 const canManage = computed(() => node.value?.my_level === 'manager')
+
+// --- Who can reach this machine (admin only) ---
+//
+// The counterpart to the per-user view: when something goes wrong on a box,
+// this is the list of people who could have touched it.
+const appStore = useAppStore()
+const showAccess = ref(false)
+const accessLoading = ref(false)
+const accessItems = ref<UserAccessItem[]>([])
+
+async function openAccess() {
+  showAccess.value = true
+  accessLoading.value = true
+  accessItems.value = []
+  try {
+    accessItems.value = await getNodeAccess(nodeId)
+  } finally {
+    accessLoading.value = false
+  }
+}
 const commands = ref<NodeCommandItem[]>([])
 const loading = ref(true)
 
@@ -167,6 +195,16 @@ const expiresInfo = computed(() => {
         {{ g }}
       </Badge>
       <div class="flex-1" />
+      <Button
+        v-if="appStore.isAdmin"
+        variant="outline"
+        size="sm"
+        :title="$t('nodeDetail.whoCanAccess')"
+        @click="openAccess()"
+      >
+        <UsersIcon class="h-4 w-4 mr-1" />
+        {{ $t('nodeDetail.whoCanAccess') }}
+      </Button>
       <Button
         v-if="node && canManage"
         variant="outline"
@@ -332,4 +370,45 @@ const expiresInfo = computed(() => {
       <span style="color: var(--muted-foreground)">{{ $t('common.loading') }}</span>
     </div>
   </div>
+
+    <!-- Who can reach this node -->
+    <Dialog :open="showAccess" @update:open="showAccess = $event">
+      <DialogContent class="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{{ $t('nodeDetail.whoCanAccess') }}</DialogTitle>
+        </DialogHeader>
+
+        <div v-if="accessLoading" class="flex justify-center py-8">
+          <Loader2 class="h-5 w-5 animate-spin" style="color: var(--muted-foreground)" />
+        </div>
+        <template v-else>
+          <p v-if="accessItems.length === 0" class="text-sm" style="color: var(--muted-foreground)">
+            {{ $t('nodeDetail.accessNone') }}
+          </p>
+          <div v-else class="max-h-72 overflow-y-auto">
+            <div
+              v-for="item in accessItems"
+              :key="item.user_id"
+              class="flex items-center justify-between border-b py-2 text-sm last:border-0"
+              style="border-color: var(--border)"
+            >
+              <span>
+                {{ item.username }}
+                <Badge v-if="item.via_admin_role" variant="outline" class="ml-2 text-[10px]">
+                  {{ $t('nodeDetail.viaAdminRole') }}
+                </Badge>
+              </span>
+              <Badge variant="secondary">
+                {{ $t('permissions.level' + item.level.charAt(0).toUpperCase() + item.level.slice(1)) }}
+              </Badge>
+            </div>
+          </div>
+        </template>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showAccess = false">{{ $t('common.done') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
 </template>

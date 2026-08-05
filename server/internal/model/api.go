@@ -174,6 +174,32 @@ type CreateGrantRequest struct {
 	Level       string `json:"level" binding:"required"`       // viewer, operator, manager
 }
 
+// --- Effective access (the grant list, resolved) ---
+
+// NodeAccessItem is one node a user can reach.
+type NodeAccessItem struct {
+	NodeID   string `json:"node_id"`
+	NodeName string `json:"node_name"`
+	Level    string `json:"level"`
+}
+
+// GET /api/users/:id/access
+type UserAccessResponse struct {
+	// ViaAdminRole marks a list that comes from the admin role rather than any
+	// grant, so the UI can say so instead of implying rules exist.
+	ViaAdminRole bool             `json:"via_admin_role"`
+	Items        []NodeAccessItem `json:"items"`
+}
+
+// UserAccessItem is one person who can reach a node.
+// GET /api/nodes/:id/access
+type UserAccessItem struct {
+	UserID       string `json:"user_id"`
+	Username     string `json:"username"`
+	Level        string `json:"level"`
+	ViaAdminRole bool   `json:"via_admin_role"`
+}
+
 // --- Conversations ---
 
 // POST /api/conversations
