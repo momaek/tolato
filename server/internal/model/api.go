@@ -69,6 +69,24 @@ type OIDCSettings struct {
 	// AllowSignup gates whether an unrecognized subject may create an account.
 	// Off means only users who already exist locally can sign in via SSO.
 	AllowSignup bool `json:"allow_signup"`
+	// GroupClaim names the ID-token claim carrying the user's IdP groups
+	// (commonly "groups"). Empty disables group sync entirely.
+	GroupClaim string `json:"group_claim,omitempty"`
+	// GroupMappings translates IdP group names into Tolato user groups. Only
+	// the groups named here are ever synced — see OIDCGroupMapping.
+	GroupMappings []OIDCGroupMapping `json:"group_mappings,omitempty"`
+}
+
+// OIDCGroupMapping ties one IdP group name to one Tolato user group.
+//
+// Sync is scoped to the mapped groups on purpose: a user's membership of a
+// group that appears here is owned by the IdP and re-derived on every sign-in,
+// while any other group they were added to by hand is left alone. Without that
+// scoping, turning on group sync would silently empty every manually curated
+// group on the next login.
+type OIDCGroupMapping struct {
+	IdPGroup    string `json:"idp_group"`
+	UserGroupID string `json:"user_group_id"`
 }
 
 // GET /api/settings/oidc — adds the read-only callback URL for the admin to

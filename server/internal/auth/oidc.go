@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -141,11 +142,22 @@ type OIDCIdentity struct {
 	EmailVerified bool
 	Name          string
 	Username      string // preferred_username, when the IdP supplies one
+
+	// Groups holds the IdP group names read from the configured claim.
+	// GroupsPresent distinguishes "the IdP said this user is in no groups"
+	// from "the token carried no group claim at all" — the first is an
+	// instruction to remove memberships, the second means we know nothing and
+	// must not touch them.
+	Groups        []string
+	GroupsPresent bool
 }
 
 // Exchange trades the authorization code for tokens, verifies the ID token
 // signature and audience, checks the nonce, and returns the claims we use.
-func (p *OIDCProvider) Exchange(ctx context.Context, code, nonce string) (*OIDCIdentity, error) {
+//
+// groupClaim names the claim carrying the user's IdP groups; empty skips
+// group extraction.
+func (p *OIDCProvider) Exchange(ctx context.Context, code, nonce, groupClaim string) (*OIDCIdentity, error) {
 	ctx, cancel := context.WithTimeout(ctx, oidcDiscoveryTimeout)
 	defer cancel()
 
@@ -180,13 +192,54 @@ func (p *OIDCProvider) Exchange(ctx context.Context, code, nonce string) (*OIDCI
 		return nil, errors.New("id_token carried no subject")
 	}
 
-	return &OIDCIdentity{
+	identity := &OIDCIdentity{
 		Subject:       idToken.Subject,
 		Email:         claims.Email,
 		EmailVerified: claims.EmailVerified,
 		Name:          claims.Name,
 		Username:      claims.PreferredUsername,
-	}, nil
+	}
+
+	// The group claim's key is configurable, so it can't be a struct field —
+	// decode the whole claim set again and look the key up by name.
+	if groupClaim != "" {
+		var raw map[string]json.RawMessage
+		if err := idToken.Claims(&raw); err != nil {
+			return nil, fmt.Errorf("decode claims: %w", err)
+		}
+		if v, ok := raw[groupClaim]; ok {
+			groups, err := parseGroupsClaim(v)
+			if err != nil {
+				return nil, fmt.Errorf("claim %q: %w", groupClaim, err)
+			}
+			identity.Groups = groups
+			identity.GroupsPresent = true
+		}
+	}
+
+	return identity, nil
+}
+
+// parseGroupsClaim accepts the two shapes IdPs actually send: a list of names,
+// or a single name as a bare string. A JSON null is treated as an empty list —
+// the claim was present, so it still means "no groups".
+func parseGroupsClaim(raw json.RawMessage) ([]string, error) {
+	var list []string
+	if err := json.Unmarshal(raw, &list); err == nil {
+		return list, nil
+	}
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		if single == "" {
+			return nil, nil
+		}
+		return []string{single}, nil
+	}
+	var isNull any
+	if err := json.Unmarshal(raw, &isNull); err == nil && isNull == nil {
+		return nil, nil
+	}
+	return nil, errors.New("expected a string or an array of strings")
 }
 
 // normalizeScopes guarantees "openid" is present — without it the IdP runs a

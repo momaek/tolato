@@ -92,6 +92,80 @@ func ResolveOIDCUser(id *OIDCIdentity, s model.OIDCSettings) (*model.User, error
 	return u, nil
 }
 
+// SyncOIDCGroups re-derives the user's membership of the mapped user groups
+// from the IdP's group claim. Everything else about their membership is left
+// alone.
+//
+// Three rules make this safe to switch on for an existing instance:
+//
+//   - Only groups named in the mapping table are touched. A group somebody
+//     curates by hand is never emptied by a login.
+//   - A token with no group claim at all means "the IdP told us nothing", not
+//     "this user is in no groups" — memberships are left as they are. Otherwise
+//     a misconfigured claim name would quietly strip everyone's access on their
+//     next sign-in.
+//   - An empty list *in* the claim is authoritative and does remove the user
+//     from mapped groups; that is the IdP actually saying they left.
+//
+// Returns the group ids added and removed, for the log.
+func SyncOIDCGroups(userID string, id *OIDCIdentity, s model.OIDCSettings) (added, removed []string, err error) {
+	if s.GroupClaim == "" || len(s.GroupMappings) == 0 || !id.GroupsPresent {
+		return nil, nil, nil
+	}
+
+	// IdP group names are compared case-insensitively — directories are
+	// inconsistent about casing and an admin typing "Ops" should match "ops".
+	claimed := make(map[string]bool, len(id.Groups))
+	for _, g := range id.Groups {
+		claimed[strings.ToLower(strings.TrimSpace(g))] = true
+	}
+
+	// The set of Tolato groups under IdP control, and which of those the user
+	// should now be in. A mapping table can point two IdP groups at the same
+	// Tolato group, so membership is a union: being in either is enough.
+	managed := make(map[string]bool, len(s.GroupMappings))
+	want := make(map[string]bool, len(s.GroupMappings))
+	for _, m := range s.GroupMappings {
+		if m.UserGroupID == "" {
+			continue
+		}
+		managed[m.UserGroupID] = true
+		if claimed[strings.ToLower(strings.TrimSpace(m.IdPGroup))] {
+			want[m.UserGroupID] = true
+		}
+	}
+	if len(managed) == 0 {
+		return nil, nil, nil
+	}
+
+	current, err := store.ListGroupIDsForUser(userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("current groups: %w", err)
+	}
+	in := make(map[string]bool, len(current))
+	for _, g := range current {
+		in[g] = true
+	}
+
+	for groupID := range want {
+		if !in[groupID] {
+			if err := store.AddUserToGroup(groupID, userID); err != nil {
+				return nil, nil, fmt.Errorf("add to group: %w", err)
+			}
+			added = append(added, groupID)
+		}
+	}
+	for groupID := range managed {
+		if in[groupID] && !want[groupID] {
+			if err := store.RemoveUserFromGroup(groupID, userID); err != nil {
+				return nil, nil, fmt.Errorf("remove from group: %w", err)
+			}
+			removed = append(removed, groupID)
+		}
+	}
+	return added, removed, nil
+}
+
 // oidcRole grants admin only to a verified email on the configured list.
 // Requiring verification matters: an IdP that lets users set an arbitrary
 // unverified email would otherwise let anyone claim an admin address.

@@ -141,7 +141,7 @@ func OIDCCallback(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
-		identity, err := provider.Exchange(c.Request.Context(), code, nonce)
+		identity, err := provider.Exchange(c.Request.Context(), code, nonce, s.GroupClaim)
 		if err != nil {
 			log.Printf("[oidc] exchange failed: %v", err)
 			redirectToLoginError(c, "sso_failed")
@@ -160,6 +160,18 @@ func OIDCCallback(deps *Deps) gin.HandlerFunc {
 				redirectToLoginError(c, "sso_failed")
 			}
 			return
+		}
+
+		// Re-derive IdP-managed group membership before minting the session, so
+		// this login already reflects any change made in the directory.
+		added, removed, err := auth.SyncOIDCGroups(user.ID, identity, s)
+		if err != nil {
+			// Non-fatal: the account is authenticated and its existing
+			// memberships still apply. Failing the login would be worse than
+			// running one session on slightly stale groups.
+			log.Printf("[oidc] group sync failed for %s: %v", user.Username, err)
+		} else if len(added) > 0 || len(removed) > 0 {
+			log.Printf("[oidc] group sync for %s: +%d -%d", user.Username, len(added), len(removed))
 		}
 
 		token, expiresAt, err := middleware.GenerateToken(user)

@@ -194,7 +194,11 @@ JWT Claims 从 `{username}` 扩展为 `{user_id, username, role}`。`JWTAuth()` 
 - 端点：`GET /api/auth/oidc/login`（302 到 IdP）+ `GET /api/auth/oidc/callback`（换 token、验签、发本站 JWT）。前端登录页在 OIDC 启用时显示「SSO 登录」按钮。
 - **用户匹配与自动建号**：`users` 表加 `auth_source`（`local` | `oidc`）和 `oidc_subject`（唯一索引）。按 `sub` 匹配；首登自动建号，默认角色 `member`。可配 `admin_emails` 白名单：命中者建号即 admin。
 - **账号采纳**：首登时若存在同「已验证邮箱」的本地账号，直接接管该账号（保留其 ID、对话、API Key），并清空本地密码——已有管理员切到 SSO 不会变成一个空的新账号。未验证的邮箱不作为归属证据。
-- **组映射：暂不实现**。它依赖尚未落地的用户组（P2），且简单接入已能满足需求。将来做 P2 时再补 `group_claim` + 映射表。
+- **组映射（已实现）**：配置 `group_claim`（如 `groups`）+ 映射表 `{IdP组名: Tolato用户组}`。每次登录按 claim 重新推导该用户在**被映射组**里的成员身份。三条安全规则：
+  1. **只动映射表里点名的组**。手工维护的组不会被登录清空。
+  2. **token 里没有该 claim = 什么都不知道**，成员身份原样保留——否则 claim 名字打错会在所有人下次登录时静默吊销权限。
+  3. **claim 存在但为空数组 = IdP 明确说「此人不属于任何组」**，此时才移出被映射的组。
+  IdP 组名大小写不敏感；同步失败不阻断登录（记日志，沿用既有成员身份）。角色（admin/member）仍由 Tolato 管理，不随 IdP 同步。
 - OIDC 用户不可改密码（无本地密码），管理员也不能给其设置密码；被 IdP 停用的用户由 admin 手工 disable 即时生效（JWTAuth 每请求重读状态）。
 
 ### 5.2 节点分组
@@ -269,7 +273,7 @@ JWT Claims 从 `{username}` 扩展为 `{user_id, username, role}`。`JWTAuth()` 
 | **P2 分组与授权** ✅ | 五张新表、authz 包、REST 层强制点 1–3、6、8、注册 token 绑组、管理 API+页面 | 已完成 |
 | **P3 执行面收口** ✅ | 终端 WS（点4）、chat 上下文预过滤 + 按角色裁剪工具集（点5）、API Key 两档制 + 绑 owner（点7） | 已完成 |
 | **P3.5 CLI + Skill** ✅ | `tolato` CLI、下线 `/mcp` 与 `internal/mcp`、`skills/tolato/SKILL.md`、v1 审计补 user_id/source | 已完成 |
-| **P3.6 OIDC** ✅ | go-oidc 接入、Settings 页配置 + verify + 热生效、auth_source/oidc_subject、自动建号、账号采纳（组映射留给 P2） | 已完成 |
+| **P3.6 OIDC** ✅ | go-oidc 接入、Settings 页配置 + verify + 热生效、auth_source/oidc_subject、自动建号、账号采纳、组映射同步 | 已完成 |
 | **P4 打磨** ✅ | `my_level` 字段与按钮显隐、审计过滤细化、文档 | 已完成 |
 
 P1 独立可发布（等价于评估文档的方案 B）；P2/P3 必须一起发（只发 P2 会出现「列表看不见但终端连得上」的假隔离）。总量约 2–2.5 周，与当年评估的方案 C 估算一致，但砍掉了 Settings 拆分和租户隔离两块最重的部分。
@@ -293,7 +297,7 @@ P1 独立可发布（等价于评估文档的方案 B）；P2/P3 必须一起发
 实现过程中与设计稿的差异，均为收紧而非放宽：
 
 1. **少一张表**。设计稿写「六张新表」，实际五张：`user_groups`、`user_group_members`、`node_groups`、`node_group_members`、`grants`。原先把 Grant 的唯一索引单独算了一张。
-2. **OIDC 组映射未做**。它依赖用户组，而 OIDC 先于 P2 落地；产品上简单接入已够用，后续需要时再补 `group_claim` + 映射表即可（表已就绪）。
+2. **OIDC 组映射在 P2 之后补做**。OIDC 先于用户组落地，所以先发了不含组映射的简单版本，用户组就位后再补上（见 §5.1）。
 3. **AI 对话的工具集按角色裁剪，而非调用时拒绝**。`edit_node_info` 和 `update_agent` 对 member **根本不注入**，模型看不到就无从调用；工具分发层仍保留 admin + manager 双重校验作为兜底。
 4. **API Key 的能力是「档位 ∩ owner 权限」**。writable key 也只能在 owner 拥有 operator 的节点上执行；owner 停用则 key 立即失效。
 5. **删除的级联比设计稿更彻底**。删用户 → 同时清其组成员身份与 grants；删节点 / 节点组 → 同时清 grants，节点组还会解绑注册 token。避免 id 复用时权限「诈尸」。

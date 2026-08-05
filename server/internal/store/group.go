@@ -60,6 +60,19 @@ func SetUserGroupMembers(groupID string, userIDs []string) error {
 	})
 }
 
+// AddUserToGroup adds one member, ignoring a repeat. Used by the OIDC group
+// sync, which re-derives membership on every sign-in.
+func AddUserToGroup(groupID, userID string) error {
+	row := model.UserGroupMember{UserGroupID: groupID, UserID: userID}
+	return DB.Where(row).FirstOrCreate(&row).Error
+}
+
+// RemoveUserFromGroup drops one membership.
+func RemoveUserFromGroup(groupID, userID string) error {
+	return DB.Where("user_group_id = ? AND user_id = ?", groupID, userID).
+		Delete(&model.UserGroupMember{}).Error
+}
+
 // ListUserGroupMemberIDs returns the user ids in one group.
 func ListUserGroupMemberIDs(groupID string) ([]string, error) {
 	var ids []string
@@ -197,4 +210,3 @@ func GroupIDsByNode() (map[string][]string, error) {
 	}
 	return out, nil
 }
-

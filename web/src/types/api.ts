@@ -53,6 +53,11 @@ export interface UserItem {
   created_at: string
 }
 
+export interface OIDCGroupMapping {
+  idp_group: string
+  user_group_id: string
+}
+
 export interface OIDCSettings {
   enabled: boolean
   issuer: string
@@ -61,6 +66,8 @@ export interface OIDCSettings {
   scopes?: string[]
   admin_emails?: string[]
   allow_signup: boolean
+  group_claim?: string
+  group_mappings?: OIDCGroupMapping[]
 }
 
 export interface OIDCSettingsResponse extends OIDCSettings {

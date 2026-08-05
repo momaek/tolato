@@ -54,8 +54,10 @@ import {
   getOIDCSettings,
   updateOIDCSettings,
   verifyOIDC,
+  getUserGroups,
 } from '@/services/api'
 import { useAppStore } from '@/stores/app'
+import type { GroupItem } from '@/types/api'
 import type {
   APIKeyPermission,
   LLMSettings,
@@ -70,6 +72,7 @@ import type {
   NotifyChannel,
   NotifyTokenSource,
   OIDCSettings,
+  OIDCGroupMapping,
   VerifyOIDCResponse,
 } from '@/types/api'
 
@@ -432,7 +435,11 @@ const oidc = ref<OIDCSettings>({
   scopes: [],
   admin_emails: [],
   allow_signup: true,
+  group_claim: '',
+  group_mappings: [],
 })
+// Tolato user groups, to pick as mapping targets.
+const oidcUserGroups = ref<GroupItem[]>([])
 const oidcRedirectURL = ref('')
 const oidcAdminEmailsInput = ref('')
 const oidcScopesInput = ref('')
@@ -452,9 +459,20 @@ async function loadOIDC() {
     scopes: data.scopes ?? [],
     admin_emails: data.admin_emails ?? [],
     allow_signup: data.allow_signup,
+    group_claim: data.group_claim ?? '',
+    group_mappings: data.group_mappings ?? [],
   }
   oidcAdminEmailsInput.value = (data.admin_emails ?? []).join(', ')
   oidcScopesInput.value = (data.scopes ?? []).join(' ')
+  oidcUserGroups.value = await getUserGroups().catch(() => [])
+}
+
+function addGroupMapping() {
+  oidc.value.group_mappings = [...(oidc.value.group_mappings ?? []), { idp_group: '', user_group_id: '' }]
+}
+
+function removeGroupMapping(index: number) {
+  oidc.value.group_mappings = (oidc.value.group_mappings ?? []).filter((_, i) => i !== index)
 }
 
 /** Splits a comma/whitespace separated field into a clean list. */
@@ -467,6 +485,10 @@ function oidcPayload(): OIDCSettings {
     ...oidc.value,
     admin_emails: splitList(oidcAdminEmailsInput.value, /[,\s]+/),
     scopes: splitList(oidcScopesInput.value, /[,\s]+/),
+    // Half-filled rows would be saved as rules that match nothing.
+    group_mappings: (oidc.value.group_mappings ?? []).filter(
+      (m: OIDCGroupMapping) => m.idp_group.trim() && m.user_group_id,
+    ),
   }
 }
 
@@ -1428,6 +1450,75 @@ function closeCreateDialog() {
           <p class="text-xs" style="color: var(--muted-foreground)">
             {{ $t('settings.oidc.adminEmailsHelp') }}
           </p>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-4">
+          <div>
+            <h3 class="text-sm font-semibold">{{ $t('settings.oidc.groupSync') }}</h3>
+            <p class="mt-1 text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.oidc.groupSyncHelp') }}
+            </p>
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-sm font-medium">{{ $t('settings.oidc.groupClaim') }}</label>
+            <Input v-model="oidc.group_claim" placeholder="groups" />
+            <p class="text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.oidc.groupClaimHelp') }}
+            </p>
+          </div>
+
+          <template v-if="oidc.group_claim">
+            <div
+              v-for="(mapping, i) in oidc.group_mappings ?? []"
+              :key="i"
+              class="flex items-end gap-2"
+            >
+              <div class="flex-1 space-y-1">
+                <label v-if="i === 0" class="text-xs" style="color: var(--muted-foreground)">
+                  {{ $t('settings.oidc.idpGroup') }}
+                </label>
+                <Input v-model="mapping.idp_group" placeholder="ops-team" />
+              </div>
+              <div class="flex-1 space-y-1">
+                <label v-if="i === 0" class="text-xs" style="color: var(--muted-foreground)">
+                  {{ $t('settings.oidc.tolatoGroup') }}
+                </label>
+                <Select v-model="mapping.user_group_id">
+                  <SelectTrigger>
+                    <SelectValue :placeholder="$t('permissions.choose')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="g in oidcUserGroups" :key="g.id" :value="g.id">
+                      {{ g.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button variant="ghost" size="icon" @click="removeGroupMapping(i)">
+                <Trash2 class="h-4 w-4" style="color: var(--color-error-foreground)" />
+              </Button>
+            </div>
+
+            <p
+              v-if="oidcUserGroups.length === 0"
+              class="text-xs"
+              style="color: var(--muted-foreground)"
+            >
+              {{ $t('settings.oidc.noUserGroups') }}
+            </p>
+            <Button
+              v-else
+              variant="outline"
+              size="sm"
+              @click="addGroupMapping"
+            >
+              <Plus class="mr-2 h-3.5 w-3.5" />
+              {{ $t('settings.oidc.addMapping') }}
+            </Button>
+          </template>
         </div>
 
         <div
