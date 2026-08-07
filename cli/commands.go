@@ -102,24 +102,60 @@ func runNodesGet(c *client, args []string) error {
 	return w.Flush()
 }
 
-// runExec runs one command on one node. The command is taken verbatim after
-// `--` so quoting, pipes and flags reach the remote shell untouched.
+// runExec runs one command on one node. Everything after `--` is the remote
+// command: our own flags are never read out of it, so `tolato exec web-01 --
+// ls --json` runs `ls --json` remotely rather than printing JSON here.
+//
+// The words after `--` are rejoined with spaces into a single string that the
+// node's shell then splits, so the caller's local quoting does not survive the
+// trip. Anything depending on quotes or shell syntax has to arrive as one
+// argument: `-- "grep 'foo bar' /etc/hosts | head -1"`.
 func runExec(c *client, args []string) error {
+	// Split at the first `--` before parsing. Without this the separator ends
+	// up inside the command string and the remote shell chokes on it.
+	flagArgs, remote := args, []string(nil)
+	sawSeparator := false
+	for i, a := range args {
+		if a == "--" {
+			flagArgs, remote, sawSeparator = args[:i], args[i+1:], true
+			break
+		}
+	}
+
 	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
 	timeout := fs.Int("timeout", 60, "seconds to allow the command to run")
 	confirm := fs.Bool("confirm", false, "proceed with a command the server flags as sensitive")
 	asJSON := fs.Bool("json", false, "print raw JSON")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
 
 	rest := fs.Args()
-	if len(rest) < 2 {
+	if len(rest) == 0 {
 		return errUsage
 	}
 	nodeRef := rest[0]
-	command := strings.Join(rest[1:], " ")
-	if command == "" {
+
+	// Go's flag package stops at the first non-flag argument, which is the node
+	// reference, so flags written after it are still unparsed. Parse again to
+	// pick them up; silently folding `--timeout 300` into the remote command is
+	// how this went wrong before, and a swallowed `--confirm` is worse than a
+	// noisy one.
+	if err := fs.Parse(rest[1:]); err != nil {
+		return err
+	}
+	trailing := fs.Args()
+
+	if !sawSeparator {
+		remote = trailing
+	} else if len(trailing) > 0 {
+		// Args both before and after `--`. Which half is the command is anyone's
+		// guess, so refuse rather than run half of it.
+		return errUsage
+	}
+
+	command := strings.Join(remote, " ")
+	if strings.TrimSpace(command) == "" {
 		return errUsage
 	}
 
