@@ -50,20 +50,30 @@ url: https://tolato.example.com
 api_key: tlat_...
 ```
 
-The config file lives where Go's `os.UserConfigDir()` points, which is **not
-the same path on every platform**:
+The config file is `~/.config/tolato/config.yaml`, on every platform.
+`$TOLATO_CONFIG` overrides the file outright and `$XDG_CONFIG_HOME` overrides
+the directory, if the user has either set.
 
-| Platform | Path |
-| --- | --- |
-| Linux | `~/.config/tolato/config.yaml` (or `$XDG_CONFIG_HOME/tolato/config.yaml`) |
-| macOS | `~/Library/Application Support/tolato/config.yaml` |
-
-Don't guess: when the CLI cannot find a config it prints the exact path it
-looked at, so run `tolato nodes list` and read the error.
+When the CLI cannot find a config it prints the exact path it looked at, so if
+anything seems off, run `tolato nodes list` and read the error rather than
+guessing.
 
 API keys are created in the Tolato web UI under Settings → API Keys. **Ask the
 user to create and set the key themselves** — do not ask them to paste it into
-the conversation.
+the conversation, and do not write it into the config file for them even if
+they do. Hand them a command that reads the key without putting it in shell
+history, and let them run it:
+
+```bash
+mkdir -p ~/.config/tolato && read -rs -p 'API key: ' K \
+  && printf 'url: %s\napi_key: %s\n' https://tolato.example.com "$K" \
+  > ~/.config/tolato/config.yaml \
+  && chmod 600 ~/.config/tolato/config.yaml && unset K
+```
+
+If a key does end up in the conversation, say so plainly and suggest revoking
+it in the web UI: transcripts are retained, so it should be treated as
+disclosed.
 
 ## What you can do
 
