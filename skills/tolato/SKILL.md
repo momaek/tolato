@@ -16,20 +16,50 @@ Check the CLI is present and configured before anything else:
 tolato nodes list
 ```
 
-If that fails with a missing-configuration error, the user needs to supply a
-server URL and an API key, either as environment variables:
+### If the CLI is missing
+
+Binaries are published per CLI release under the `cli-v*` tags. They are
+deliberately *not* marked as the latest release — that pointer belongs to the
+agent — so download from the tag URL rather than `/releases/latest`:
+
+```bash
+# pick a tag from https://github.com/momaek/tolato/releases
+curl -fL -o /usr/local/bin/tolato \
+  https://github.com/momaek/tolato/releases/download/cli-v0.1.0/tolato-darwin-arm64
+chmod +x /usr/local/bin/tolato
+```
+
+Assets are named `tolato-<os>-<arch>` for linux/darwin × amd64/arm64, each with
+a `.sha256` alongside it. From a checkout, `go build -C cli -o ~/bin/tolato .`
+works too.
+
+### If the CLI is unconfigured
+
+The user needs to supply a server URL and an API key, either as environment
+variables:
 
 ```bash
 export TOLATO_URL=https://tolato.example.com
 export TOLATO_API_KEY=tlat_...
 ```
 
-or in `~/.config/tolato/config.yaml`:
+or in a config file:
 
 ```yaml
 url: https://tolato.example.com
 api_key: tlat_...
 ```
+
+The config file lives where Go's `os.UserConfigDir()` points, which is **not
+the same path on every platform**:
+
+| Platform | Path |
+| --- | --- |
+| Linux | `~/.config/tolato/config.yaml` (or `$XDG_CONFIG_HOME/tolato/config.yaml`) |
+| macOS | `~/Library/Application Support/tolato/config.yaml` |
+
+Don't guess: when the CLI cannot find a config it prints the exact path it
+looked at, so run `tolato nodes list` and read the error.
 
 API keys are created in the Tolato web UI under Settings → API Keys. **Ask the
 user to create and set the key themselves** — do not ask them to paste it into
