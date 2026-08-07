@@ -95,6 +95,22 @@ show it.
 behave as they would locally. Remote stdout goes to stdout and stderr to
 stderr.
 
+Everything after `--` is the remote command, so its own flags are safe:
+`tolato exec web-01 -- ls --json` runs `ls --json` there rather than asking for
+JSON here.
+
+The words after `--` are rejoined with spaces into one string, and the shell on
+the node does the final splitting. Your local shell's quotes are consumed
+locally and never arrive, so anything that depends on quoting or on shell
+syntax must be passed as **one** argument, with the quotes inside it:
+
+```bash
+tolato exec web-01 -- "grep 'foo bar' /etc/hosts | head -1"   # correct
+tolato exec web-01 -- grep 'foo bar' /etc/hosts               # arrives as: grep foo bar /etc/hosts
+```
+
+Plain commands with no quoting or pipes need none of this.
+
 ## What you cannot do
 
 - **Change a node's attributes.** There is no command for it. Alias and metadata
