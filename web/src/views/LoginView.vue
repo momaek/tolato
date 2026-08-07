@@ -1,20 +1,88 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Zap } from 'lucide-vue-next'
+import { Zap, Loader2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
+import { getOIDCStatus } from '@/services/api'
 import { useAppStore } from '@/stores/app'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const route = useRoute()
 const router = useRouter()
 
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
+
+// --- Single sign-on ---
+
+const ssoEnabled = ref(false)
+const ssoReturning = ref(false)
+
+/** Server-side failures arrive as a fixed code, never a raw error string. */
+const SSO_ERRORS: Record<string, string> = {
+  sso_unavailable: 'login.sso.errorUnavailable',
+  sso_denied: 'login.sso.errorDenied',
+  sso_state: 'login.sso.errorState',
+  sso_no_account: 'login.sso.errorNoAccount',
+  sso_disabled: 'login.sso.errorDisabled',
+  sso_failed: 'login.sso.errorFailed',
+}
+
+/**
+ * Completes an SSO round trip. The server hands the token back in the URL
+ * fragment — fragments never reach a server, so the token stays out of access
+ * logs and the Referer header. We consume it and wipe the hash immediately so
+ * it doesn't linger in browser history.
+ */
+async function consumeSSOFragment(): Promise<boolean> {
+  const hash = window.location.hash.replace(/^#/, '')
+  if (!hash) return false
+
+  const params = new URLSearchParams(hash)
+  const token = params.get('token')
+  if (!token) return false
+
+  history.replaceState(null, '', window.location.pathname)
+  ssoReturning.value = true
+  try {
+    await appStore.adoptToken(token)
+    router.replace('/')
+    return true
+  } catch {
+    error.value = t('login.sso.errorFailed')
+    return false
+  } finally {
+    ssoReturning.value = false
+  }
+}
+
+function startSSO() {
+  // A full navigation, not fetch: the browser has to follow the redirect to
+  // the identity provider and carry the state cookie back.
+  window.location.href = '/api/auth/oidc/login'
+}
+
+onMounted(async () => {
+  if (await consumeSSOFragment()) return
+
+  const code = route.query.sso_error
+  if (typeof code === 'string') {
+    error.value = t(SSO_ERRORS[code] ?? 'login.sso.errorFailed')
+    router.replace({ query: {} })
+  }
+
+  try {
+    ssoEnabled.value = (await getOIDCStatus()).enabled
+  } catch {
+    // Older server or a transient failure — just leave the button hidden.
+  }
+})
 
 async function handleLogin() {
   if (!username.value || !password.value) {
@@ -166,6 +234,27 @@ async function handleLogin() {
             >↵</kbd>
           </span>
         </Button>
+        <template v-if="ssoEnabled">
+          <div class="relative py-1">
+            <Separator />
+            <span
+              class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 px-2 text-[11px]"
+              style="background-color: var(--card); color: var(--muted-foreground)"
+            >
+              {{ $t('login.sso.divider') }}
+            </span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            class="w-full"
+            :disabled="ssoReturning"
+            @click="startSSO"
+          >
+            <Loader2 v-if="ssoReturning" class="mr-2 h-4 w-4 animate-spin" />
+            {{ $t('login.sso.signIn') }}
+          </Button>
+        </template>
       </form>
 
       <!-- Tiny meta line -->

@@ -6,13 +6,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/momaek/tolato/server/internal/geoip"
 	"github.com/momaek/tolato/server/internal/model"
+	"gorm.io/gorm"
 )
 
 // --- Registration Tokens ---
 
 // CreateRegistrationToken creates a reusable registration token with expiry.
 // A non-positive expiry means the token never expires.
-func CreateRegistrationToken(aliasPrefix *string, expiry time.Duration) (*model.RegistrationToken, error) {
+func CreateRegistrationToken(aliasPrefix *string, nodeGroupID *string, expiry time.Duration) (*model.RegistrationToken, error) {
 	var expiresAt time.Time
 	if expiry > 0 {
 		expiresAt = time.Now().Add(expiry)
@@ -23,6 +24,7 @@ func CreateRegistrationToken(aliasPrefix *string, expiry time.Duration) (*model.
 	token := &model.RegistrationToken{
 		ID:          uuid.New().String(),
 		AliasPrefix: aliasPrefix,
+		NodeGroupID: nodeGroupID,
 		ExpiresAt:   expiresAt,
 	}
 	if err := DB.Create(token).Error; err != nil {
@@ -77,24 +79,38 @@ func ListNodesMissingGeo() ([]model.Node, error) {
 	return nodes, err
 }
 
-// ListNodes returns paginated nodes with optional status filter.
+// ListNodes returns paginated nodes with optional status filter, unscoped by
+// permissions. Callers that serve a specific user must use ListNodesScoped.
 func ListNodes(page, pageSize int, status string) ([]model.Node, int64, error) {
-	var total int64
-	query := DB.Model(&model.Node{})
-	if status != "" {
-		query = query.Where("status = ?", status)
+	return ListNodesScoped(page, pageSize, status, nil, true)
+}
+
+// ListNodesScoped pages over only the nodes the caller may see. Restricting in
+// SQL rather than after the fact keeps the page size meaningful: a user with
+// three visible nodes gets one page of three, not twenty pages that are mostly
+// filtered away.
+//
+// unrestricted skips the id filter entirely (admins, and grants on "all").
+func ListNodesScoped(page, pageSize int, status string, visibleIDs []string, unrestricted bool) ([]model.Node, int64, error) {
+	scope := func(q *gorm.DB) *gorm.DB {
+		if status != "" {
+			q = q.Where("status = ?", status)
+		}
+		if !unrestricted {
+			q = q.Where("id IN ?", visibleIDs)
+		}
+		return q
 	}
-	if err := query.Count(&total).Error; err != nil {
+
+	var total int64
+	if err := scope(DB.Model(&model.Node{})).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var nodes []model.Node
 	offset := (page - 1) * pageSize
-	q := DB.Order("created_at DESC").Offset(offset).Limit(pageSize)
-	if status != "" {
-		q = q.Where("status = ?", status)
-	}
-	err := q.Find(&nodes).Error
+	err := scope(DB.Model(&model.Node{})).
+		Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&nodes).Error
 	return nodes, total, err
 }
 
@@ -121,9 +137,20 @@ func UpdateNode(id string, updates map[string]any) error {
 	return DB.Model(&model.Node{}).Where("id = ?", id).Updates(updates).Error
 }
 
-// DeleteNode deletes a node by ID.
+// DeleteNode deletes a node by ID, along with its group memberships and the
+// grants naming it. Leaving those behind would let a recycled node id inherit
+// the permissions of the machine that previously held it.
 func DeleteNode(id string) error {
-	return DB.Where("id = ?", id).Delete(&model.Node{}).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("node_id = ?", id).Delete(&model.NodeGroupMember{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("object_type = ? AND object_id = ?", model.ObjectNode, id).
+			Delete(&model.Grant{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&model.Node{}).Error
+	})
 }
 
 // UpdateHeartbeat updates the node's last heartbeat time and status.

@@ -22,15 +22,14 @@ func InitDB(dsn string) error {
 		return fmt.Errorf("open database: %w", err)
 	}
 
-	// One-time cleanup of the retired NodeProbe schema. IF EXISTS makes this a
-	// no-op on already-cleaned DBs; remove this block once all deployments
-	// have been migrated.
-	if err := dropRemovedProbeSchema(db); err != nil {
-		return err
-	}
-
 	// Auto-migrate all models
 	if err := db.AutoMigrate(
+		&model.User{},
+		&model.UserGroup{},
+		&model.UserGroupMember{},
+		&model.NodeGroup{},
+		&model.NodeGroupMember{},
+		&model.Grant{},
 		&model.Conversation{},
 		&model.Message{},
 		&model.Node{},
@@ -43,6 +42,19 @@ func InitDB(dsn string) error {
 	}
 
 	DB = db
+
+	// One-time cleanup of the retired NodeProbe schema. Runs after AutoMigrate
+	// because the ALTER TABLEs below name `nodes` directly, and their IF EXISTS
+	// covers only the column — on a fresh database, where AutoMigrate is what
+	// creates the table, running this first fails with "relation does not exist".
+	// Remove this block once all deployments have been migrated.
+	if err := dropRemovedProbeSchema(db); err != nil {
+		return err
+	}
+
+	if err := migrateAPIKeyPermissions(); err != nil {
+		return fmt.Errorf("migrate api key permissions: %w", err)
+	}
 
 	// Initialize default settings
 	initDefaultSettings()

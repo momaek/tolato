@@ -18,10 +18,27 @@ func GetAPIKeyByHash(keyHash string) (*model.APIKey, error) {
 	return &key, nil
 }
 
-// ListAPIKeys returns all API keys.
-func ListAPIKeys() ([]model.APIKey, error) {
+// GetAPIKeyByID finds an API key by primary key.
+func GetAPIKeyByID(id string) (*model.APIKey, error) {
+	var key model.APIKey
+	if err := DB.First(&key, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &key, nil
+}
+
+// ListAllAPIKeys returns every API key. Admin-only view.
+func ListAllAPIKeys() ([]model.APIKey, error) {
 	var keys []model.APIKey
 	err := DB.Order("created_at DESC").Find(&keys).Error
+	return keys, err
+}
+
+// ListAPIKeysByOwner returns the keys belonging to one user.
+func ListAPIKeysByOwner(ownerUserID string) ([]model.APIKey, error) {
+	var keys []model.APIKey
+	err := DB.Where("owner_user_id = ?", ownerUserID).
+		Order("created_at DESC").Find(&keys).Error
 	return keys, err
 }
 

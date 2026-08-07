@@ -77,6 +77,11 @@ function formatPercent(val?: number): string {
   return `${val.toFixed(1)}%`
 }
 
+// Mirrors the server-reported level; absent means viewer-or-less.
+const canOperate = computed(
+  () => props.node.my_level === 'operator' || props.node.my_level === 'manager',
+)
+
 const specLabel = computed(() => {
   const cores = props.node.cpu_cores
   const memMB = props.node.memory_total_mb
@@ -354,6 +359,7 @@ function onAliasInputMounted(vnode: { el?: HTMLInputElement | null }) {
       </span>
       <div class="flex items-center gap-1">
         <Button
+          v-if="canOperate"
           variant="ghost"
           size="icon"
           class="h-8 w-8"

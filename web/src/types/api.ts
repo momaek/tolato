@@ -32,6 +32,136 @@ export interface LoginRequest {
 export interface LoginResponse {
   token: string
   expires_at: string // ISO 8601
+  user: UserItem
+}
+
+// --- Users ---
+
+export type UserRole = 'admin' | 'member'
+export type UserStatus = 'active' | 'disabled'
+export type AuthSource = 'local' | 'oidc'
+
+export interface UserItem {
+  id: string
+  username: string
+  display_name: string
+  email?: string
+  role: UserRole
+  status: UserStatus
+  auth_source: AuthSource
+  last_login_at?: string
+  created_at: string
+}
+
+export interface OIDCGroupMapping {
+  idp_group: string
+  user_group_id: string
+}
+
+export interface OIDCSettings {
+  enabled: boolean
+  issuer: string
+  client_id: string
+  client_secret: string // masked on GET; leave the mask to keep the stored value
+  scopes?: string[]
+  admin_emails?: string[]
+  allow_signup: boolean
+  group_claim?: string
+  group_mappings?: OIDCGroupMapping[]
+}
+
+export interface OIDCSettingsResponse extends OIDCSettings {
+  redirect_url: string // read-only; register this with the identity provider
+}
+
+export interface VerifyOIDCResponse {
+  success: boolean
+  issuer?: string
+  authorization_endpoint?: string
+  error?: string
+}
+
+export interface OIDCStatusResponse {
+  enabled: boolean
+}
+
+// --- Groups and grants ---
+
+export type NodeLevel = 'viewer' | 'operator' | 'manager'
+export type SubjectType = 'user' | 'user_group'
+export type ObjectType = 'node' | 'node_group' | 'all'
+
+export interface GroupItem {
+  id: string
+  name: string
+  description?: string
+  member_ids: string[]
+  created_at: string
+}
+
+export interface GroupRequest {
+  name?: string
+  description?: string
+  member_ids?: string[]
+}
+
+export interface GrantItem {
+  id: string
+  subject_type: SubjectType
+  subject_id: string
+  subject_name: string
+  object_type: ObjectType
+  object_id?: string
+  object_name: string
+  level: NodeLevel
+  created_at: string
+}
+
+export interface CreateGrantRequest {
+  subject_type: SubjectType
+  subject_id: string
+  object_type: ObjectType
+  object_id?: string
+  level: NodeLevel
+}
+
+export interface NodeAccessItem {
+  node_id: string
+  node_name: string
+  level: NodeLevel
+}
+
+export interface UserAccessResponse {
+  via_admin_role: boolean
+  items: NodeAccessItem[]
+}
+
+export interface UserAccessItem {
+  user_id: string
+  username: string
+  level: NodeLevel
+  via_admin_role: boolean
+}
+
+export interface CreateUserRequest {
+  username: string
+  password: string
+  display_name?: string
+  email?: string
+  role?: UserRole
+}
+
+export interface UpdateUserRequest {
+  display_name?: string
+  email?: string
+  role?: UserRole
+  status?: UserStatus
+  password?: string
+}
+
+export interface ChangePasswordRequest {
+  current_password: string
+  new_password: string
 }
 
 // ============================================================================
@@ -122,6 +252,7 @@ export interface UpdateConversationRequest {
 // ============================================================================
 
 export interface CreateNodeRequest {
+  node_group_id?: string // enrol nodes registered with this token into a group
   alias?: string
 }
 
@@ -150,6 +281,8 @@ export interface NodeListItem {
   disk?: number
   extra?: NodeExtra
   last_heartbeat?: string
+  groups?: string[]     // node group names
+  my_level?: NodeLevel  // caller's effective level; absent means no access
 }
 
 // NodeExtra is a free-form bag of metadata. Conventional keys are surfaced as
@@ -186,6 +319,8 @@ export interface NodeDetail {
   last_heartbeat?: string
   created_at: string
   metrics?: NodeMetrics
+  groups?: string[]     // node group names
+  my_level?: NodeLevel  // caller's effective level
 }
 
 export interface NodeMetrics {
@@ -335,13 +470,14 @@ export interface AuditLogItem {
   id: number
   node_id: string
   node_name: string
+  actor?: string // username that ran it
   command: string
   exit_code?: number
   stdout?: string
   stderr?: string
   duration_ms?: number
   confirmed: boolean
-  source: 'webui' | 'api' | 'mcp'
+  source: 'webui' | 'terminal' | 'terminal/file_op' | 'api' | 'cli'
   created_at: string
 }
 
@@ -376,7 +512,7 @@ export interface SensitiveOperationError {
 // API Key Management
 // ============================================================================
 
-export type APIKeyPermission = 'readonly' | 'standard' | 'admin'
+export type APIKeyPermission = 'readonly' | 'writable'
 
 export interface CreateAPIKeyRequest {
   name: string
@@ -395,6 +531,7 @@ export interface CreateAPIKeyResponse {
 export interface APIKeyListItem {
   id: string
   name: string
+  owner_username?: string // present for admins, who see every user's keys
   key_prefix: string
   permission: APIKeyPermission
   status: 'active' | 'revoked'

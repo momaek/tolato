@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/momaek/tolato/server/internal/authz"
+	"github.com/momaek/tolato/server/internal/middleware"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/security"
 	"github.com/momaek/tolato/server/internal/store"
@@ -15,16 +17,37 @@ import (
 
 // External API — /api/v1/
 
+// externalSource labels an audit row by how the v1 API was reached, so the
+// audit view can tell a `tolato` CLI invocation from a bare HTTP client. It is
+// a display hint taken from a client-controlled header — never an authorization
+// input.
+func externalSource(c *gin.Context) string {
+	if strings.HasPrefix(c.GetHeader("User-Agent"), "tolato-cli/") {
+		return "cli"
+	}
+	return "api"
+}
+
 type ExecuteCommandRequest struct {
 	Command string `json:"command" binding:"required"`
 	Timeout int    `json:"timeout"`
 	Confirm bool   `json:"confirm"`
 }
 
-// ExternalListNodes returns all nodes for external API consumers.
+// ExternalListNodes returns the nodes the API key's owner may see.
 func ExternalListNodes(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		nodes, _, err := store.ListNodes(1, 200, "")
+		visibleIDs, unrestricted, err := authz.VisibleNodeIDs(subjectOf(c))
+		if err != nil {
+			internalError(c, "failed to check permissions")
+			return
+		}
+		if !unrestricted && len(visibleIDs) == 0 {
+			c.JSON(http.StatusOK, []model.NodeListItem{})
+			return
+		}
+
+		nodes, _, err := store.ListNodesScoped(1, 200, "", visibleIDs, unrestricted)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: "db_error", Message: "Failed to list nodes"})
 			return
@@ -59,6 +82,9 @@ func ExternalListNodes(deps *Deps) gin.HandlerFunc {
 func ExternalGetNode(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if !requireNodeLevel(c, id, model.LevelViewer) {
+			return
+		}
 		n, err := store.GetNodeByID(id)
 		if err != nil {
 			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: "not_found", Message: "Node not found"})
@@ -94,12 +120,17 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 		permission := c.GetString("api_key_permission")
 		apiKeyID := c.GetString("api_key_id")
 
-		// Readonly keys cannot execute commands
-		if permission == "readonly" {
+		// A key's reach is the intersection of its own tier and its owner's
+		// permissions: readonly never executes, and writable only executes where
+		// the owner personally holds operator.
+		if permission != model.APIKeyWritable {
 			c.JSON(http.StatusForbidden, model.ErrorResponse{
 				Error:   "forbidden",
 				Message: "Read-only API keys cannot execute commands",
 			})
+			return
+		}
+		if !requireNodeLevel(c, nodeID, model.LevelOperator) {
 			return
 		}
 
@@ -115,7 +146,7 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 
 		// Check sensitive operation
 		checker := security.NewChecker(deps.Settings)
-		if permission != "admin" && checker.IsSensitive(req.Command) && !req.Confirm {
+		if checker.IsSensitive(req.Command) && !req.Confirm {
 			c.JSON(http.StatusConflict, model.ErrorResponse{
 				Error:   "sensitive_operation",
 				Message: "This command requires confirmation. Set confirm: true to proceed.",
@@ -149,8 +180,10 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 			store.CreateAuditLog(&model.AuditLog{
 				NodeID:   nodeID,
 				NodeName: n.Name,
+				UserID:   middleware.CurrentUserID(c),
+				Actor:    middleware.CurrentUsername(c),
 				Command:  req.Command,
-				Source:   "api",
+				Source:   externalSource(c),
 				APIKeyID: &apiKeyID,
 			})
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
@@ -166,13 +199,15 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 		store.CreateAuditLog(&model.AuditLog{
 			NodeID:     nodeID,
 			NodeName:   n.Name,
+			UserID:     middleware.CurrentUserID(c),
+			Actor:      middleware.CurrentUsername(c),
 			Command:    req.Command,
 			ExitCode:   &result.ExitCode,
 			Stdout:     &stdout,
 			Stderr:     &stderr,
 			DurationMS: &result.DurationMS,
-			Confirmed:  req.Confirm || permission == "admin",
-			Source:     "api",
+			Confirmed:  req.Confirm,
+			Source:     externalSource(c),
 			APIKeyID:   &apiKeyID,
 		})
 
@@ -295,6 +330,9 @@ func GetLLMModels(deps *Deps) gin.HandlerFunc {
 func ListNodeCommands(deps *Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		nodeID := c.Param("id")
+		if !requireNodeLevel(c, nodeID, model.LevelViewer) {
+			return
+		}
 		var query model.PaginationQuery
 		if err := c.ShouldBindQuery(&query); err != nil {
 			query.Page = 1
@@ -319,6 +357,7 @@ func ListNodeCommands(deps *Deps) gin.HandlerFunc {
 				ID:         l.ID,
 				NodeID:     l.NodeID,
 				NodeName:   l.NodeName,
+				Actor:      l.Actor,
 				Command:    l.Command,
 				ExitCode:   l.ExitCode,
 				Stdout:     l.Stdout,

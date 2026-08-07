@@ -26,6 +26,23 @@ import type {
   PaginationQuery,
   NodeCommandItem,
   ToolCallOutputResponse,
+  UserItem,
+  CreateUserRequest,
+  UpdateUserRequest,
+  ChangePasswordRequest,
+  APIKeyListItem,
+  CreateAPIKeyRequest,
+  CreateAPIKeyResponse,
+  OIDCSettings,
+  OIDCSettingsResponse,
+  OIDCStatusResponse,
+  VerifyOIDCResponse,
+  GroupItem,
+  GroupRequest,
+  GrantItem,
+  CreateGrantRequest,
+  UserAccessResponse,
+  UserAccessItem,
 } from '@/types/api'
 import router from '@/router'
 
@@ -63,6 +80,121 @@ api.interceptors.response.use(
 export async function login(data: LoginRequest): Promise<LoginResponse> {
   const res = await api.post<LoginResponse>('/auth/login', data)
   return res.data
+}
+
+export async function getCurrentUser(): Promise<UserItem> {
+  const res = await api.get<UserItem>('/auth/me')
+  return res.data
+}
+
+export async function changeOwnPassword(data: ChangePasswordRequest): Promise<void> {
+  await api.put('/auth/password', data)
+}
+
+// --- Single sign-on ---
+
+/** Unauthenticated: drives the SSO button on the login page. */
+export async function getOIDCStatus(): Promise<OIDCStatusResponse> {
+  const res = await api.get<OIDCStatusResponse>('/auth/oidc/status')
+  return res.data
+}
+
+export async function getOIDCSettings(): Promise<OIDCSettingsResponse> {
+  const res = await api.get<OIDCSettingsResponse>('/settings/oidc')
+  return res.data
+}
+
+export async function updateOIDCSettings(data: OIDCSettings): Promise<void> {
+  await api.put('/settings/oidc', data)
+}
+
+export async function verifyOIDC(data: OIDCSettings): Promise<VerifyOIDCResponse> {
+  const res = await api.post<VerifyOIDCResponse>('/settings/oidc/verify', data)
+  return res.data
+}
+
+// --- Groups and grants (admin only) ---
+
+export async function getUserGroups(): Promise<GroupItem[]> {
+  const res = await api.get<{ items: GroupItem[] }>('/user-groups')
+  return res.data.items ?? []
+}
+
+export async function createUserGroup(data: GroupRequest): Promise<GroupItem> {
+  const res = await api.post<GroupItem>('/user-groups', data)
+  return res.data
+}
+
+export async function updateUserGroup(id: string, data: GroupRequest): Promise<void> {
+  await api.put(`/user-groups/${id}`, data)
+}
+
+export async function deleteUserGroup(id: string): Promise<void> {
+  await api.delete(`/user-groups/${id}`)
+}
+
+export async function getNodeGroups(): Promise<GroupItem[]> {
+  const res = await api.get<{ items: GroupItem[] }>('/node-groups')
+  return res.data.items ?? []
+}
+
+export async function createNodeGroup(data: GroupRequest): Promise<GroupItem> {
+  const res = await api.post<GroupItem>('/node-groups', data)
+  return res.data
+}
+
+export async function updateNodeGroup(id: string, data: GroupRequest): Promise<void> {
+  await api.put(`/node-groups/${id}`, data)
+}
+
+export async function deleteNodeGroup(id: string): Promise<void> {
+  await api.delete(`/node-groups/${id}`)
+}
+
+export async function getGrants(): Promise<GrantItem[]> {
+  const res = await api.get<{ items: GrantItem[] }>('/grants')
+  return res.data.items ?? []
+}
+
+export async function createGrant(data: CreateGrantRequest): Promise<void> {
+  await api.post('/grants', data)
+}
+
+export async function deleteGrant(id: string): Promise<void> {
+  await api.delete(`/grants/${id}`)
+}
+
+/** What one user can reach, with grants resolved. Admin only. */
+export async function getUserAccess(id: string): Promise<UserAccessResponse> {
+  const res = await api.get<UserAccessResponse>(`/users/${id}/access`)
+  return res.data
+}
+
+/** Who can reach one node, with grants resolved. Admin only. */
+export async function getNodeAccess(id: string): Promise<UserAccessItem[]> {
+  const res = await api.get<{ items: UserAccessItem[] }>(`/nodes/${id}/access`)
+  return res.data.items ?? []
+}
+
+// --- User management (admin only) ---
+
+export async function getUsers(): Promise<UserItem[]> {
+  const res = await api.get<{ items: UserItem[] }>('/users')
+  return res.data.items ?? []
+}
+
+export async function createUser(data: CreateUserRequest): Promise<UserItem> {
+  const res = await api.post<UserItem>('/users', data)
+  return res.data
+}
+
+export async function updateUser(id: string, data: UpdateUserRequest): Promise<UserItem> {
+  const res = await api.put<UserItem>(`/users/${id}`, data)
+  return res.data
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await api.delete(`/users/${id}`)
 }
 
 export interface VersionInfo {
@@ -252,13 +384,13 @@ export async function getAuditLogs(query: AuditLogQuery): Promise<PaginatedRespo
 
 // --- API Keys ---
 
-export async function getAPIKeys(): Promise<any[]> {
-  const res = await api.get('/api-keys')
+export async function getAPIKeys(): Promise<APIKeyListItem[]> {
+  const res = await api.get<APIKeyListItem[]>('/api-keys')
   return res.data
 }
 
-export async function createAPIKey(data: { name: string; permission: string }): Promise<any> {
-  const res = await api.post('/api-keys', data)
+export async function createAPIKey(data: CreateAPIKeyRequest): Promise<CreateAPIKeyResponse> {
+  const res = await api.post<CreateAPIKeyResponse>('/api-keys', data)
   return res.data
 }
 

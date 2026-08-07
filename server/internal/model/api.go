@@ -37,6 +37,185 @@ type LoginRequest struct {
 type LoginResponse struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
+	User      UserItem  `json:"user"`
+}
+
+// PUT /api/auth/password — self-service change, proves the current password.
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+}
+
+// --- OIDC / single sign-on ---
+//
+// Stored as one JSON blob under the setting key "oidc.config" and edited from
+// the admin UI, so enabling SSO needs no config-file change or restart.
+//
+// ClientSecret is masked on GET (e.g. "abcd****wxyz"). On PUT, a value still
+// containing the "****" sentinel means "unchanged" and the stored secret is
+// kept — same pattern as the LLM and web-fetch API keys.
+type OIDCSettings struct {
+	Enabled bool `json:"enabled"`
+	// Issuer is the IdP base URL; its /.well-known/openid-configuration is
+	// fetched for endpoint discovery.
+	Issuer       string `json:"issuer"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"` // masked on GET
+	// Scopes requested at authorization. "openid" is always added.
+	Scopes []string `json:"scopes,omitempty"`
+	// AdminEmails lists verified email addresses provisioned as admins on first
+	// sign-in. Everyone else becomes a member.
+	AdminEmails []string `json:"admin_emails,omitempty"`
+	// AllowSignup gates whether an unrecognized subject may create an account.
+	// Off means only users who already exist locally can sign in via SSO.
+	AllowSignup bool `json:"allow_signup"`
+	// GroupClaim names the ID-token claim carrying the user's IdP groups
+	// (commonly "groups"). Empty disables group sync entirely.
+	GroupClaim string `json:"group_claim,omitempty"`
+	// GroupMappings translates IdP group names into Tolato user groups. Only
+	// the groups named here are ever synced — see OIDCGroupMapping.
+	GroupMappings []OIDCGroupMapping `json:"group_mappings,omitempty"`
+}
+
+// OIDCGroupMapping ties one IdP group name to one Tolato user group.
+//
+// Sync is scoped to the mapped groups on purpose: a user's membership of a
+// group that appears here is owned by the IdP and re-derived on every sign-in,
+// while any other group they were added to by hand is left alone. Without that
+// scoping, turning on group sync would silently empty every manually curated
+// group on the next login.
+type OIDCGroupMapping struct {
+	IdPGroup    string `json:"idp_group"`
+	UserGroupID string `json:"user_group_id"`
+}
+
+// GET /api/settings/oidc — adds the read-only callback URL for the admin to
+// register with the IdP.
+type OIDCSettingsResponse struct {
+	OIDCSettings
+	RedirectURL string `json:"redirect_url"`
+}
+
+// POST /api/settings/oidc/verify
+type VerifyOIDCResponse struct {
+	Success               bool   `json:"success"`
+	Issuer                string `json:"issuer,omitempty"`
+	AuthorizationEndpoint string `json:"authorization_endpoint,omitempty"`
+	Error                 string `json:"error,omitempty"`
+}
+
+// GET /api/auth/oidc/status — unauthenticated; drives the login page's SSO
+// button. Deliberately exposes nothing but whether SSO is on.
+type OIDCStatusResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+// --- Users (admin-managed) ---
+
+type UserItem struct {
+	ID          string     `json:"id"`
+	Username    string     `json:"username"`
+	DisplayName string     `json:"display_name"`
+	Email       string     `json:"email,omitempty"`
+	Role        string     `json:"role"`        // admin, member
+	Status      string     `json:"status"`      // active, disabled
+	AuthSource  string     `json:"auth_source"` // local, oidc
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// POST /api/users
+type CreateUserRequest struct {
+	Username    string `json:"username" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Role        string `json:"role"` // defaults to member
+}
+
+// PUT /api/users/:id — every field optional; omitted fields are left alone.
+type UpdateUserRequest struct {
+	DisplayName *string `json:"display_name,omitempty"`
+	Email       *string `json:"email,omitempty"`
+	Role        *string `json:"role,omitempty"`
+	Status      *string `json:"status,omitempty"`
+	Password    *string `json:"password,omitempty"` // admin reset; no current-password check
+}
+
+// --- Groups and grants ---
+
+type UserGroupItem struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	MemberIDs   []string  `json:"member_ids"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type NodeGroupItem struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	MemberIDs   []string  `json:"member_ids"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// POST/PUT for both group kinds. MemberIDs replaces the membership wholesale
+// when present; omit it to leave membership untouched.
+type GroupRequest struct {
+	Name        *string   `json:"name,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	MemberIDs   *[]string `json:"member_ids,omitempty"`
+}
+
+// GrantItem carries resolved subject/object names so the UI can render a grant
+// without cross-referencing three more endpoints.
+type GrantItem struct {
+	ID          string    `json:"id"`
+	SubjectType string    `json:"subject_type"`
+	SubjectID   string    `json:"subject_id"`
+	SubjectName string    `json:"subject_name"`
+	ObjectType  string    `json:"object_type"`
+	ObjectID    string    `json:"object_id,omitempty"`
+	ObjectName  string    `json:"object_name"`
+	Level       string    `json:"level"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// POST /api/grants — granting the same subject on the same object again edits
+// the level rather than creating a duplicate.
+type CreateGrantRequest struct {
+	SubjectType string `json:"subject_type" binding:"required"` // user, user_group
+	SubjectID   string `json:"subject_id" binding:"required"`
+	ObjectType  string `json:"object_type" binding:"required"` // node, node_group, all
+	ObjectID    string `json:"object_id"`                      // empty when object_type is "all"
+	Level       string `json:"level" binding:"required"`       // viewer, operator, manager
+}
+
+// --- Effective access (the grant list, resolved) ---
+
+// NodeAccessItem is one node a user can reach.
+type NodeAccessItem struct {
+	NodeID   string `json:"node_id"`
+	NodeName string `json:"node_name"`
+	Level    string `json:"level"`
+}
+
+// GET /api/users/:id/access
+type UserAccessResponse struct {
+	// ViaAdminRole marks a list that comes from the admin role rather than any
+	// grant, so the UI can say so instead of implying rules exist.
+	ViaAdminRole bool             `json:"via_admin_role"`
+	Items        []NodeAccessItem `json:"items"`
+}
+
+// UserAccessItem is one person who can reach a node.
+// GET /api/nodes/:id/access
+type UserAccessItem struct {
+	UserID       string `json:"user_id"`
+	Username     string `json:"username"`
+	Level        string `json:"level"`
+	ViaAdminRole bool   `json:"via_admin_role"`
 }
 
 // --- Conversations ---
@@ -120,6 +299,9 @@ type UpdateConversationRequest struct {
 // POST /api/nodes — generates a reusable registration token
 type CreateNodeRequest struct {
 	Alias *string `json:"alias,omitempty"` // optional alias prefix for nodes registered with this token
+	// NodeGroupID enrols every node registered with this token into that group,
+	// so the grants already on the group apply the moment the agent connects.
+	NodeGroupID *string `json:"node_group_id,omitempty"`
 }
 
 type CreateNodeResponse struct {
@@ -147,6 +329,8 @@ type NodeListItem struct {
 	Disk          *float64   `json:"disk,omitempty"`            // current disk usage %
 	Extra         JSONMap    `json:"extra,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
+	Groups        []string   `json:"groups,omitempty"`   // node group names
+	MyLevel       string     `json:"my_level,omitempty"` // caller's effective level
 }
 
 // GET /api/nodes/:id
@@ -168,6 +352,8 @@ type NodeDetail struct {
 	Extra         JSONMap    `json:"extra,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
+	Groups        []string   `json:"groups,omitempty"`   // node group names
+	MyLevel       string     `json:"my_level,omitempty"` // caller's effective level
 
 	// Real-time metrics from heartbeat cache
 	Metrics *NodeMetrics `json:"metrics,omitempty"`
@@ -331,12 +517,13 @@ type AuditLogItem struct {
 	ID         uint      `json:"id"`
 	NodeID     string    `json:"node_id"`
 	NodeName   string    `json:"node_name"`
+	Actor      string    `json:"actor,omitempty"` // username that ran it
 	Command    string    `json:"command"`
 	ExitCode   *int      `json:"exit_code,omitempty"`
 	Stdout     *string   `json:"stdout,omitempty"`
 	Stderr     *string   `json:"stderr,omitempty"`
 	DurationMS *int64    `json:"duration_ms,omitempty"`
 	Confirmed  bool      `json:"confirmed"`
-	Source     string    `json:"source"` // webui, api, mcp
+	Source     string    `json:"source"` // webui, terminal, api, cli
 	CreatedAt  time.Time `json:"created_at"`
 }

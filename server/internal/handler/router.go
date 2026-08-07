@@ -1,19 +1,21 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/momaek/tolato/server/internal/auth"
 	"github.com/momaek/tolato/server/internal/config"
 	"github.com/momaek/tolato/server/internal/geoip"
-	"github.com/momaek/tolato/server/internal/mcp"
 	"github.com/momaek/tolato/server/internal/middleware"
+	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/notify"
 	"github.com/momaek/tolato/server/internal/settings"
+	"github.com/momaek/tolato/server/internal/store"
 	"github.com/momaek/tolato/server/internal/webui"
 )
 
@@ -28,19 +30,38 @@ type Deps struct {
 	Settings    *settings.Cache
 	GeoIP       *geoip.Service     // may be nil when geoip is disabled
 	Notifier    *notify.Dispatcher // node offline/online notifications
+	OIDC        *auth.OIDCManager  // caches the discovered SSO provider
 	Version     string             // server build version (e.g. "v0.8.10"), "dev" in local builds
 }
 
-// ValidateToken validates a JWT token string and returns the claims.
-func (d *Deps) ValidateToken(tokenString string) (*middleware.Claims, error) {
-	claims := &middleware.Claims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
-		return []byte(middleware.JWTSecret), nil
-	})
-	if err != nil || !token.Valid {
-		return nil, err
+// errAuth is returned for every WebSocket authentication failure. The specific
+// cause is logged server-side but never told to the client.
+var errAuth = errors.New("invalid or expired token")
+
+// AuthenticateToken validates a JWT carried in a WebSocket handshake and
+// returns the live user behind it.
+//
+// The WebSocket handlers can't run through JWTAuth (the token arrives in the
+// first frame, not a header), so this is the equivalent gate: signature, then a
+// database lookup that re-checks the account still exists and is active. A
+// long-lived socket is only authorized at connect time, so a user disabled
+// mid-session keeps their current socket until it drops — new ones are refused.
+func (d *Deps) AuthenticateToken(tokenString string) (*model.User, error) {
+	claims, err := middleware.ParseTokenString(tokenString)
+	if err != nil {
+		return nil, errAuth
 	}
-	return claims, nil
+	if claims.UserID == "" {
+		return nil, errAuth
+	}
+	user, err := store.GetUserByID(claims.UserID)
+	if err != nil {
+		return nil, errAuth
+	}
+	if user.Status != model.UserStatusActive {
+		return nil, errAuth
+	}
+	return user, nil
 }
 
 // SetupRouter creates and configures the Gin router with all routes.
@@ -66,12 +87,48 @@ func SetupRouter(deps *Deps) *gin.Engine {
 
 	api := r.Group("/api")
 
-	// Auth (no JWT required)
+	// Auth (no JWT required). The SSO endpoints are necessarily public: they
+	// are what a not-yet-signed-in browser walks through.
 	api.POST("/auth/login", LoginHandler(deps))
+	api.GET("/auth/oidc/status", OIDCStatus(deps))
+	api.GET("/auth/oidc/login", OIDCLogin(deps))
+	api.GET("/auth/oidc/callback", OIDCCallback(deps))
 
 	// JWT-protected routes
 	protected := api.Group("")
 	protected.Use(middleware.JWTAuth())
+
+	// Admin-only routes. Everything that configures the instance lives here;
+	// members get the chat, the nodes they've been granted, and their own keys.
+	admin := api.Group("")
+	admin.Use(middleware.JWTAuth(), middleware.RequireAdmin())
+
+	// Session / self-service
+	protected.GET("/auth/me", CurrentUser(deps))
+	protected.PUT("/auth/password", ChangeOwnPassword(deps))
+
+	// User groups, node groups and grants — the permission model's admin surface
+	admin.GET("/user-groups", ListUserGroups(deps))
+	admin.POST("/user-groups", CreateUserGroup(deps))
+	admin.PUT("/user-groups/:id", UpdateUserGroup(deps))
+	admin.DELETE("/user-groups/:id", DeleteUserGroup(deps))
+	admin.GET("/node-groups", ListNodeGroups(deps))
+	admin.POST("/node-groups", CreateNodeGroup(deps))
+	admin.PUT("/node-groups/:id", UpdateNodeGroup(deps))
+	admin.DELETE("/node-groups/:id", DeleteNodeGroup(deps))
+	admin.GET("/grants", ListGrants(deps))
+	admin.POST("/grants", CreateGrant(deps))
+	admin.DELETE("/grants/:id", DeleteGrant(deps))
+
+	// User management
+	admin.GET("/users", ListUsers(deps))
+	admin.POST("/users", CreateUser(deps))
+	admin.PUT("/users/:id", UpdateUser(deps))
+	admin.DELETE("/users/:id", DeleteUser(deps))
+
+	// The grant list resolved into effective access, from either direction.
+	admin.GET("/users/:id/access", UserAccess(deps))
+	admin.GET("/nodes/:id/access", NodeAccess(deps))
 
 	// Conversations
 	protected.POST("/conversations", CreateConversation(deps))
@@ -83,7 +140,7 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.GET("/conversations/:id/tool-calls/:toolCallId/output", GetToolCallOutput(deps))
 
 	// Nodes
-	protected.POST("/nodes", CreateNode(deps))
+	admin.POST("/nodes", CreateNode(deps))
 	protected.GET("/nodes", ListNodes(deps))
 	protected.GET("/nodes/:id", GetNode(deps))
 	protected.PUT("/nodes/:id", UpdateNode(deps))
@@ -91,21 +148,24 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.DELETE("/nodes/:id", DeleteNode(deps))
 
 	// Settings
-	protected.GET("/settings/llm", GetLLMSettings(deps))
-	protected.PUT("/settings/llm", PutLLMSettings(deps))
-	protected.GET("/settings/security", GetSecuritySettings(deps))
-	protected.PUT("/settings/security", PutSecuritySettings(deps))
-	protected.GET("/settings/agent", GetAgentSettings(deps))
-	protected.PUT("/settings/agent", PutAgentSettings(deps))
-	protected.GET("/settings/chat", GetChatSettings(deps))
-	protected.PUT("/settings/chat", PutChatSettings(deps))
-	protected.GET("/settings/webfetch", GetWebFetchSettings(deps))
-	protected.PUT("/settings/webfetch", PutWebFetchSettings(deps))
-	protected.POST("/settings/webfetch/verify", VerifyWebFetchSettings(deps))
-	protected.GET("/settings/notify", GetNotifySettings(deps))
-	protected.PUT("/settings/notify", PutNotifySettings(deps))
-	protected.GET("/settings/notify/presets", GetNotifyPresets(deps))
-	protected.POST("/settings/notify/test", TestNotifyChannel(deps))
+	admin.GET("/settings/llm", GetLLMSettings(deps))
+	admin.PUT("/settings/llm", PutLLMSettings(deps))
+	admin.GET("/settings/security", GetSecuritySettings(deps))
+	admin.PUT("/settings/security", PutSecuritySettings(deps))
+	admin.GET("/settings/agent", GetAgentSettings(deps))
+	admin.PUT("/settings/agent", PutAgentSettings(deps))
+	admin.GET("/settings/chat", GetChatSettings(deps))
+	admin.PUT("/settings/chat", PutChatSettings(deps))
+	admin.GET("/settings/webfetch", GetWebFetchSettings(deps))
+	admin.PUT("/settings/webfetch", PutWebFetchSettings(deps))
+	admin.POST("/settings/webfetch/verify", VerifyWebFetchSettings(deps))
+	admin.GET("/settings/notify", GetNotifySettings(deps))
+	admin.PUT("/settings/notify", PutNotifySettings(deps))
+	admin.GET("/settings/notify/presets", GetNotifyPresets(deps))
+	admin.POST("/settings/notify/test", TestNotifyChannel(deps))
+	admin.GET("/settings/oidc", GetOIDCSettings(deps))
+	admin.PUT("/settings/oidc", PutOIDCSettings(deps))
+	admin.POST("/settings/oidc/verify", VerifyOIDCSettings(deps))
 
 	// Audit Logs
 	protected.GET("/audit-logs", ListAuditLogs(deps))
@@ -114,8 +174,8 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	protected.GET("/nodes/:id/commands", ListNodeCommands(deps))
 
 	// LLM verify + cached models
-	protected.POST("/settings/llm/verify", VerifyLLMSettings(deps))
-	protected.GET("/settings/llm/models", GetLLMModels(deps))
+	admin.POST("/settings/llm/verify", VerifyLLMSettings(deps))
+	admin.GET("/settings/llm/models", GetLLMModels(deps))
 
 	// API Keys management
 	protected.POST("/api-keys", CreateAPIKey(deps))
@@ -131,14 +191,6 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	v1.GET("/nodes", ExternalListNodes(deps))
 	v1.GET("/nodes/:id", ExternalGetNode(deps))
 	v1.POST("/nodes/:id/execute", ExternalExecuteCommand(deps))
-
-	// MCP endpoint for Claude Code / other MCP clients. Streamable HTTP
-	// transport over JSON-RPC 2.0; reuses the same API-key auth as /api/v1.
-	mcpGroup := r.Group("/mcp")
-	mcpGroup.Use(middleware.APIKeyAuth())
-	mcpHandler := mcp.Handler(deps.NodeManager, deps.Settings)
-	mcpGroup.POST("", mcpHandler)
-	mcpGroup.GET("", mcpHandler) // returns 405 with a useful body
 
 	// Agent install script: 302 → GitHub raw (configurable via server.install_script_url).
 	// curl -fsSL follows the redirect transparently.

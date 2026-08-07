@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/momaek/tolato/server/internal/agent"
+	"github.com/momaek/tolato/server/internal/authz"
 	"github.com/momaek/tolato/server/internal/llm"
 	"github.com/momaek/tolato/server/internal/model"
 	"github.com/momaek/tolato/server/internal/security"
@@ -77,8 +78,9 @@ func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 		}
 
 		// Validate JWT token
-		if _, err := deps.ValidateToken(authMsg.Payload.Token); err != nil {
-			log.Printf("[chat_ws] invalid token")
+		user, err := deps.AuthenticateToken(authMsg.Payload.Token)
+		if err != nil {
+			log.Printf("[chat_ws] rejected connection: %v", err)
 			_ = conn.WriteJSON(model.WSMessage{
 				Type:    model.WSTypeError,
 				Payload: model.WSErrorEvent{Message: "invalid or expired token"},
@@ -155,7 +157,7 @@ func ChatWSHandler(deps *Deps) gin.HandlerFunc {
 		defer cancel()
 
 		// Reader loop: reads messages from frontend
-		chatReadLoop(ctx, session, deps, loops, eventCh, &runnersWG)
+		chatReadLoop(ctx, session, deps, user, loops, eventCh, &runnersWG)
 	}
 }
 
@@ -234,7 +236,7 @@ type chatInbound struct {
 	Payload        json.RawMessage `json:"payload,omitempty"`
 }
 
-func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup) {
+func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, user *model.User, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup) {
 	conn := session.Conn()
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -256,7 +258,7 @@ func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, loops *
 				log.Printf("[chat_ws] bad user_message payload: %v", err)
 				continue
 			}
-			handleUserMessage(ctx, deps, loops, eventCh, runnersWG, msg.ConversationID, evt)
+			handleUserMessage(ctx, deps, user, loops, eventCh, runnersWG, msg.ConversationID, evt)
 		case model.WSTypeConfirmResponse:
 			var evt model.WSConfirmResponseEvent
 			if err := json.Unmarshal(msg.Payload, &evt); err != nil {
@@ -272,9 +274,23 @@ func chatReadLoop(ctx context.Context, session *ChatSession, deps *Deps, loops *
 	}
 }
 
-func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup, convID string, evt model.WSUserMessageEvent) {
+func handleUserMessage(ctx context.Context, deps *Deps, user *model.User, loops *loopRegistry, eventCh chan any, runnersWG *sync.WaitGroup, convID string, evt model.WSUserMessageEvent) {
 	if convID == "" {
 		log.Printf("[chat_ws] user_message missing conversation_id")
+		return
+	}
+
+	// Conversations are private, and the ID arrives from the client — so the
+	// socket being authenticated isn't enough. Without this check any logged-in
+	// user could append to (and read the replies of) somebody else's chat by
+	// guessing its ID.
+	owns, err := store.ConversationBelongsTo(user.ID, convID)
+	if err != nil || !owns {
+		log.Printf("[chat_ws] user %s denied access to conv %s (err=%v)", user.Username, convID, err)
+		select {
+		case eventCh <- agent.ErrorEvent{ConversationID: convID, Message: "conversation not found"}:
+		case <-ctx.Done():
+		}
 		return
 	}
 
@@ -292,9 +308,13 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 		llmCfg.Model = *evt.Model
 	}
 
-	llmClient := llm.NewClient(llmCfg, agent.ToolDefs())
+	subject := authz.SubjectOf(user)
+
+	// The tool set is trimmed to the caller's role, so a member's conversation
+	// is never even offered the node-mutating tools.
+	llmClient := llm.NewClient(llmCfg, agent.ToolDefsFor(subject.IsAdmin))
 	secChecker := security.NewChecker(deps.Settings)
-	toolExec := agent.NewToolExecutor(deps.NodeManager, secChecker, deps.Settings, chatSettings.OutputTruncateLines)
+	toolExec := agent.NewToolExecutor(deps.NodeManager, secChecker, deps.Settings, chatSettings.OutputTruncateLines, subject)
 	promptBuilder := agent.NewPromptBuilder()
 
 	// Decide whether to auto-generate a title for this conversation. Done
@@ -305,7 +325,7 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 		runnersWG.Add(1)
 		go func() {
 			defer runnersWG.Done()
-			generateAndEmitTitle(ctx, llmCfg, convID, evt.Content, eventCh)
+			generateAndEmitTitle(ctx, llmCfg, user.ID, convID, evt.Content, eventCh)
 		}()
 	}
 
@@ -318,7 +338,7 @@ func handleUserMessage(ctx context.Context, deps *Deps, loops *loopRegistry, eve
 		MaxRounds:      llmSettings.MaxRounds,
 		ContextRounds:  chatSettings.ContextRounds,
 		GetNodeInfos: func() []agent.NodeInfo {
-			return getNodeInfos(deps)
+			return getNodeInfos(deps, subject)
 		},
 		GetCustomPrompt: func() string {
 			cs := deps.Settings.Chat()
@@ -461,8 +481,24 @@ func chatWriteLoop(session *ChatSession, eventCh chan any) {
 
 // Helper functions
 
-func getNodeInfos(deps *Deps) []agent.NodeInfo {
-	nodes, _, err := store.ListNodes(1, 200, "")
+// getNodeInfos builds the machine inventory injected into the model's system
+// prompt, restricted to what this user may see.
+//
+// This is the primary defence, not the per-tool checks: a node the user has no
+// grant on never enters the model's context, so it cannot be named in a
+// suggestion, leaked in a summary, or reasoned about at all. The checks inside
+// the tool executor exist for the case where the model invents an id anyway.
+func getNodeInfos(deps *Deps, subject authz.Subject) []agent.NodeInfo {
+	visibleIDs, unrestricted, err := authz.VisibleNodeIDs(subject)
+	if err != nil {
+		log.Printf("[chat_ws] node visibility lookup failed: %v", err)
+		return nil
+	}
+	if !unrestricted && len(visibleIDs) == 0 {
+		return nil
+	}
+
+	nodes, _, err := store.ListNodesScoped(1, 200, "", visibleIDs, unrestricted)
 	if err != nil {
 		return nil
 	}

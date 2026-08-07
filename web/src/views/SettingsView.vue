@@ -50,8 +50,16 @@ import {
   getAPIKeys,
   createAPIKey,
   deleteAPIKey,
+  changeOwnPassword,
+  getOIDCSettings,
+  updateOIDCSettings,
+  verifyOIDC,
+  getUserGroups,
 } from '@/services/api'
+import { useAppStore } from '@/stores/app'
+import type { GroupItem } from '@/types/api'
 import type {
+  APIKeyPermission,
   LLMSettings,
   SecuritySettings,
   AgentSettings,
@@ -63,20 +71,36 @@ import type {
   NotifyPreset,
   NotifyChannel,
   NotifyTokenSource,
+  OIDCSettings,
+  OIDCGroupMapping,
+  VerifyOIDCResponse,
 } from '@/types/api'
 
 const { t } = useI18n()
-const activeTab = ref('llm')
+const appStore = useAppStore()
+const isAdmin = computed(() => appStore.isAdmin)
 
+// Everything that configures the instance is admin-only, reads included: these
+// payloads carry masked provider keys and webhook URLs. Members get their own
+// account and their own API keys, nothing else. Hiding the tabs is a courtesy —
+// each endpoint behind them is gated server-side too.
 const tabs = computed(() => [
-  { id: 'llm', label: t('settings.tabs.llm') },
-  { id: 'security', label: t('settings.tabs.security') },
-  { id: 'agent', label: t('settings.tabs.agent') },
-  { id: 'chat', label: t('settings.tabs.chat') },
-  { id: 'web_fetch', label: t('settings.tabs.webFetch') },
-  { id: 'notify', label: t('settings.tabs.notify') },
+  ...(isAdmin.value
+    ? [
+        { id: 'llm', label: t('settings.tabs.llm') },
+        { id: 'security', label: t('settings.tabs.security') },
+        { id: 'agent', label: t('settings.tabs.agent') },
+        { id: 'chat', label: t('settings.tabs.chat') },
+        { id: 'web_fetch', label: t('settings.tabs.webFetch') },
+        { id: 'notify', label: t('settings.tabs.notify') },
+        { id: 'oidc', label: t('settings.tabs.oidc') },
+      ]
+    : []),
   { id: 'api_keys', label: t('settings.tabs.apiKeys') },
+  { id: 'account', label: t('settings.tabs.account') },
 ])
+
+const activeTab = ref(isAdmin.value ? 'llm' : 'api_keys')
 
 // LLM
 const llm = ref<LLMSettings>({
@@ -370,12 +394,18 @@ async function testChannel(ch: NotifyChannel) {
 const apiKeys = ref<any[]>([])
 const showCreateKeyDialog = ref(false)
 const newKeyName = ref('')
-const newKeyPermission = ref('standard')
+const newKeyPermission = ref<APIKeyPermission>('readonly')
 const createdKey = ref<string | null>(null)
 const keyCopied = ref(false)
 
 onMounted(async () => {
   try {
+    apiKeys.value = await getAPIKeys().catch(() => [])
+
+    // The instance settings endpoints are admin-only; a member requesting them
+    // would collect a row of 403s and the "failed to load" toast.
+    if (!isAdmin.value) return
+
     const [llmData, secData, agentData, chatData, webFetchData] = await Promise.all([
       getLLMSettings(),
       getSecuritySettings(),
@@ -388,12 +418,138 @@ onMounted(async () => {
     agent.value = agentData
     chat.value = chatData
     webFetch.value = webFetchData
-    apiKeys.value = await getAPIKeys().catch(() => [])
     await loadNotify().catch(() => {})
+    await loadOIDC().catch(() => {})
   } catch {
     toast.error(t('settings.failedToLoad'))
   }
 })
+
+// --- Single sign-on (OIDC) ---
+
+const oidc = ref<OIDCSettings>({
+  enabled: false,
+  issuer: '',
+  client_id: '',
+  client_secret: '',
+  scopes: [],
+  admin_emails: [],
+  allow_signup: true,
+  group_claim: '',
+  group_mappings: [],
+})
+// Tolato user groups, to pick as mapping targets.
+const oidcUserGroups = ref<GroupItem[]>([])
+const oidcRedirectURL = ref('')
+const oidcAdminEmailsInput = ref('')
+const oidcScopesInput = ref('')
+const oidcVerifyResult = ref<VerifyOIDCResponse | null>(null)
+const oidcVerifying = ref(false)
+const oidcSaving = ref(false)
+const oidcRedirectCopied = ref(false)
+
+async function loadOIDC() {
+  const data = await getOIDCSettings()
+  oidcRedirectURL.value = data.redirect_url
+  oidc.value = {
+    enabled: data.enabled,
+    issuer: data.issuer,
+    client_id: data.client_id,
+    client_secret: data.client_secret,
+    scopes: data.scopes ?? [],
+    admin_emails: data.admin_emails ?? [],
+    allow_signup: data.allow_signup,
+    group_claim: data.group_claim ?? '',
+    group_mappings: data.group_mappings ?? [],
+  }
+  oidcAdminEmailsInput.value = (data.admin_emails ?? []).join(', ')
+  oidcScopesInput.value = (data.scopes ?? []).join(' ')
+  oidcUserGroups.value = await getUserGroups().catch(() => [])
+}
+
+function addGroupMapping() {
+  oidc.value.group_mappings = [...(oidc.value.group_mappings ?? []), { idp_group: '', user_group_id: '' }]
+}
+
+function removeGroupMapping(index: number) {
+  oidc.value.group_mappings = (oidc.value.group_mappings ?? []).filter((_, i) => i !== index)
+}
+
+/** Splits a comma/whitespace separated field into a clean list. */
+function splitList(raw: string, separator: RegExp): string[] {
+  return raw.split(separator).map((v) => v.trim()).filter(Boolean)
+}
+
+function oidcPayload(): OIDCSettings {
+  return {
+    ...oidc.value,
+    admin_emails: splitList(oidcAdminEmailsInput.value, /[,\s]+/),
+    scopes: splitList(oidcScopesInput.value, /[,\s]+/),
+    // Half-filled rows would be saved as rules that match nothing.
+    group_mappings: (oidc.value.group_mappings ?? []).filter(
+      (m: OIDCGroupMapping) => m.idp_group.trim() && m.user_group_id,
+    ),
+  }
+}
+
+async function handleVerifyOIDC() {
+  oidcVerifying.value = true
+  oidcVerifyResult.value = null
+  try {
+    oidcVerifyResult.value = await verifyOIDC(oidcPayload())
+  } catch {
+    oidcVerifyResult.value = { success: false, error: t('settings.oidc.verifyFailed') }
+  } finally {
+    oidcVerifying.value = false
+  }
+}
+
+async function saveOIDC() {
+  oidcSaving.value = true
+  try {
+    await updateOIDCSettings(oidcPayload())
+    await loadOIDC() // re-mask the secret
+  } catch (err) {
+    const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+    toast.error(message || t('settings.saveFailed'))
+  } finally {
+    oidcSaving.value = false
+  }
+}
+
+async function copyRedirectURL() {
+  await navigator.clipboard.writeText(oidcRedirectURL.value)
+  oidcRedirectCopied.value = true
+  setTimeout(() => (oidcRedirectCopied.value = false), 1500)
+}
+
+// --- Account (self-service) ---
+
+const pw = ref({ current: '', next: '', confirm: '' })
+const pwSaving = ref(false)
+
+const canChangePassword = computed(
+  () => pw.value.current.length > 0 && pw.value.next.length >= 8 && pw.value.confirm.length > 0,
+)
+
+async function handleChangePassword() {
+  if (!canChangePassword.value) return
+  if (pw.value.next !== pw.value.confirm) {
+    toast.error(t('settings.account.passwordMismatch'))
+    return
+  }
+  pwSaving.value = true
+  try {
+    await changeOwnPassword({ current_password: pw.value.current, new_password: pw.value.next })
+    pw.value = { current: '', next: '', confirm: '' }
+    toast.success(t('settings.account.passwordChanged'))
+  } catch (err) {
+    const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+    toast.error(message || t('settings.account.failedToChange'))
+  } finally {
+    pwSaving.value = false
+  }
+}
 
 async function handleVerifyLLM() {
   verifying.value = true
@@ -525,7 +681,7 @@ async function handleCreateKey() {
     createdKey.value = res.key
     apiKeys.value = await getAPIKeys()
     newKeyName.value = ''
-    newKeyPermission.value = 'standard'
+    newKeyPermission.value = 'readonly'
   } catch {
     toast.error(t('settings.saveFailed'))
   }
@@ -1195,6 +1351,208 @@ function closeCreateDialog() {
       </div>
 
       <!-- API Keys -->
+
+      <!-- Single sign-on -->
+      <div v-if="activeTab === 'oidc'" class="max-w-2xl space-y-6">
+        <div>
+          <h2 class="text-base font-semibold">{{ $t('settings.oidc.title') }}</h2>
+          <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.description') }}
+          </p>
+        </div>
+
+        <div class="flex items-center justify-between rounded-lg border p-3" style="border-color: var(--border)">
+          <div>
+            <p class="text-sm font-medium">{{ $t('settings.oidc.enable') }}</p>
+            <p class="text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.oidc.enableHelp') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+            :style="{ backgroundColor: oidc.enabled ? 'var(--primary)' : 'var(--secondary)' }"
+            @click="oidc.enabled = !oidc.enabled"
+          >
+            <span
+              class="absolute top-0.5 block h-5 w-5 rounded-full bg-white transition-transform"
+              :class="oidc.enabled ? 'translate-x-5' : 'translate-x-0.5'"
+            />
+          </button>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium">{{ $t('settings.oidc.redirectUrl') }}</label>
+          <div class="flex gap-2">
+            <Input :model-value="oidcRedirectURL" readonly class="font-mono text-xs" />
+            <Button variant="outline" size="icon" @click="copyRedirectURL">
+              <Check v-if="oidcRedirectCopied" class="h-4 w-4" />
+              <Copy v-else class="h-4 w-4" />
+            </Button>
+          </div>
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.redirectUrlHelp') }}
+          </p>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium">{{ $t('settings.oidc.issuer') }}</label>
+          <Input v-model="oidc.issuer" placeholder="https://accounts.example.com" />
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.issuerHelp') }}
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-1.5">
+            <label class="text-sm font-medium">{{ $t('settings.oidc.clientId') }}</label>
+            <Input v-model="oidc.client_id" autocomplete="off" />
+          </div>
+          <div class="space-y-1.5">
+            <label class="text-sm font-medium">{{ $t('settings.oidc.clientSecret') }}</label>
+            <Input v-model="oidc.client_secret" type="password" autocomplete="new-password" />
+          </div>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium">{{ $t('settings.oidc.scopes') }}</label>
+          <Input v-model="oidcScopesInput" placeholder="openid profile email" />
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.scopesHelp') }}
+          </p>
+        </div>
+
+        <Separator />
+
+        <div class="flex items-center justify-between rounded-lg border p-3" style="border-color: var(--border)">
+          <div>
+            <p class="text-sm font-medium">{{ $t('settings.oidc.allowSignup') }}</p>
+            <p class="text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.oidc.allowSignupHelp') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+            :style="{ backgroundColor: oidc.allow_signup ? 'var(--primary)' : 'var(--secondary)' }"
+            @click="oidc.allow_signup = !oidc.allow_signup"
+          >
+            <span
+              class="absolute top-0.5 block h-5 w-5 rounded-full bg-white transition-transform"
+              :class="oidc.allow_signup ? 'translate-x-5' : 'translate-x-0.5'"
+            />
+          </button>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium">{{ $t('settings.oidc.adminEmails') }}</label>
+          <Input v-model="oidcAdminEmailsInput" placeholder="boss@example.com, ops@example.com" />
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.oidc.adminEmailsHelp') }}
+          </p>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-4">
+          <div>
+            <h3 class="text-sm font-semibold">{{ $t('settings.oidc.groupSync') }}</h3>
+            <p class="mt-1 text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.oidc.groupSyncHelp') }}
+            </p>
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-sm font-medium">{{ $t('settings.oidc.groupClaim') }}</label>
+            <Input v-model="oidc.group_claim" placeholder="groups" />
+            <p class="text-xs" style="color: var(--muted-foreground)">
+              {{ $t('settings.oidc.groupClaimHelp') }}
+            </p>
+          </div>
+
+          <template v-if="oidc.group_claim">
+            <div
+              v-for="(mapping, i) in oidc.group_mappings ?? []"
+              :key="i"
+              class="flex items-end gap-2"
+            >
+              <div class="flex-1 space-y-1">
+                <label v-if="i === 0" class="text-xs" style="color: var(--muted-foreground)">
+                  {{ $t('settings.oidc.idpGroup') }}
+                </label>
+                <Input v-model="mapping.idp_group" placeholder="ops-team" />
+              </div>
+              <div class="flex-1 space-y-1">
+                <label v-if="i === 0" class="text-xs" style="color: var(--muted-foreground)">
+                  {{ $t('settings.oidc.tolatoGroup') }}
+                </label>
+                <Select v-model="mapping.user_group_id">
+                  <SelectTrigger>
+                    <SelectValue :placeholder="$t('permissions.choose')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="g in oidcUserGroups" :key="g.id" :value="g.id">
+                      {{ g.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button variant="ghost" size="icon" @click="removeGroupMapping(i)">
+                <Trash2 class="h-4 w-4" style="color: var(--color-error-foreground)" />
+              </Button>
+            </div>
+
+            <p
+              v-if="oidcUserGroups.length === 0"
+              class="text-xs"
+              style="color: var(--muted-foreground)"
+            >
+              {{ $t('settings.oidc.noUserGroups') }}
+            </p>
+            <Button
+              v-else
+              variant="outline"
+              size="sm"
+              @click="addGroupMapping"
+            >
+              <Plus class="mr-2 h-3.5 w-3.5" />
+              {{ $t('settings.oidc.addMapping') }}
+            </Button>
+          </template>
+        </div>
+
+        <div
+          v-if="oidcVerifyResult"
+          class="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm"
+          :style="{
+            backgroundColor: oidcVerifyResult.success ? 'var(--color-success)' : 'var(--color-error)',
+            color: oidcVerifyResult.success ? 'var(--color-success-foreground)' : 'var(--color-error-foreground)',
+            borderColor: 'transparent',
+          }"
+        >
+          <CheckCircle v-if="oidcVerifyResult.success" class="mt-0.5 h-4 w-4 shrink-0" />
+          <AlertCircle v-else class="mt-0.5 h-4 w-4 shrink-0" />
+          <div class="min-w-0">
+            <p v-if="oidcVerifyResult.success">{{ $t('settings.oidc.verifyOk') }}</p>
+            <p v-else class="break-words">{{ oidcVerifyResult.error }}</p>
+            <p v-if="oidcVerifyResult.authorization_endpoint" class="mt-1 break-all font-mono text-xs opacity-80">
+              {{ oidcVerifyResult.authorization_endpoint }}
+            </p>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <Button variant="outline" :disabled="oidcVerifying || !oidc.issuer" @click="handleVerifyOIDC">
+            <Loader2 v-if="oidcVerifying" class="mr-2 h-4 w-4 animate-spin" />
+            {{ $t('common.verify') }}
+          </Button>
+          <Button :disabled="oidcSaving" @click="saveOIDC">
+            <Loader2 v-if="oidcSaving" class="mr-2 h-4 w-4 animate-spin" />
+            {{ oidcSaving ? $t('common.saving') : $t('common.save') }}
+          </Button>
+        </div>
+      </div>
+
       <div v-if="activeTab === 'api_keys'" class="max-w-3xl space-y-6">
         <div class="flex items-center justify-between">
           <div>
@@ -1215,6 +1573,7 @@ function closeCreateDialog() {
           <TableHeader>
             <TableRow>
               <TableHead>{{ $t('common.name') }}</TableHead>
+              <TableHead v-if="isAdmin">{{ $t('settings.apiKeys.owner') }}</TableHead>
               <TableHead>{{ $t('settings.apiKeys.key') }}</TableHead>
               <TableHead>{{ $t('settings.apiKeys.permission') }}</TableHead>
               <TableHead>{{ $t('common.status') }}</TableHead>
@@ -1225,6 +1584,7 @@ function closeCreateDialog() {
           <TableBody>
             <TableRow v-for="key in apiKeys" :key="key.id">
               <TableCell class="font-medium">{{ key.name }}</TableCell>
+              <TableCell v-if="isAdmin" class="text-sm">{{ key.owner_username || '—' }}</TableCell>
               <TableCell class="font-mono text-xs">{{ key.key_prefix }}...</TableCell>
               <TableCell><Badge variant="secondary">{{ key.permission }}</Badge></TableCell>
               <TableCell>
@@ -1247,12 +1607,67 @@ function closeCreateDialog() {
               </TableCell>
             </TableRow>
             <TableRow v-if="apiKeys.length === 0">
-              <TableCell :colspan="6" class="text-center py-8 text-sm" style="color: var(--muted-foreground)">
+              <TableCell :colspan="isAdmin ? 7 : 6" class="text-center py-8 text-sm" style="color: var(--muted-foreground)">
                 {{ $t('settings.apiKeys.noKeys') }}
               </TableCell>
             </TableRow>
           </TableBody>
         </Table>
+      </div>
+
+
+      <div v-if="activeTab === 'account'" class="max-w-2xl space-y-6">
+        <div>
+          <h2 class="text-base font-semibold">{{ $t('settings.account.title') }}</h2>
+          <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.account.description') }}
+          </p>
+        </div>
+
+        <div class="space-y-2 text-sm">
+          <div class="flex gap-2">
+            <span style="color: var(--muted-foreground)">{{ $t('settings.account.signedInAs') }}</span>
+            <span class="font-medium">{{ appStore.user?.username }}</span>
+          </div>
+          <div class="flex gap-2">
+            <span style="color: var(--muted-foreground)">{{ $t('settings.account.role') }}</span>
+            <Badge variant="secondary">
+              {{ isAdmin ? $t('users.roleAdmin') : $t('users.roleMember') }}
+            </Badge>
+          </div>
+        </div>
+
+        <Separator />
+
+        <template v-if="appStore.user?.auth_source === 'oidc'">
+          <p class="text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.account.ssoNoPassword') }}
+          </p>
+        </template>
+        <template v-else>
+          <div class="space-y-4">
+            <h3 class="text-sm font-semibold">{{ $t('settings.account.changePassword') }}</h3>
+            <div>
+              <label class="text-sm font-medium">{{ $t('settings.account.currentPassword') }}</label>
+              <Input v-model="pw.current" type="password" class="mt-1.5" autocomplete="current-password" />
+            </div>
+            <div>
+              <label class="text-sm font-medium">{{ $t('settings.account.newPassword') }}</label>
+              <Input v-model="pw.next" type="password" class="mt-1.5" autocomplete="new-password" />
+              <p class="mt-1 text-xs" style="color: var(--muted-foreground)">
+                {{ $t('users.passwordHint') }}
+              </p>
+            </div>
+            <div>
+              <label class="text-sm font-medium">{{ $t('settings.account.confirmPassword') }}</label>
+              <Input v-model="pw.confirm" type="password" class="mt-1.5" autocomplete="new-password" />
+            </div>
+            <Button :disabled="!canChangePassword || pwSaving" @click="handleChangePassword">
+              <Loader2 v-if="pwSaving" class="mr-2 h-4 w-4 animate-spin" />
+              {{ $t('settings.account.changePassword') }}
+            </Button>
+          </div>
+        </template>
       </div>
 
       <!-- Create API Key Dialog -->
@@ -1276,8 +1691,7 @@ function closeCreateDialog() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="readonly">{{ $t('settings.apiKeys.readonly') }}</SelectItem>
-                    <SelectItem value="standard">{{ $t('settings.apiKeys.standard') }}</SelectItem>
-                    <SelectItem value="admin">{{ $t('settings.apiKeys.admin') }}</SelectItem>
+                    <SelectItem value="writable">{{ $t('settings.apiKeys.writable') }}</SelectItem>
                   </SelectContent>
                 </Select>
                 <p class="text-xs" style="color: var(--muted-foreground)">

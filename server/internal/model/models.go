@@ -44,10 +44,159 @@ func (m *JSONMap) Scan(value any) error {
 // Database Models (GORM)
 // ============================================================================
 
+// --- Core: Users ---
+
+// Role values. Only two exist by design: every finer-grained distinction is
+// expressed with node grants rather than more global roles.
+const (
+	RoleAdmin  = "admin"
+	RoleMember = "member"
+)
+
+// User status values.
+const (
+	UserStatusActive   = "active"
+	UserStatusDisabled = "disabled"
+)
+
+// Auth source values. Local users authenticate with PasswordHash; oidc users
+// have no local password and are matched by OIDCSubject.
+const (
+	AuthSourceLocal = "local"
+	AuthSourceOIDC  = "oidc"
+)
+
+type User struct {
+	ID           string  `json:"id" gorm:"primaryKey;type:text"`
+	Username     string  `json:"username" gorm:"type:text;not null;uniqueIndex"`
+	PasswordHash string  `json:"-" gorm:"type:text"` // bcrypt; empty for OIDC users
+	DisplayName  string  `json:"display_name" gorm:"type:text"`
+	Email        string  `json:"email" gorm:"type:text"`
+	Role         string  `json:"role" gorm:"type:text;not null;default:'member'"`  // admin, member
+	Status       string  `json:"status" gorm:"type:text;not null;default:'active'"` // active, disabled
+	AuthSource   string  `json:"auth_source" gorm:"type:text;not null;default:'local'"`
+	// OIDCSubject is the IdP's `sub` claim. The column name is pinned because
+	// GORM's default naming would split the initialism into "o_id_c_subject".
+	OIDCSubject *string `json:"-" gorm:"column:oidc_subject;type:text;uniqueIndex"`
+
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt   time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+// IsAdmin reports whether the user holds the global admin role.
+func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
+
+// --- Core: Groups and grants ---
+
+// Node permission levels, ordered least to most capable. Each level implies
+// the ones before it.
+const (
+	// LevelViewer can see the node in listings and read its state and history.
+	LevelViewer = "viewer"
+	// LevelOperator can additionally run commands on it (chat, terminal, file ops).
+	LevelOperator = "operator"
+	// LevelManager can additionally edit, upgrade and delete it — and only ever
+	// through the web UI.
+	LevelManager = "manager"
+)
+
+// levelRank orders the levels for comparison. Absent from the map means "no
+// access at all", which is distinct from viewer.
+var levelRank = map[string]int{
+	LevelViewer:   1,
+	LevelOperator: 2,
+	LevelManager:  3,
+}
+
+// LevelAtLeast reports whether have is sufficient for want. An unknown or empty
+// level never satisfies anything.
+func LevelAtLeast(have, want string) bool {
+	h, ok := levelRank[have]
+	if !ok {
+		return false
+	}
+	w, ok := levelRank[want]
+	if !ok {
+		return false
+	}
+	return h >= w
+}
+
+// IsValidLevel reports whether s names a real permission level.
+func IsValidLevel(s string) bool {
+	_, ok := levelRank[s]
+	return ok
+}
+
+// HigherLevel returns whichever of the two levels grants more. Used to fold the
+// several grants that may match one (user, node) pair into an effective level.
+func HigherLevel(a, b string) string {
+	if levelRank[a] >= levelRank[b] {
+		return a
+	}
+	return b
+}
+
+// Grant subject and object types.
+const (
+	SubjectUser      = "user"
+	SubjectUserGroup = "user_group"
+
+	ObjectNode      = "node"
+	ObjectNodeGroup = "node_group"
+	ObjectAll       = "all"
+)
+
+type UserGroup struct {
+	ID          string    `json:"id" gorm:"primaryKey;type:text"`
+	Name        string    `json:"name" gorm:"type:text;not null;uniqueIndex"`
+	Description string    `json:"description" gorm:"type:text"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+type UserGroupMember struct {
+	UserGroupID string `json:"user_group_id" gorm:"primaryKey;type:text"`
+	UserID      string `json:"user_id" gorm:"primaryKey;type:text;index"`
+}
+
+type NodeGroup struct {
+	ID          string    `json:"id" gorm:"primaryKey;type:text"`
+	Name        string    `json:"name" gorm:"type:text;not null;uniqueIndex"`
+	Description string    `json:"description" gorm:"type:text"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+type NodeGroupMember struct {
+	NodeGroupID string `json:"node_group_id" gorm:"primaryKey;type:text"`
+	NodeID      string `json:"node_id" gorm:"primaryKey;type:text;index"`
+}
+
+// Grant binds a subject (a user, or a group of users) to an object (a node, a
+// group of nodes, or every node) at a permission level.
+//
+// Nodes have no owner column: who may touch a machine is expressed entirely
+// through group membership and these rows, so a departing user never leaves
+// orphaned machines behind.
+type Grant struct {
+	ID          string    `json:"id" gorm:"primaryKey;type:text"`
+	SubjectType string    `json:"subject_type" gorm:"type:text;not null;uniqueIndex:idx_grant_subject_object"`
+	SubjectID   string    `json:"subject_id" gorm:"type:text;not null;uniqueIndex:idx_grant_subject_object"`
+	ObjectType  string    `json:"object_type" gorm:"type:text;not null;uniqueIndex:idx_grant_subject_object"`
+	ObjectID    string    `json:"object_id" gorm:"type:text;not null;default:'';uniqueIndex:idx_grant_subject_object"` // empty when ObjectType is "all"
+	Level       string    `json:"level" gorm:"type:text;not null"`
+	CreatedBy   string    `json:"created_by" gorm:"type:text"` // granting admin, for the audit trail
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
 // --- Core: Conversations ---
 
 type Conversation struct {
 	ID        string    `json:"id" gorm:"primaryKey;type:text"`
+	// UserID is the owner — conversations are private, never listed across users.
+	// The empty default exists only so AutoMigrate can add the column to a table
+	// that already has rows; Bootstrap immediately adopts those into the first admin.
+	UserID    string    `json:"user_id" gorm:"type:text;not null;default:'';index"`
 	Title     string    `json:"title" gorm:"type:text;not null;default:'新对话'"`
 	Model     string    `json:"model" gorm:"type:text"` // LLM model used
 	DefaultNodeID *string `json:"default_node_id,omitempty" gorm:"type:text"`
@@ -100,6 +249,11 @@ type Node struct {
 type RegistrationToken struct {
 	ID          string    `json:"id" gorm:"primaryKey;type:text"`           // token value itself
 	AliasPrefix *string   `json:"alias_prefix,omitempty" gorm:"type:text"` // optional alias prefix for nodes registered with this token
+	// NodeGroupID, when set, puts every node enrolled with this token into that
+	// group. This is the main way machines acquire permissions: the grants on
+	// the group already exist, so a freshly installed agent is reachable by the
+	// right people the moment it comes online, with no change to install scripts.
+	NodeGroupID *string   `json:"node_group_id,omitempty" gorm:"type:text"`
 	ExpiresAt   time.Time `json:"expires_at" gorm:"not null"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
@@ -110,14 +264,15 @@ type AuditLog struct {
 	ID          uint      `json:"id" gorm:"primaryKey;autoIncrement"`
 	NodeID      string    `json:"node_id" gorm:"type:text;not null;index"`
 	NodeName    string    `json:"node_name" gorm:"type:text"`
-	Actor       string    `json:"actor,omitempty" gorm:"type:text;index"` // JWT username for webui/terminal; empty for api/mcp (see api_key_id)
+	UserID      string    `json:"user_id,omitempty" gorm:"type:text;index"` // acting user; for api/cli it's the key owner
+	Actor       string    `json:"actor,omitempty" gorm:"type:text;index"`   // username snapshot for display; survives user deletion
 	Command     string    `json:"command" gorm:"type:text;not null"`
 	ExitCode    *int      `json:"exit_code,omitempty"`
 	Stdout      *string   `json:"stdout,omitempty" gorm:"type:text"`
 	Stderr      *string   `json:"stderr,omitempty" gorm:"type:text"`
 	DurationMS  *int64    `json:"duration_ms,omitempty"`
 	Confirmed   bool      `json:"confirmed" gorm:"default:false"`             // required 2FA confirmation
-	Source      string    `json:"source" gorm:"type:text;not null;default:'webui'"` // webui, api, mcp
+	Source      string    `json:"source" gorm:"type:text;not null;default:'webui'"` // webui, terminal, api, cli
 	APIKeyID    *string   `json:"api_key_id,omitempty" gorm:"type:text"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime;index"`
 }
@@ -132,12 +287,21 @@ type Setting struct {
 
 // --- Core: External API Keys ---
 
+// API key permission tiers. Two by design — a key is either read-only or it can
+// also run commands. Neither tier can ever modify node attributes; that lives in
+// the web UI alone.
+const (
+	APIKeyReadonly = "readonly"
+	APIKeyWritable = "writable"
+)
+
 type APIKey struct {
 	ID          string    `json:"id" gorm:"primaryKey;type:text"`
 	Name        string    `json:"name" gorm:"type:text;not null"`
+	OwnerUserID string    `json:"owner_user_id" gorm:"type:text;not null;default:'';index"` // key acts as this user; caps its reach
 	KeyHash     string    `json:"-" gorm:"type:text;not null;uniqueIndex"` // hashed key, never expose
 	KeyPrefix   string    `json:"key_prefix" gorm:"type:text"`            // first 8 chars for display
-	Permission  string    `json:"permission" gorm:"type:text;not null"`   // readonly, standard, admin
+	Permission  string    `json:"permission" gorm:"type:text;not null"`   // readonly, writable
 	Status      string    `json:"status" gorm:"type:text;not null;default:'active'"` // active, revoked
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`

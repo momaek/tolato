@@ -45,12 +45,26 @@ func APIKeyAuth() gin.HandlerFunc {
 			return
 		}
 
+		// A key acts as its owner, so it can never outlive or outrank that
+		// account: disabling a user immediately kills every key they issued.
+		owner, err := store.GetUserByID(key.OwnerUserID)
+		if err != nil || owner.Status != model.UserStatusActive {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, model.ErrorResponse{
+				Error:   "unauthorized",
+				Message: "invalid or revoked API key",
+			})
+			return
+		}
+
 		// Update last_used_at
 		now := time.Now()
 		store.UpdateAPIKey(key.ID, map[string]any{"last_used_at": &now})
 
 		c.Set("api_key_id", key.ID)
 		c.Set("api_key_permission", key.Permission)
+		c.Set(CtxUserID, owner.ID)
+		c.Set(CtxUsername, owner.Username)
+		c.Set(CtxUserRole, owner.Role)
 		c.Next()
 	}
 }

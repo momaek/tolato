@@ -32,7 +32,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useNodesStore } from '@/stores/nodes'
-import type { CreateNodeResponse } from '@/types/api'
+import type { CreateNodeResponse, NodeListItem, GroupItem } from '@/types/api'
+import { getNodeGroups } from '@/services/api'
+import { useAppStore } from '@/stores/app'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -42,6 +44,29 @@ const nodesStore = useNodesStore()
 // view, work in multiple terminals at once, and not lose state when they
 // navigate elsewhere. Token rides along via localStorage; the SPA's auth
 // guard auto-routes the new tab into /nodes/:id/terminal.
+const appStore = useAppStore()
+
+// Node groups, for the enrolment dialog. Only admins can read them, and only
+// admins see the dialog, so a member's request never fires.
+const nodeGroups = ref<GroupItem[]>([])
+const nodeGroupId = ref('')
+
+onMounted(() => {
+  if (!appStore.isAdmin) return
+  getNodeGroups()
+    .then((g) => (nodeGroups.value = g))
+    .catch(() => {}) // the picker just stays hidden
+})
+
+// The server stamps each node with the caller's effective level. The UI only
+// reflects it — an absent level means viewer-or-less, so actions stay hidden.
+function canOperate(node: NodeListItem) {
+  return node.my_level === 'operator' || node.my_level === 'manager'
+}
+function canManage(node: NodeListItem) {
+  return node.my_level === 'manager'
+}
+
 function openTerminal(nodeId: string) {
   const href = router.resolve(`/nodes/${nodeId}/terminal`).href
   window.open(href, '_blank', 'noopener')
@@ -133,7 +158,10 @@ const filteredNodes = computed(() => {
 async function handleAddNode() {
   addingNode.value = true
   try {
-    const res = await nodesStore.addNode({ alias: nodeAlias.value || undefined })
+    const res = await nodesStore.addNode({
+      alias: nodeAlias.value || undefined,
+      node_group_id: nodeGroupId.value || undefined,
+    })
     createdNode.value = res
   } catch {
     // TODO: toast
@@ -241,7 +269,7 @@ async function handleDeleteNode(id: string) {
           <Rows3 class="h-4 w-4" />
         </Button>
       </div>
-      <Dialog v-model:open="dialogOpen" @update:open="resetDialog">
+      <Dialog v-if="appStore.isAdmin" v-model:open="dialogOpen" @update:open="resetDialog">
         <DialogTrigger as-child>
           <Button>
             <Plus class="mr-2 h-4 w-4" />
@@ -259,6 +287,23 @@ async function handleDeleteNode(id: string) {
           <template v-if="!createdNode">
             <div class="space-y-4 py-4">
               <Input v-model="nodeAlias" :placeholder="$t('nodes.aliasPlaceholder')" />
+              <div v-if="nodeGroups.length > 0">
+                <label class="text-sm font-medium">{{ $t('nodes.enrolIntoGroup') }}</label>
+                <Select v-model="nodeGroupId">
+                  <SelectTrigger class="mt-1.5">
+                    <SelectValue :placeholder="$t('nodes.noGroup')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">{{ $t('nodes.noGroup') }}</SelectItem>
+                    <SelectItem v-for="g in nodeGroups" :key="g.id" :value="g.id">
+                      {{ g.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p class="mt-1.5 text-xs" style="color: var(--muted-foreground)">
+                  {{ $t('nodes.enrolIntoGroupHelp') }}
+                </p>
+              </div>
             </div>
             <DialogFooter>
               <Button :disabled="addingNode" @click="handleAddNode">
@@ -379,6 +424,7 @@ async function handleDeleteNode(id: string) {
             <TableCell>
               <div class="flex items-center justify-end gap-1">
                 <Button
+                  v-if="canOperate(node)"
                   variant="ghost"
                   size="icon"
                   :title="$t('nodes.openTerminal')"
@@ -396,6 +442,7 @@ async function handleDeleteNode(id: string) {
                   <Eye class="h-4 w-4" />
                 </Button>
                 <Button
+                  v-if="canManage(node)"
                   variant="ghost"
                   size="sm"
                   class="text-destructive"

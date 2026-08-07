@@ -207,6 +207,18 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				return
 			}
 
+			// Enrol into the token's node group, if it names one. This is how a
+			// freshly installed machine inherits permissions: the grants on the
+			// group already exist, so the right people can reach it as soon as
+			// it appears — without anyone editing the install command.
+			if regToken.NodeGroupID != nil && *regToken.NodeGroupID != "" {
+				if err := store.AddNodeToGroup(*regToken.NodeGroupID, node.ID); err != nil {
+					// Non-fatal: the node is registered and an admin can move it
+					// by hand. Failing the registration would be worse.
+					log.Printf("Failed to add node %s to group %s: %v", node.ID, *regToken.NodeGroupID, err)
+				}
+			}
+
 			// Send register_ack with node_id + secret
 			ack := model.WSMessage{
 				Type: "register_ack",

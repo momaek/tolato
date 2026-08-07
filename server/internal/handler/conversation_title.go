@@ -36,10 +36,10 @@ func isFirstUserMessage(convID string) bool {
 // title_update event back to the frontend over eventCh. Runs in its own
 // goroutine; failures are logged and swallowed (title generation is
 // best-effort — chat must continue regardless).
-func generateAndEmitTitle(ctx context.Context, baseCfg llm.ClientConfig, convID, userContent string, eventCh chan<- any) {
+func generateAndEmitTitle(ctx context.Context, baseCfg llm.ClientConfig, userID, convID, userContent string, eventCh chan<- any) {
 	// Re-check the conversation's current title at emit time. If the user
 	// renamed during the LLM call, we must not overwrite their choice.
-	conv, err := store.GetConversationByID(convID)
+	conv, err := store.GetConversationByID(userID, convID)
 	if err != nil {
 		log.Printf("[title-gen] conv=%s lookup failed: %v", convID, err)
 		return
@@ -69,7 +69,7 @@ func generateAndEmitTitle(ctx context.Context, baseCfg llm.ClientConfig, convID,
 
 	// Re-check before persist (LLM call can take seconds; user may have
 	// renamed in the meantime).
-	conv, err = store.GetConversationByID(convID)
+	conv, err = store.GetConversationByID(userID, convID)
 	if err != nil {
 		return
 	}
@@ -77,7 +77,7 @@ func generateAndEmitTitle(ctx context.Context, baseCfg llm.ClientConfig, convID,
 		return
 	}
 
-	if err := store.UpdateConversation(convID, map[string]any{"title": title}); err != nil {
+	if err := store.UpdateConversation(userID, convID, map[string]any{"title": title}); err != nil {
 		log.Printf("[title-gen] conv=%s persist failed: %v", convID, err)
 		return
 	}
