@@ -1,19 +1,21 @@
-name: release-agent
+name: release-cli
 
-# Build tolato-agent binaries on tag push and attach them to a GitHub Release.
-# Tag format: agent-v*  (e.g. agent-v0.1.0) — the agent versions independently
-# of the server (which uses bare v* tags, see release-image.yml).
+# Build the `tolato` CLI on tag push and attach the binaries to a GitHub
+# Release. Tag format: cli-v*  (e.g. cli-v0.1.0) — the CLI versions
+# independently of the agent (agent-v*) and the server (bare v*).
 #
-# The install script (scripts/install.sh) fetches
+# IMPORTANT: this workflow must never claim the "latest" release. The agent
+# install script (scripts/install.sh) fetches
 #   https://github.com/<repo>/releases/latest/download/tolato-agent-<os>-<arch>
-# so the asset names below must stay in sync, and /releases/latest must keep
-# resolving to an agent release. release-cli.yml also publishes Releases, but
-# passes make_latest: false precisely so it cannot take that pointer away.
+# so /releases/latest has to keep resolving to a release-agent.yml release.
+# Hence make_latest: false below — a CLI release is published, but not marked
+# latest. Download the CLI from its own tag URL:
+#   https://github.com/<repo>/releases/download/cli-v<x.y.z>/tolato-<os>-<arch>
 
 on:
   push:
     tags:
-      - 'agent-v*'
+      - 'cli-v*'
   workflow_dispatch:
 
 permissions:
@@ -40,30 +42,30 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
-          cache-dependency-path: agent/go.sum
+          # cli/go.mod carries `toolchain go1.24.1`; matching it here avoids
+          # making every job download a second toolchain before it can build.
+          go-version: '1.24'
+          cache-dependency-path: cli/go.sum
 
       - name: build
-        working-directory: agent
+        working-directory: cli
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
-          # Tag push → e.g. "agent-v0.2.0"; manual run → branch name. The
-          # self-update flow compares this to the running version, so it must be
-          # accurate. Strip the "agent-" tag prefix so the reported version is
-          # the bare "v0.2.0".
+          # Tag push → e.g. "cli-v0.1.0"; manual run → branch name. Strip the
+          # "cli-" prefix so `tolato version` reports the bare "v0.1.0".
           REF_NAME: ${{ github.ref_name }}
         run: |
-          VERSION="${REF_NAME#agent-}"
-          OUT="tolato-agent-${GOOS}-${GOARCH}"
-          LDFLAGS="-s -w -X github.com/momaek/tolato/agent/internal/client.Version=${VERSION}"
-          go build -trimpath -ldflags "${LDFLAGS}" -o "../dist/${OUT}" ./cmd/agent
+          VERSION="${REF_NAME#cli-}"
+          OUT="tolato-${GOOS}-${GOARCH}"
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          go build -trimpath -ldflags "${LDFLAGS}" -o "../dist/${OUT}" .
           (cd ../dist && sha256sum "${OUT}" > "${OUT}.sha256")
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tolato-agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: tolato-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
           if-no-files-found: error
 
@@ -86,3 +88,5 @@ jobs:
           files: dist/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+          # See the header comment: /releases/latest belongs to the agent.
+          make_latest: false
