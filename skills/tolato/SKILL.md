@@ -71,6 +71,15 @@ mkdir -p ~/.config/tolato && read -rs -p 'API key: ' K \
   && chmod 600 ~/.config/tolato/config.yaml && unset K
 ```
 
+That is bash. **zsh spells the prompt differently** — `-p` there means "read
+from a coprocess" and fails with `read: -p: no coprocess`. Since zsh is the
+default shell on macOS, check which one the user runs and swap the first
+command for:
+
+```zsh
+read -rs "K?API key: "
+```
+
 If a key does end up in the conversation, say so plainly and suggest revoking
 it in the web UI: transcripts are retained, so it should be treated as
 disclosed.
