@@ -28,6 +28,8 @@ Node arguments accept an id, an alias, or a hostname.
 Configuration (checked in this order):
   TOLATO_URL and TOLATO_API_KEY environment variables
   ~/.config/tolato/config.yaml     with keys: url, api_key
+                                   ($TOLATO_CONFIG or $XDG_CONFIG_HOME override
+                                   the location; same path on every platform)
 
 Flags:
   --json      print the raw JSON response instead of a table

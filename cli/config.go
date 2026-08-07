@@ -47,11 +47,30 @@ func loadConfig() (Config, error) {
 	return cfg, nil
 }
 
+// configPath is where the CLI looks for its settings: $TOLATO_CONFIG if set,
+// otherwise ~/.config/tolato/config.yaml (honouring $XDG_CONFIG_HOME).
+//
+// Resolving this by hand rather than through os.UserConfigDir() is deliberate.
+// That function returns each platform's official application config directory,
+// which on macOS is ~/Library/Application Support — the right answer for a
+// bundled GUI app, and the wrong one for a command-line tool, where ~/.config
+// is what people expect on every platform. It stays as a last resort only.
 func configPath() string {
+	if p := strings.TrimSpace(os.Getenv("TOLATO_CONFIG")); p != "" {
+		return p
+	}
+	if dir := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); dir != "" {
+		return filepath.Join(dir, "tolato", "config.yaml")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".config", "tolato", "config.yaml")
+	}
 	if dir, err := os.UserConfigDir(); err == nil {
 		return filepath.Join(dir, "tolato", "config.yaml")
 	}
-	return "~/.config/tolato/config.yaml"
+	// No home directory at all. Return something openable and printable rather
+	// than a literal "~/...", which nothing in Go expands.
+	return filepath.Join(".config", "tolato", "config.yaml")
 }
 
 func readConfigFile() (Config, error) {
