@@ -618,3 +618,17 @@ export interface ProbeAlertItem {
   triggered_at: string
   resolved_at?: string
 }
+
+// --- CLI login (loopback + PKCE) ---
+
+export interface CLIAuthorizeRequest {
+  redirect_uri: string
+  code_challenge: string
+  label?: string
+  permission?: 'readonly' | 'writable'
+}
+
+export interface CLIAuthorizeResponse {
+  /** One-time, one-minute code. Exchanged by the CLI for the actual key. */
+  code: string
+}

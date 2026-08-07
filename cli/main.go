@@ -18,6 +18,9 @@ var version = "dev"
 const usage = `tolato — command-line client for a Tolato server
 
 Usage:
+  tolato auth login [--url <server>] [--no-browser]
+  tolato auth status
+  tolato auth logout
   tolato nodes list [--status online|offline] [--json]
   tolato nodes get <node> [--json]
   tolato exec <node> -- <command>...
@@ -25,7 +28,7 @@ Usage:
 
 Node arguments accept an id, an alias, or a hostname.
 
-Configuration (checked in this order):
+Configuration ("tolato auth login" writes this for you):
   TOLATO_URL and TOLATO_API_KEY environment variables
   ~/.config/tolato/config.yaml     with keys: url, api_key
                                    ($TOLATO_CONFIG or $XDG_CONFIG_HOME override
@@ -62,6 +65,12 @@ func run(args []string) error {
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return nil
+	}
+
+	// Dispatched before loadConfig: `auth login` is what produces a config, so
+	// requiring one first would make it impossible to run when it is needed.
+	if args[0] == "auth" {
+		return runAuth(args[1:])
 	}
 
 	cfg, err := loadConfig()

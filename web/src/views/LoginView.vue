@@ -19,6 +19,25 @@ const password = ref('')
 const loading = ref(false)
 const error = ref('')
 
+/**
+ * Where to land once signed in. Only same-origin paths are honoured — a value
+ * that could name another site would turn the login page into an open
+ * redirect, and `//evil.example` is a path to the browser but an origin to the
+ * navigator, so it has to be rejected explicitly.
+ */
+function safeRedirect(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  if (!value.startsWith('/') || value.startsWith('//')) return null
+  return value
+}
+
+/**
+ * SSO leaves and comes back through the identity provider, and the callback
+ * lands on a URL of the server's choosing — any query we were carrying is gone
+ * by then. Park the destination where the round trip cannot touch it.
+ */
+const POST_LOGIN_KEY = 'tolato_post_login'
+
 // --- Single sign-on ---
 
 const ssoEnabled = ref(false)
@@ -52,7 +71,9 @@ async function consumeSSOFragment(): Promise<boolean> {
   ssoReturning.value = true
   try {
     await appStore.adoptToken(token)
-    router.replace('/')
+    const parked = safeRedirect(sessionStorage.getItem(POST_LOGIN_KEY))
+    sessionStorage.removeItem(POST_LOGIN_KEY)
+    router.replace(parked ?? '/')
     return true
   } catch {
     error.value = t('login.sso.errorFailed')
@@ -63,6 +84,8 @@ async function consumeSSOFragment(): Promise<boolean> {
 }
 
 function startSSO() {
+  const target = safeRedirect(route.query.redirect)
+  if (target) sessionStorage.setItem(POST_LOGIN_KEY, target)
   // A full navigation, not fetch: the browser has to follow the redirect to
   // the identity provider and carry the state cookie back.
   window.location.href = '/api/auth/oidc/login'
@@ -74,7 +97,10 @@ onMounted(async () => {
   const code = route.query.sso_error
   if (typeof code === 'string') {
     error.value = t(SSO_ERRORS[code] ?? 'login.sso.errorFailed')
-    router.replace({ query: {} })
+    // Keep ?redirect= — clearing the whole query would strip the destination
+    // the guard put there, stranding a CLI login on a failed SSO attempt.
+    const { sso_error: _dropped, ...rest } = route.query
+    router.replace({ query: rest })
   }
 
   try {
@@ -98,7 +124,7 @@ async function handleLogin() {
       username: username.value,
       password: password.value,
     })
-    router.push('/')
+    router.push(safeRedirect(route.query.redirect) ?? '/')
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'response' in err) {
       const axiosErr = err as { response?: { data?: { message?: string } } }

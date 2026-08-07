@@ -9,6 +9,14 @@ const router = createRouter({
       component: () => import('@/views/LoginView.vue'),
     },
     {
+      // Consent screen for `tolato auth login`. Deliberately outside AppLayout:
+      // it is a single decision the user arrived at from a CLI, not a place to
+      // navigate around from.
+      path: '/cli-auth',
+      name: 'cli-auth',
+      component: () => import('@/views/CliAuthView.vue'),
+    },
+    {
       path: '/',
       component: () => import('@/components/layout/AppLayout.vue'),
       children: [
@@ -69,7 +77,11 @@ router.beforeEach(async (to) => {
   const { useAppStore } = await import('@/stores/app')
   const appStore = useAppStore()
   if (to.path !== '/login' && !appStore.isAuthenticated) {
-    return '/login'
+    // Carry the destination through the login so a deep link survives it. This
+    // matters for /cli-auth, which is meaningless without its query string:
+    // dropping it would send the CLI's request into the void and leave the user
+    // staring at a chat window wondering what happened.
+    return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (to.path === '/login' && appStore.isAuthenticated) {
     return '/'

@@ -35,7 +35,33 @@ works too.
 
 ### If the CLI is unconfigured
 
-The user needs to supply a server URL and an API key, either as environment
+Have the user run:
+
+```bash
+tolato auth login --url https://tolato.example.com
+```
+
+That opens a browser, they approve once, and the CLI writes
+`~/.config/tolato/config.yaml` itself with the key it was granted. The `--url`
+is only needed the first time. `tolato auth status` reports what is configured
+and whether the server still accepts it; `tolato auth logout` revokes the key
+server-side and removes it locally.
+
+**Let the user run it.** The approval screen is the point of the design — it is
+where they choose read-only or read-and-run, and it should be a person clicking
+it. The key itself never appears in the terminal or in this conversation.
+
+The config file is `~/.config/tolato/config.yaml` on every platform.
+`$TOLATO_CONFIG` overrides the file outright and `$XDG_CONFIG_HOME` overrides
+the directory, if the user has either set. When the CLI cannot find a config it
+prints the exact path it looked at, so if anything seems off, run
+`tolato nodes list` and read the error rather than guessing.
+
+#### When there is no browser
+
+Over SSH, `tolato auth login` cannot help: the loopback address it listens on
+is the remote machine, not the one with the browser. There, fall back to a key
+created in the web UI under Settings → API Keys, and supplied as environment
 variables:
 
 ```bash
@@ -43,46 +69,11 @@ export TOLATO_URL=https://tolato.example.com
 export TOLATO_API_KEY=tlat_...
 ```
 
-or in a config file:
-
-```yaml
-url: https://tolato.example.com
-api_key: tlat_...
-```
-
-The config file is `~/.config/tolato/config.yaml`, on every platform.
-`$TOLATO_CONFIG` overrides the file outright and `$XDG_CONFIG_HOME` overrides
-the directory, if the user has either set.
-
-When the CLI cannot find a config it prints the exact path it looked at, so if
-anything seems off, run `tolato nodes list` and read the error rather than
-guessing.
-
-API keys are created in the Tolato web UI under Settings → API Keys. **Ask the
-user to create and set the key themselves** — do not ask them to paste it into
-the conversation, and do not write it into the config file for them even if
-they do. Hand them a command that reads the key without putting it in shell
-history, and let them run it:
-
-```bash
-mkdir -p ~/.config/tolato && read -rs -p 'API key: ' K \
-  && printf 'url: %s\napi_key: %s\n' https://tolato.example.com "$K" \
-  > ~/.config/tolato/config.yaml \
-  && chmod 600 ~/.config/tolato/config.yaml && unset K
-```
-
-That is bash. **zsh spells the prompt differently** — `-p` there means "read
-from a coprocess" and fails with `read: -p: no coprocess`. Since zsh is the
-default shell on macOS, check which one the user runs and swap the first
-command for:
-
-```zsh
-read -rs "K?API key: "
-```
-
-If a key does end up in the conversation, say so plainly and suggest revoking
-it in the web UI: transcripts are retained, so it should be treated as
-disclosed.
+**Ask the user to create and set the key themselves** — do not ask them to
+paste it into the conversation, and do not write it into a config file for them
+even if they do. If a key does end up in the conversation anyway, say so
+plainly and suggest revoking it in the web UI: transcripts are retained, so it
+should be treated as disclosed.
 
 ## What you can do
 
@@ -128,7 +119,8 @@ Plain commands with no quoting or pipes need none of this.
   is visible; a node the user lacks access to reports as not found, and that is
   the correct answer to relay.
 - **Manage users, groups, permissions or server settings.** Those live in the
-  web UI.
+  web UI. `tolato auth` is the one exception, and only for the CLI's own key:
+  it can obtain one and revoke that same one, nothing else.
 
 ## Running commands safely
 
