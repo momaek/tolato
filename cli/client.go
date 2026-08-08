@@ -122,6 +122,13 @@ func (c *client) do(ctx context.Context, method, path string, body any, out any)
 	return nil
 }
 
+// RevokeOwnKey revokes the key this client is authenticating with. Used by
+// `tolato auth logout`, which holds a key rather than a session and so cannot
+// reach the browser-facing key management endpoints.
+func (c *client) RevokeOwnKey(ctx context.Context) error {
+	return c.do(ctx, http.MethodDelete, "/api/v1/auth/key", nil, nil)
+}
+
 func (c *client) ListNodes(ctx context.Context) ([]Node, error) {
 	var nodes []Node
 	err := c.do(ctx, http.MethodGet, "/api/v1/nodes", nil, &nodes)

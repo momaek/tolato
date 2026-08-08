@@ -87,3 +87,43 @@ func readConfigFile() (Config, error) {
 	}
 	return cfg, nil
 }
+
+// writeConfigFile persists the config, creating the directory if needed.
+//
+// The file holds an API key, so it is written 0600 under a 0700 directory, and
+// replaced through a temporary file so an interrupted write cannot leave a
+// half-written credential behind.
+func writeConfigFile(cfg Config) error {
+	path := configPath()
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(dir, ".config-*.yaml")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	defer os.Remove(tmp.Name())
+
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}

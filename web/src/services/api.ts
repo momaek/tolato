@@ -33,6 +33,8 @@ import type {
   APIKeyListItem,
   CreateAPIKeyRequest,
   CreateAPIKeyResponse,
+  CLIAuthorizeRequest,
+  CLIAuthorizeResponse,
   OIDCSettings,
   OIDCSettingsResponse,
   OIDCStatusResponse,
@@ -396,6 +398,15 @@ export async function createAPIKey(data: CreateAPIKeyRequest): Promise<CreateAPI
 
 export async function deleteAPIKey(id: string): Promise<void> {
   await api.delete(`/api-keys/${id}`)
+}
+
+/**
+ * Approves a `tolato auth login`, returning the one-time code the browser
+ * hands back to the CLI's loopback listener. Never returns the key itself.
+ */
+export async function authorizeCLI(data: CLIAuthorizeRequest): Promise<CLIAuthorizeResponse> {
+  const res = await api.post<CLIAuthorizeResponse>('/auth/cli/authorize', data)
+  return res.data
 }
 
 // --- Node Commands ---

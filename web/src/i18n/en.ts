@@ -41,6 +41,31 @@ export default {
     darkMode: 'Dark Mode',
   },
 
+  cliAuth: {
+    title: 'Authorize command-line access',
+    subtitle: 'A Tolato CLI on {label} is asking to sign in as you.',
+    unknownMachine: 'an unnamed machine',
+    account: 'Account',
+    returnsTo: 'Returns to',
+    permission: 'Grant this key',
+    permissions: {
+      readonly: {
+        label: 'Read only',
+        description: 'List nodes and read their status and metrics.',
+      },
+      writable: {
+        label: 'Read and run commands',
+        description: 'Everything above, plus running shell commands on nodes you can reach.',
+      },
+    },
+    approve: 'Authorize',
+    deny: 'Cancel',
+    failed: 'Could not authorize the CLI. Please try again.',
+    invalidRequest:
+      'This authorization request is malformed or incomplete. Start it again from the CLI with `tolato auth login`.',
+    revokeHint: 'A new API key is created for this machine. You can revoke it any time under Settings, API Keys.',
+  },
+
   login: {
     sso: {
       divider: 'or',

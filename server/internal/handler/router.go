@@ -94,6 +94,12 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	api.GET("/auth/oidc/login", OIDCLogin(deps))
 	api.GET("/auth/oidc/callback", OIDCCallback(deps))
 
+	// CLI login: the exchange is public because the caller is a `tolato auth
+	// login` that has no credential yet. Its authorization to be here is the
+	// one-minute, single-use code it presents, plus the PKCE verifier behind
+	// it. The approving half of the flow is JWT-guarded, below.
+	api.POST("/auth/cli/exchange", CLIExchange(deps))
+
 	// JWT-protected routes
 	protected := api.Group("")
 	protected.Use(middleware.JWTAuth())
@@ -106,6 +112,7 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	// Session / self-service
 	protected.GET("/auth/me", CurrentUser(deps))
 	protected.PUT("/auth/password", ChangeOwnPassword(deps))
+	protected.POST("/auth/cli/authorize", CLIAuthorize(deps))
 
 	// User groups, node groups and grants — the permission model's admin surface
 	admin.GET("/user-groups", ListUserGroups(deps))
@@ -191,6 +198,8 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	v1.GET("/nodes", ExternalListNodes(deps))
 	v1.GET("/nodes/:id", ExternalGetNode(deps))
 	v1.POST("/nodes/:id/execute", ExternalExecuteCommand(deps))
+	// `tolato auth logout` — a key revoking itself, since the CLI holds no session.
+	v1.DELETE("/auth/key", RevokeOwnAPIKey(deps))
 
 	// Agent install script: 302 → GitHub raw (configurable via server.install_script_url).
 	// curl -fsSL follows the redirect transparently.

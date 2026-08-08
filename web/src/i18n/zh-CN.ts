@@ -41,6 +41,30 @@ export default {
     darkMode: '深色模式',
   },
 
+  cliAuth: {
+    title: '授权命令行访问',
+    subtitle: '{label} 上的 Tolato CLI 请求以你的身份登录。',
+    unknownMachine: '未命名的机器',
+    account: '账号',
+    returnsTo: '回调地址',
+    permission: '授予权限',
+    permissions: {
+      readonly: {
+        label: '只读',
+        description: '查看节点列表、状态和监控指标。',
+      },
+      writable: {
+        label: '读取并执行命令',
+        description: '包含上述权限，并可在你有权访问的节点上执行 shell 命令。',
+      },
+    },
+    approve: '授权',
+    deny: '取消',
+    failed: '授权失败，请重试。',
+    invalidRequest: '授权请求不完整或格式错误。请在命令行重新执行 `tolato auth login`。',
+    revokeHint: '将为这台机器创建一个新的 API Key，随时可在设置 → API Keys 中吊销。',
+  },
+
   login: {
     sso: {
       divider: '或',
