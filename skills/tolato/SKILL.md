@@ -43,19 +43,51 @@ tolato auth login --url https://tolato.example.com
 
 That opens a browser, they approve once, and the CLI writes
 `~/.config/tolato/config.yaml` itself with the key it was granted. The `--url`
-is only needed the first time. `tolato auth status` reports what is configured
-and whether the server still accepts it; `tolato auth logout` revokes the key
-server-side and removes it locally.
+is only needed the first time. `tolato auth status` reports which server and
+profile are in play and whether the key still works; `tolato auth logout`
+revokes the key server-side and removes it locally.
 
 **Let the user run it.** The approval screen is the point of the design — it is
 where they choose read-only or read-and-run, and it should be a person clicking
 it. The key itself never appears in the terminal or in this conversation.
 
-The config file is `~/.config/tolato/config.yaml` on every platform.
+The config file is `~/.config/tolato/config.yaml` on every platform, holding one
+entry per server under `profiles` with `current` naming the active one.
 `$TOLATO_CONFIG` overrides the file outright and `$XDG_CONFIG_HOME` overrides
 the directory, if the user has either set. When the CLI cannot find a config it
 prints the exact path it looked at, so if anything seems off, run
 `tolato nodes list` and read the error rather than guessing.
+
+### Several deployments
+
+A user may have more than one Tolato server — a company fleet and a personal
+one is the common pair. Each is a named **profile**, and one is current:
+
+```bash
+tolato profile list                 # names, servers, and which one is active
+tolato --profile work nodes list    # one command against a named profile
+```
+
+Adding another is another login, with a name for it:
+
+```bash
+tolato auth login --url https://tolato.corp.example.com --profile work
+```
+
+Two rules, both about not touching the wrong fleet:
+
+- **Once more than one profile exists, name it on every command.**
+  `--profile <name>` is authoritative: it beats `$TOLATO_PROFILE` and
+  `$TOLATO_URL`, and it does not depend on which profile was current when the
+  user last changed it in some other terminal.
+- **Never run `tolato profile use` for the user.** It rewrites the default for
+  every shell they have open, including ones you cannot see. Which fleet is the
+  default is theirs to decide — say what you would switch to and let them run it.
+
+If `tolato profile list` shows more than one and the request does not say which
+server it means, **ask before running anything against a node**. Listing the
+wrong deployment wastes an answer; `exec` against the wrong deployment runs a
+command on a machine the user was not talking about.
 
 #### When there is no browser
 
@@ -68,6 +100,13 @@ variables:
 export TOLATO_URL=https://tolato.example.com
 export TOLATO_API_KEY=tlat_...
 ```
+
+These two replace the server and key of whatever profile is current, so a shell
+that has them exported reaches that server no matter what `profile list` shows.
+Passing `--profile <name>` ignores them and uses the profile as written, which
+is the way out when the two disagree. `$TOLATO_PROFILE` selects a profile for
+one shell without changing the file, and is the safe thing to suggest when a
+user wants a terminal pinned to one deployment.
 
 **Ask the user to create and set the key themselves** — do not ask them to
 paste it into the conversation, and do not write it into a config file for them
@@ -120,7 +159,9 @@ Plain commands with no quoting or pipes need none of this.
   the correct answer to relay.
 - **Manage users, groups, permissions or server settings.** Those live in the
   web UI. `tolato auth` is the one exception, and only for the CLI's own key:
-  it can obtain one and revoke that same one, nothing else.
+  it can obtain one and revoke that same one, nothing else. `tolato profile`
+  touches nothing on any server — it only edits which local credentials are
+  used, and `profile remove` refuses to drop a key it has not revoked.
 
 ## Running commands safely
 
@@ -140,6 +181,12 @@ outright and no flag overrides them.
 Every command run through the CLI is written to the Tolato audit log against the
 API key's owner, with its output. Treat that as a reason for care, not secrecy:
 say what you are about to run and why.
+
+When more than one profile is configured, say **which deployment** you are about
+to run against as part of that, and pass `--profile <name>` rather than relying
+on whichever is current. The audit entry lands on the server that actually ran
+the command, so a misdirected `exec` is both the wrong machine and the wrong
+log.
 
 ## Reading command output
 

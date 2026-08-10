@@ -100,38 +100,54 @@ func TestAwaitCallbackReportsDenial(t *testing.T) {
 }
 
 func TestResolveServerURLPrecedence(t *testing.T) {
-	// An empty config file keeps the lookup from finding a real one.
-	dir := t.TempDir()
-	t.Setenv("TOLATO_CONFIG", filepath.Join(dir, "config.yaml"))
+	t.Setenv("TOLATO_PROFILE", "")
+	saved := &configFile{
+		Current:  "personal",
+		Profiles: map[string]Config{"personal": {URL: "https://from-config.example.com"}},
+	}
 
 	t.Setenv("TOLATO_URL", "https://from-env.example.com")
-	if got, _ := resolveServerURL("https://from-flag.example.com"); got != "https://from-flag.example.com" {
+	if got, _ := resolveServerURL(saved, "", "https://from-flag.example.com"); got != "https://from-flag.example.com" {
 		t.Errorf("flag should win, got %q", got)
 	}
-	if got, _ := resolveServerURL(""); got != "https://from-env.example.com" {
+	if got, _ := resolveServerURL(saved, "", ""); got != "https://from-env.example.com" {
 		t.Errorf("env should win over config, got %q", got)
 	}
 
 	t.Setenv("TOLATO_URL", "")
-	if _, err := resolveServerURL(""); err == nil {
+	if got, _ := resolveServerURL(saved, "", ""); got != "https://from-config.example.com" {
+		t.Errorf("config should supply the URL, got %q", got)
+	}
+	if _, err := resolveServerURL(&configFile{}, "", ""); err == nil {
 		t.Error("want an error when nothing supplies a URL")
+	}
+
+	// Naming a profile that does not exist is how a second deployment is added,
+	// so it must not error here — it just has no URL of its own to fall back on.
+	if _, err := resolveServerURL(saved, "work", ""); err == nil {
+		t.Error("unknown profile with no --url should report the missing URL, not succeed")
+	}
+	if got, _ := resolveServerURL(saved, "work", "https://tolato.corp.com"); got != "https://tolato.corp.com" {
+		t.Errorf("--url should serve a not-yet-existing profile, got %q", got)
 	}
 
 	// Trailing slashes would double up when paths are appended.
 	t.Setenv("TOLATO_URL", "https://x.example.com/")
-	if got, _ := resolveServerURL(""); got != "https://x.example.com" {
+	if got, _ := resolveServerURL(saved, "", ""); got != "https://x.example.com" {
 		t.Errorf("trailing slash not trimmed: %q", got)
 	}
 }
 
-// The file holds an API key, so its mode is part of the contract.
+// The file holds API keys, so its mode is part of the contract.
 func TestWriteConfigFileIsPrivate(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "config.yaml")
 	t.Setenv("TOLATO_CONFIG", path)
 
 	want := Config{URL: "https://tolato.example.com", APIKey: "tlat_secret"}
-	if err := writeConfigFile(want); err != nil {
+	file := &configFile{Current: "default"}
+	file.set("default", want)
+	if err := writeConfigFile(file); err != nil {
 		t.Fatalf("writeConfigFile: %v", err)
 	}
 
@@ -147,8 +163,8 @@ func TestWriteConfigFileIsPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readConfigFile: %v", err)
 	}
-	if got != want {
-		t.Errorf("round trip = %+v, want %+v", got, want)
+	if got.Current != "default" || got.Profiles["default"] != want {
+		t.Errorf("round trip = %+v, want profile default = %+v", got, want)
 	}
 
 	// No temporary files left behind next to the config.
