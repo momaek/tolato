@@ -109,8 +109,13 @@ func ListNodesScoped(page, pageSize int, status string, visibleIDs []string, unr
 
 	var nodes []model.Node
 	offset := (page - 1) * pageSize
+	// id breaks ties. Bulk-registered nodes can share a created_at down to the
+	// microsecond, and Postgres is free to return tied rows in any order — which
+	// it does, because heartbeats keep rewriting these rows and moving them
+	// around the heap. Without the tiebreaker the list reshuffles between
+	// requests and pagination can drop or repeat a node across pages.
 	err := scope(DB.Model(&model.Node{})).
-		Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&nodes).Error
+		Order("created_at DESC, id ASC").Offset(offset).Limit(pageSize).Find(&nodes).Error
 	return nodes, total, err
 }
 
