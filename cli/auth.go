@@ -36,23 +36,23 @@ import (
 // the consent screen, short enough that a forgotten terminal stops listening.
 const authWait = 3 * time.Minute
 
-func runAuth(args []string) error {
+func runAuth(profile string, args []string) error {
 	if len(args) == 0 {
 		return errUsage
 	}
 	switch args[0] {
 	case "login":
-		return runAuthLogin(args[1:])
+		return runAuthLogin(profile, args[1:])
 	case "status":
-		return runAuthStatus(args[1:])
+		return runAuthStatus(profile, args[1:])
 	case "logout":
-		return runAuthLogout(args[1:])
+		return runAuthLogout(profile, args[1:])
 	default:
 		return fmt.Errorf("unknown auth command %q\n\n%s", args[0], usage)
 	}
 }
 
-func runAuthLogin(args []string) error {
+func runAuthLogin(profile string, args []string) error {
 	fs := flag.NewFlagSet("auth login", flag.ContinueOnError)
 	serverURL := fs.String("url", "", "Tolato server URL (default: TOLATO_URL, or the configured one)")
 	noBrowser := fs.Bool("no-browser", false, "print the URL instead of opening a browser")
@@ -60,7 +60,12 @@ func runAuthLogin(args []string) error {
 		return err
 	}
 
-	base, err := resolveServerURL(*serverURL)
+	file, err := readConfigFile()
+	if err != nil {
+		return err
+	}
+
+	base, err := resolveServerURL(file, profile, *serverURL)
 	if err != nil {
 		return err
 	}
@@ -115,29 +120,53 @@ func runAuthLogin(args []string) error {
 		return err
 	}
 
-	cfg := Config{URL: base, APIKey: granted.APIKey}
-	if err := writeConfigFile(cfg); err != nil {
+	name, err := chooseProfile(file, profile, base)
+	if err != nil {
+		return err
+	}
+	_, existed := file.Profiles[name]
+	file.set(name, Config{URL: base, APIKey: granted.APIKey})
+	// A brand new profile becomes current; re-logging in to an existing one is
+	// a key refresh and must not move a target the user set deliberately.
+	if !existed {
+		file.Current = name
+	}
+	if err := writeConfigFile(file); err != nil {
 		return err
 	}
 
-	fmt.Printf("Authorized as %q (%s).\nKey written to %s\n", granted.Name, granted.Permission, configPath())
+	fmt.Printf("Authorized as %q (%s) on profile %q.\nKey written to %s\n",
+		granted.Name, granted.Permission, name, configPath())
+	if !existed && len(file.Profiles) > 1 {
+		fmt.Printf("Profile %q is now current. Use `tolato profile use <name>` or --profile to switch.\n", name)
+	}
 	return nil
 }
 
-func runAuthStatus(args []string) error {
+func runAuthStatus(profile string, args []string) error {
 	fs := flag.NewFlagSet("auth status", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfg, err := loadConfig()
+	file, err := readConfigFile()
+	if err != nil {
+		return err
+	}
+	active, _ := file.resolve(profile)
+
+	cfg, err := loadConfig(profile)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Server: %s\n", cfg.URL)
-	fmt.Printf("Key:    %s\n", maskKey(cfg.APIKey))
-	fmt.Printf("Config: %s\n", configPath())
+	// The profile line comes first and is the point of this command when more
+	// than one deployment is configured: know which fleet you are about to
+	// touch before you touch it.
+	fmt.Printf("Profile: %s\n", profileLabel(file, active))
+	fmt.Printf("Server:  %s\n", cfg.URL)
+	fmt.Printf("Key:     %s\n", maskKey(cfg.APIKey))
+	fmt.Printf("Config:  %s\n", configPath())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -149,17 +178,38 @@ func runAuthStatus(args []string) error {
 		fmt.Printf("Status: not working — %v\n", err)
 		return err
 	}
-	fmt.Printf("Status: ok, %d node(s) visible\n", len(nodes))
+	fmt.Printf("Status:  ok, %d node(s) visible\n", len(nodes))
+	if others := len(file.Profiles); others > 1 {
+		fmt.Printf("Other:   %s (switch with --profile or `tolato profile use`)\n", strings.Join(file.names(), ", "))
+	}
 	return nil
 }
 
-func runAuthLogout(args []string) error {
+// profileLabel describes the profile in play, including the case where there
+// is none because the environment supplied the credentials directly.
+func profileLabel(file *configFile, active string) string {
+	if active == "" {
+		return "(none — from TOLATO_URL/TOLATO_API_KEY)"
+	}
+	if strings.TrimSpace(os.Getenv("TOLATO_URL")) != "" || strings.TrimSpace(os.Getenv("TOLATO_API_KEY")) != "" {
+		return active + " (partly overridden by TOLATO_URL/TOLATO_API_KEY)"
+	}
+	return active
+}
+
+func runAuthLogout(profile string, args []string) error {
 	fs := flag.NewFlagSet("auth logout", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfg, err := loadConfig()
+	file, err := readConfigFile()
+	if err != nil {
+		return err
+	}
+	active, _ := file.resolve(profile)
+
+	cfg, err := loadConfig(profile)
 	if err != nil {
 		return err
 	}
@@ -171,15 +221,25 @@ func runAuthLogout(args []string) error {
 	// credential on the server that nobody is tracking any more.
 	revokeErr := newClient(cfg).RevokeOwnKey(ctx)
 
-	cfg.APIKey = ""
-	if err := writeConfigFile(cfg); err != nil {
-		return err
+	// Only this profile's key goes. The URL stays so logging back in needs no
+	// --url, and the other profiles are none of this command's business.
+	if active != "" {
+		p := file.Profiles[active]
+		p.APIKey = ""
+		file.set(active, p)
+		if err := writeConfigFile(file); err != nil {
+			return err
+		}
 	}
 
 	if revokeErr != nil {
 		return fmt.Errorf("local key removed, but revoking it on the server failed: %w", revokeErr)
 	}
-	fmt.Printf("Key revoked and removed from %s\n", configPath())
+	if active == "" {
+		fmt.Println("Key revoked. It came from the environment, so there is nothing to remove locally — unset TOLATO_API_KEY.")
+		return nil
+	}
+	fmt.Printf("Key for profile %q revoked and removed from %s\n", active, configPath())
 	return nil
 }
 
@@ -267,11 +327,19 @@ func respondHTML(w http.ResponseWriter, title, detail string) {
 }
 
 // resolveServerURL picks the server to log in to: the flag, then the
-// environment, then whatever a previous login wrote.
-func resolveServerURL(flagValue string) (string, error) {
+// environment, then whatever a previous login wrote for this profile.
+//
+// Unlike everywhere else, an unknown --profile is not an error here: naming a
+// profile that does not exist yet is how the second deployment gets added. It
+// just carries no URL to fall back on, so --url has to supply it.
+func resolveServerURL(file *configFile, profile, flagValue string) (string, error) {
 	candidates := []string{flagValue, os.Getenv("TOLATO_URL")}
-	if fileCfg, err := readConfigFile(); err == nil {
-		candidates = append(candidates, fileCfg.URL)
+	if p, ok := file.Profiles[strings.TrimSpace(profile)]; ok {
+		candidates = append(candidates, p.URL)
+	} else if profile == "" {
+		if active, err := file.resolve(""); err == nil {
+			candidates = append(candidates, file.Profiles[active].URL)
+		}
 	}
 	for _, c := range candidates {
 		if c = strings.TrimSpace(c); c != "" {
