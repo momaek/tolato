@@ -98,6 +98,13 @@ function nodeLabel(n: NodeListItem) {
   return n.alias || n.name
 }
 
+// An SSO username can be as anonymous as "user" — the display name is what
+// tells you which person a picker row or a grant actually refers to.
+function userLabel(u: UserItem) {
+  if (!u.display_name || u.display_name === u.username) return u.username
+  return `${u.display_name} (${u.username})`
+}
+
 // --- Grants ---
 
 const showGrantDialog = ref(false)
@@ -113,7 +120,7 @@ const grantForm = ref({
 /** Options for the chosen subject kind. */
 const subjectOptions = computed(() =>
   grantForm.value.subject_type === 'user'
-    ? users.value.map((u) => ({ id: u.id, label: u.username }))
+    ? users.value.map((u) => ({ id: u.id, label: userLabel(u) }))
     : userGroups.value.map((g) => ({ id: g.id, label: g.name })),
 )
 
@@ -180,7 +187,7 @@ const groupForm = ref({ name: '', description: '', member_ids: [] as string[] })
 
 const groupMemberOptions = computed(() =>
   groupKind.value === 'user'
-    ? users.value.map((u) => ({ id: u.id, label: u.username }))
+    ? users.value.map((u) => ({ id: u.id, label: userLabel(u) }))
     : nodes.value.map((n) => ({ id: n.id, label: nodeLabel(n) })),
 )
 
