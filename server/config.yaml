@@ -7,6 +7,9 @@ server:
   allowed_origins: []
   # /install.sh 会 302 重定向到这个 URL（默认指向本仓库 main 分支的 scripts/install.sh）
   install_script_url: https://raw.githubusercontent.com/momaek/tolato/main/scripts/install.sh
+  # /skill.md 会 302 重定向到这个 URL —— 用户在「设置 → CLI」里装进
+  # Claude Code / Codex 的那份 skill。github.com 不通时可以改指镜像。
+  skill_url: https://raw.githubusercontent.com/momaek/tolato/main/skills/tolato/SKILL.md
   # 外部可访问的地址（经 caddy / nginx 反代后的域名）。
   # 用于生成安装命令和 agent 的 ws 连接地址；为空时 fallback 到 host:port（仅同机有效）。
   # 示例：https://tolato.example.com

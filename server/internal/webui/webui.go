@@ -21,8 +21,8 @@ import (
 var distFS embed.FS
 
 // Register mounts the embedded SPA as a NoRoute fallback on r. Requests to
-// `/api/*`, `/ws/*`, and `/install.sh` keep their natural 404 so unknown API
-// calls don't silently return HTML.
+// `/api/*`, `/ws/*`, `/install.sh`, and `/skill.md` keep their natural 404 so
+// unknown API calls don't silently return HTML.
 func Register(r *gin.Engine) error {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
@@ -33,7 +33,7 @@ func Register(r *gin.Engine) error {
 
 	r.NoRoute(func(c *gin.Context) {
 		p := c.Request.URL.Path
-		if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/ws/") || p == "/install.sh" {
+		if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/ws/") || p == "/install.sh" || p == "/skill.md" {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}

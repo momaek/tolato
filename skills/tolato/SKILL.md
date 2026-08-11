@@ -35,21 +35,33 @@ works too.
 
 ### If the CLI is unconfigured
 
-Have the user run:
+Run:
 
 ```bash
 tolato auth login --url https://tolato.example.com
 ```
 
-That opens a browser, they approve once, and the CLI writes
+That opens a browser, the user approves once, and the CLI writes
 `~/.config/tolato/config.yaml` itself with the key it was granted. The `--url`
 is only needed the first time. `tolato auth status` reports which server and
 profile are in play and whether the key still works; `tolato auth logout`
 revokes the key server-side and removes it locally.
 
-**Let the user run it.** The approval screen is the point of the design — it is
-where they choose read-only or read-and-run, and it should be a person clicking
-it. The key itself never appears in the terminal or in this conversation.
+You can run this one yourself — the key never reaches your output. On success
+the command prints the granted name, permission and config path, and nothing
+else; `auth status` masks the key too. Two conditions come with it:
+
+- **Say it is coming.** The command opens a browser and then blocks. Announce
+  it first, or the user is staring at a terminal that looks hung.
+- **Allow more than three minutes.** `auth login` waits three minutes for the
+  browser round trip, which is longer than a typical tool-call timeout. Cut it
+  short and you kill the loopback listener while the user is still reading the
+  consent screen; their approval then lands on a closed port and they have to
+  start over.
+
+**The consent screen is theirs.** It is where they choose read-only or
+read-and-run, and a person has to be the one clicking it. Do not fill it in or
+click through it on their behalf, even if you can drive a browser.
 
 The config file is `~/.config/tolato/config.yaml` on every platform, holding one
 entry per server under `profiles` with `current` naming the active one.

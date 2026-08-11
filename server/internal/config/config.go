@@ -31,6 +31,11 @@ type ServerConfig struct {
 	Port             int      `yaml:"port"`
 	AllowedOrigins   []string `yaml:"allowed_origins"`    // WebSocket & CORS allowed origins, empty = same-origin only
 	InstallScriptURL string   `yaml:"install_script_url"` // /install.sh redirects here (usually a GitHub raw URL)
+	// SkillURL is where /skill.md redirects: the agent skill that teaches an
+	// AI coding agent to drive the `tolato` CLI. The Settings page hands users
+	// a prompt pointing at this server's /skill.md, so a deployment whose
+	// users cannot reach github.com can repoint this at a reachable mirror.
+	SkillURL string `yaml:"skill_url"`
 	// PublicAddress is the externally reachable URL/host that agents and the
 	// install command use to reach this server (e.g. "https://tolato.example.com").
 	// Used when the server sits behind a reverse proxy (caddy/nginx) on a
@@ -87,6 +92,7 @@ func Load(path string) (*Config, error) {
 			Host:                 "0.0.0.0",
 			Port:                 8080,
 			InstallScriptURL:     "https://raw.githubusercontent.com/momaek/tolato/main/scripts/install.sh",
+			SkillURL:             "https://raw.githubusercontent.com/momaek/tolato/main/skills/tolato/SKILL.md",
 			PublicAddress:        "", // e.g. "https://tolato.example.com" when behind caddy/nginx
 			ReleaseProxyUpstream: "https://github.com/momaek/tolato/releases",
 		},
