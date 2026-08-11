@@ -184,12 +184,17 @@ type GrantItem struct {
 
 // POST /api/grants — granting the same subject on the same object again edits
 // the level rather than creating a duplicate.
+//
+// One call may name several objects of the same type, so giving somebody three
+// node groups is one dialog rather than three. ObjectID is the older
+// single-object form and still works; the two are merged and deduped.
 type CreateGrantRequest struct {
-	SubjectType string `json:"subject_type" binding:"required"` // user, user_group
-	SubjectID   string `json:"subject_id" binding:"required"`
-	ObjectType  string `json:"object_type" binding:"required"` // node, node_group, all
-	ObjectID    string `json:"object_id"`                      // empty when object_type is "all"
-	Level       string `json:"level" binding:"required"`       // viewer, operator, manager
+	SubjectType string   `json:"subject_type" binding:"required"` // user, user_group
+	SubjectID   string   `json:"subject_id" binding:"required"`
+	ObjectType  string   `json:"object_type" binding:"required"` // node, node_group, all
+	ObjectID    string   `json:"object_id"`                      // empty when object_type is "all"
+	ObjectIDs   []string `json:"object_ids"`                     // several objects of ObjectType at once
+	Level       string   `json:"level" binding:"required"`       // viewer, operator, manager
 }
 
 // --- Effective access (the grant list, resolved) ---

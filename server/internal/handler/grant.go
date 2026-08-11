@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -78,40 +81,73 @@ func CreateGrant(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
-		objectID := req.ObjectID
-		switch req.ObjectType {
-		case model.ObjectNode:
-			if _, err := store.GetNodeByID(objectID); err != nil {
-				badRequest(c, "no such node")
-				return
-			}
-		case model.ObjectNodeGroup:
-			if _, err := store.GetNodeGroupByID(objectID); err != nil {
-				badRequest(c, "no such node group")
-				return
-			}
-		case model.ObjectAll:
-			objectID = "" // normalized, so "all" is one row rather than one per stray id
-		default:
-			badRequest(c, "object_type must be node, node_group or all")
+		objectIDs, err := grantObjectIDs(&req)
+		if err != nil {
+			badRequest(c, err.Error())
 			return
 		}
 
-		g := &model.Grant{
-			ID:          uuid.New().String(),
-			SubjectType: req.SubjectType,
-			SubjectID:   req.SubjectID,
-			ObjectType:  req.ObjectType,
-			ObjectID:    objectID,
-			Level:       req.Level,
-			CreatedBy:   middleware.CurrentUserID(c),
+		author := middleware.CurrentUserID(c)
+		grants := make([]*model.Grant, 0, len(objectIDs))
+		for _, objectID := range objectIDs {
+			grants = append(grants, &model.Grant{
+				ID:          uuid.New().String(),
+				SubjectType: req.SubjectType,
+				SubjectID:   req.SubjectID,
+				ObjectType:  req.ObjectType,
+				ObjectID:    objectID,
+				Level:       req.Level,
+				CreatedBy:   author,
+			})
 		}
-		if err := store.UpsertGrant(g); err != nil {
+		if err := store.UpsertGrants(grants); err != nil {
 			internalError(c, "failed to save grant")
 			return
 		}
-		c.JSON(http.StatusCreated, g)
+		c.JSON(http.StatusCreated, gin.H{"items": grants})
 	}
+}
+
+// grantObjectIDs merges the single- and multi-object forms of the request into
+// one deduped list, with every id checked against a real row: a grant naming an
+// object that doesn't exist would sit in the table looking authoritative while
+// matching nothing — or worse, start matching once that id is created later.
+func grantObjectIDs(req *model.CreateGrantRequest) ([]string, error) {
+	switch req.ObjectType {
+	case model.ObjectAll:
+		// Normalized to a single row with no id, so "all" is one rule rather
+		// than one per stray id the client sent along with it.
+		return []string{""}, nil
+	case model.ObjectNode, model.ObjectNodeGroup:
+	default:
+		return nil, errors.New("object_type must be node, node_group or all")
+	}
+
+	ids := make([]string, 0, len(req.ObjectIDs)+1)
+	seen := make(map[string]bool, len(req.ObjectIDs)+1)
+	for _, id := range append(append([]string{}, req.ObjectIDs...), req.ObjectID) {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("name at least one %s", strings.ReplaceAll(req.ObjectType, "_", " "))
+	}
+
+	for _, id := range ids {
+		var err error
+		if req.ObjectType == model.ObjectNode {
+			_, err = store.GetNodeByID(id)
+		} else {
+			_, err = store.GetNodeGroupByID(id)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("no such %s: %s", strings.ReplaceAll(req.ObjectType, "_", " "), id)
+		}
+	}
+	return ids, nil
 }
 
 // DeleteGrant handles DELETE /api/grants/:id (admin only).

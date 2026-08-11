@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Plus, Trash2, Loader2, Users, Server, ShieldCheck } from 'lucide-vue-next'
+import { Plus, Trash2, Loader2, Users, Server, ShieldCheck, X } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -113,9 +113,12 @@ const grantForm = ref({
   subject_type: 'user_group' as SubjectType,
   subject_id: '',
   object_type: 'node_group' as ObjectType,
-  object_id: '',
+  // Several objects at once: one subject usually needs more than one group,
+  // and doing that as N trips through the dialog is the same rule typed N times.
+  object_ids: [] as string[],
   level: 'viewer' as NodeLevel,
 })
+const objectFilter = ref('')
 
 /** Options for the chosen subject kind. */
 const subjectOptions = computed(() =>
@@ -130,21 +133,62 @@ const objectOptions = computed(() =>
     : nodeGroups.value.map((g) => ({ id: g.id, label: g.name })),
 )
 
-// "all nodes" needs no object id; everything else does.
+/** The list as typed into the filter box — the ticks themselves survive filtering. */
+const visibleObjectOptions = computed(() => {
+  const q = objectFilter.value.trim().toLowerCase()
+  if (!q) return objectOptions.value
+  return objectOptions.value.filter((o) => o.label.toLowerCase().includes(q))
+})
+
+// Shown as chips above the list, because a tick scrolled out of view — or
+// filtered out of it — is a choice the dialog is keeping but no longer showing.
+const selectedObjects = computed(() =>
+  objectOptions.value.filter((o) => grantForm.value.object_ids.includes(o.id)),
+)
+
+const allVisibleSelected = computed(
+  () =>
+    visibleObjectOptions.value.length > 0 &&
+    visibleObjectOptions.value.every((o) => grantForm.value.object_ids.includes(o.id)),
+)
+
+// "all nodes" needs no object id; everything else needs at least one.
 const canSaveGrant = computed(
   () =>
     !!grantForm.value.subject_id &&
-    (grantForm.value.object_type === 'all' || !!grantForm.value.object_id),
+    (grantForm.value.object_type === 'all' || grantForm.value.object_ids.length > 0),
 )
+
+function toggleObject(id: string) {
+  const list = grantForm.value.object_ids
+  const i = list.indexOf(id)
+  if (i >= 0) list.splice(i, 1)
+  else list.push(id)
+}
+
+// Adds what the filter is currently showing rather than the whole catalogue,
+// so "filter, select all" is a way to grant a whole environment at once.
+function selectAllVisible() {
+  for (const o of visibleObjectOptions.value) {
+    if (!grantForm.value.object_ids.includes(o.id)) grantForm.value.object_ids.push(o.id)
+  }
+}
+
+function setObjectType(type: ObjectType) {
+  grantForm.value.object_type = type
+  grantForm.value.object_ids = []
+  objectFilter.value = ''
+}
 
 function openGrantDialog() {
   grantForm.value = {
     subject_type: 'user_group',
     subject_id: '',
     object_type: 'node_group',
-    object_id: '',
+    object_ids: [],
     level: 'viewer',
   }
+  objectFilter.value = ''
   showGrantDialog.value = true
 }
 
@@ -156,17 +200,35 @@ async function handleCreateGrant() {
       subject_type: grantForm.value.subject_type,
       subject_id: grantForm.value.subject_id,
       object_type: grantForm.value.object_type,
-      object_id: grantForm.value.object_type === 'all' ? undefined : grantForm.value.object_id,
+      object_ids: grantForm.value.object_type === 'all' ? undefined : grantForm.value.object_ids,
       level: grantForm.value.level,
     })
+    // One click can now write several rules, so say how many landed — otherwise
+    // the only feedback is a table the reader has to re-count.
+    const count = grantForm.value.object_type === 'all' ? 1 : grantForm.value.object_ids.length
     showGrantDialog.value = false
     await loadAll()
+    toast.success(t('permissions.grantsSaved', { count }))
   } catch (err) {
     reportError(err, t('permissions.failedToSave'))
   } finally {
     savingGrant.value = false
   }
 }
+
+// Grouped by subject rather than newest-first: a subject now holds several
+// rules at once, and the question being asked of this table is "what can this
+// person reach", which reads badly when their rows are scattered by age.
+const groupedGrants = computed(() => {
+  const rows = [...grants.value].sort(
+    (a, b) =>
+      a.subject_name.localeCompare(b.subject_name) || a.object_name.localeCompare(b.object_name),
+  )
+  return rows.map((g, i) => ({
+    ...g,
+    firstOfSubject: i === 0 || rows[i - 1].subject_id !== g.subject_id,
+  }))
+})
 
 async function handleDeleteGrant(id: string) {
   try {
@@ -255,7 +317,9 @@ const levelLabels: Record<NodeLevel, string> = {
 </script>
 
 <template>
-  <div class="p-6">
+  <!-- The layout's <main> is overflow-hidden, so this page has to own its
+       scrolling — without it a long grant list is simply unreachable. -->
+  <div class="h-full overflow-y-auto p-6">
     <div>
       <h1 class="text-lg font-semibold">{{ $t('permissions.title') }}</h1>
       <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
@@ -308,12 +372,14 @@ const levelLabels: Record<NodeLevel, string> = {
           </TableRow>
         </TableHeader>
         <TableBody>
-          <TableRow v-for="g in grants" :key="g.id">
-            <TableCell>
-              <span class="font-medium">{{ g.subject_name }}</span>
-              <Badge variant="outline" class="ml-2 text-[10px]">
-                {{ g.subject_type === 'user' ? $t('permissions.kindUser') : $t('permissions.kindUserGroup') }}
-              </Badge>
+          <TableRow v-for="g in groupedGrants" :key="g.id">
+            <TableCell :class="g.firstOfSubject ? '' : 'py-1'">
+              <template v-if="g.firstOfSubject">
+                <span class="font-medium">{{ g.subject_name }}</span>
+                <Badge variant="outline" class="ml-2 text-[10px]">
+                  {{ g.subject_type === 'user' ? $t('permissions.kindUser') : $t('permissions.kindUserGroup') }}
+                </Badge>
+              </template>
             </TableCell>
             <TableCell>
               <span class="font-medium">
@@ -401,7 +467,9 @@ const levelLabels: Record<NodeLevel, string> = {
         <DialogHeader>
           <DialogTitle>{{ $t('permissions.addGrant') }}</DialogTitle>
         </DialogHeader>
-        <div class="space-y-4">
+        <!-- The dialog is fixed and centred, so without a scroll cap here a long
+             selection grows it past both edges of the screen. -->
+        <div class="max-h-[65vh] space-y-4 overflow-y-auto px-1">
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="text-sm font-medium">{{ $t('permissions.who') }}</label>
@@ -431,34 +499,91 @@ const levelLabels: Record<NodeLevel, string> = {
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
-            <div>
+          <div>
+            <div class="flex items-center justify-between">
               <label class="text-sm font-medium">{{ $t('permissions.what') }}</label>
-              <Select
-                :model-value="grantForm.object_type"
-                @update:model-value="(v) => { grantForm.object_type = v as ObjectType; grantForm.object_id = '' }"
+              <div v-if="grantForm.object_type !== 'all'" class="flex gap-3 text-xs">
+                <button
+                  v-if="!allVisibleSelected && visibleObjectOptions.length > 1"
+                  class="hover:underline"
+                  style="color: var(--muted-foreground)"
+                  @click="selectAllVisible"
+                >
+                  {{ $t('permissions.selectAll') }}
+                </button>
+                <button
+                  v-if="grantForm.object_ids.length > 0"
+                  class="hover:underline"
+                  style="color: var(--muted-foreground)"
+                  @click="grantForm.object_ids = []"
+                >
+                  {{ $t('permissions.clearSelection') }}
+                </button>
+              </div>
+            </div>
+            <Select
+              :model-value="grantForm.object_type"
+              @update:model-value="(v) => setObjectType(v as ObjectType)"
+            >
+              <SelectTrigger class="mt-1.5"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="node_group">{{ $t('permissions.kindNodeGroup') }}</SelectItem>
+                <SelectItem value="node">{{ $t('permissions.kindNode') }}</SelectItem>
+                <SelectItem value="all">{{ $t('permissions.allNodes') }}</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <template v-if="grantForm.object_type !== 'all'">
+              <div
+                v-if="selectedObjects.length > 0"
+                class="mt-2 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto"
               >
-                <SelectTrigger class="mt-1.5"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="node_group">{{ $t('permissions.kindNodeGroup') }}</SelectItem>
-                  <SelectItem value="node">{{ $t('permissions.kindNode') }}</SelectItem>
-                  <SelectItem value="all">{{ $t('permissions.allNodes') }}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div v-if="grantForm.object_type !== 'all'">
-              <label class="text-sm font-medium">&nbsp;</label>
-              <Select v-model="grantForm.object_id">
-                <SelectTrigger class="mt-1.5">
-                  <SelectValue :placeholder="$t('permissions.choose')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="o in objectOptions" :key="o.id" :value="o.id">
-                    {{ o.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                <button
+                  v-for="o in selectedObjects"
+                  :key="o.id"
+                  class="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+                  style="background: var(--secondary); color: var(--secondary-foreground)"
+                  @click="toggleObject(o.id)"
+                >
+                  {{ o.label }}
+                  <X class="h-3 w-3" />
+                </button>
+              </div>
+              <Input
+                v-if="objectOptions.length > 8"
+                v-model="objectFilter"
+                class="mt-2"
+                autocomplete="off"
+                :placeholder="$t('permissions.filterPlaceholder')"
+              />
+              <div
+                class="mt-2 max-h-44 space-y-1 overflow-y-auto rounded-lg border p-2"
+                style="border-color: var(--border)"
+              >
+                <label
+                  v-for="o in visibleObjectOptions"
+                  :key="o.id"
+                  class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-[var(--secondary)]"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="grantForm.object_ids.includes(o.id)"
+                    @change="toggleObject(o.id)"
+                  />
+                  {{ o.label }}
+                </label>
+                <p
+                  v-if="visibleObjectOptions.length === 0"
+                  class="px-2 py-3 text-center text-xs"
+                  style="color: var(--muted-foreground)"
+                >
+                  {{ $t('permissions.noCandidates') }}
+                </p>
+              </div>
+              <p class="mt-1.5 text-xs" style="color: var(--muted-foreground)">
+                {{ $t('permissions.selectedCount', { count: grantForm.object_ids.length }) }}
+              </p>
+            </template>
           </div>
 
           <div>
