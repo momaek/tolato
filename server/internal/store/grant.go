@@ -9,17 +9,35 @@ import (
 // already granted on the same object. The unique index makes "grant again with
 // a different level" an edit rather than a duplicate row.
 func UpsertGrant(g *model.Grant) error {
+	return upsertGrant(DB, g)
+}
+
+// UpsertGrants applies several grants as one unit, so granting a subject five
+// node groups either lands whole or not at all — a half-applied set of rules is
+// worse than none, because it looks deliberate.
+func UpsertGrants(gs []*model.Grant) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		for _, g := range gs {
+			if err := upsertGrant(tx, g); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func upsertGrant(db *gorm.DB, g *model.Grant) error {
 	var existing model.Grant
-	err := DB.Where("subject_type = ? AND subject_id = ? AND object_type = ? AND object_id = ?",
+	err := db.Where("subject_type = ? AND subject_id = ? AND object_type = ? AND object_id = ?",
 		g.SubjectType, g.SubjectID, g.ObjectType, g.ObjectID).First(&existing).Error
 	switch {
 	case err == nil:
 		g.ID = existing.ID
 		g.CreatedAt = existing.CreatedAt
-		return DB.Model(&model.Grant{}).Where("id = ?", existing.ID).
+		return db.Model(&model.Grant{}).Where("id = ?", existing.ID).
 			Updates(map[string]any{"level": g.Level, "created_by": g.CreatedBy}).Error
 	case err == gorm.ErrRecordNotFound:
-		return DB.Create(g).Error
+		return db.Create(g).Error
 	default:
 		return err
 	}

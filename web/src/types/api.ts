@@ -122,6 +122,8 @@ export interface CreateGrantRequest {
   subject_id: string
   object_type: ObjectType
   object_id?: string
+  /** Several objects of object_type in one call; empty when object_type is "all". */
+  object_ids?: string[]
   level: NodeLevel
 }
 
