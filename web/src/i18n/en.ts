@@ -39,6 +39,9 @@ export default {
     settings: 'Settings',
     lightMode: 'Light Mode',
     darkMode: 'Dark Mode',
+    account: 'Account',
+    accountSettings: 'Account settings',
+    signOut: 'Sign out',
   },
 
   cliAuth: {
@@ -304,6 +307,8 @@ export default {
       passwordChanged: 'Password changed.',
       failedToChange: 'Failed to change password.',
       ssoNoPassword: 'You sign in through single sign-on, so there is no local password to change.',
+      signOut: 'Sign out',
+      signOutHint: 'Signs out this browser only. Command-line sessions end with `tolato auth logout`.',
     },
     llm: {
       title: 'LLM Configuration',

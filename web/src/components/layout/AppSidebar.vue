@@ -2,12 +2,14 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Server, FileText, Settings, Users, ShieldCheck, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink } from 'lucide-vue-next'
+import { MessageSquare, Server, FileText, Settings, Users, ShieldCheck, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink, LogOut, ChevronsUpDown } from 'lucide-vue-next'
 import { useTheme } from '@/composables/useTheme'
 import { setLocale, getLocale } from '@/i18n'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { getVersionInfo, type VersionInfo } from '@/services/api'
@@ -62,6 +64,10 @@ function toggleLocale() {
   const current = getLocale()
   setLocale(current === 'en' ? 'zh-CN' : 'en')
 }
+
+// Falls back to a bullet rather than an empty circle on the one frame before
+// /auth/me lands on a browser with no cached user.
+const userInitial = computed(() => appStore.user?.username?.trim().charAt(0).toUpperCase() || '•')
 
 // --- Update check (best-effort; failure just means no red dot) ---
 const versionInfo = ref<VersionInfo | null>(null)
@@ -203,6 +209,48 @@ async function copyPrompt() {
         <Moon v-else class="h-4 w-4" />
         {{ theme === 'dark' ? $t('sidebar.lightMode') : $t('sidebar.darkMode') }}
       </button>
+
+      <!-- Account. Sits at the bottom of the rail because that's where people
+           go looking for it, and it's the only way out of a session in the
+           web UI — the CLI has `tolato auth logout`. -->
+      <DropdownMenu>
+        <DropdownMenuTrigger as-child>
+          <button
+            type="button"
+            class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <span
+              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
+              style="background-color: var(--primary); color: var(--primary-foreground)"
+              aria-hidden="true"
+            >
+              {{ userInitial }}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-left">
+              {{ appStore.user?.username || $t('sidebar.account') }}
+            </span>
+            <ChevronsUpDown class="h-3.5 w-3.5 shrink-0 opacity-60" />
+          </button>
+        </DropdownMenuTrigger>
+
+        <DropdownMenuContent align="start" side="top" :side-offset="8" class="w-[248px]">
+          <div class="px-2 py-1.5">
+            <p class="truncate text-sm font-medium">{{ appStore.user?.username }}</p>
+            <p class="text-xs" style="color: var(--muted-foreground)">
+              {{ appStore.isAdmin ? $t('users.roleAdmin') : $t('users.roleMember') }}
+            </p>
+          </div>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem @select="navigate('/settings')">
+            <Settings class="h-4 w-4" />
+            {{ $t('sidebar.accountSettings') }}
+          </DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" @select="appStore.logout()">
+            <LogOut class="h-4 w-4" />
+            {{ $t('sidebar.signOut') }}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <div
         class="flex items-center justify-between px-3 pt-2 text-xs"

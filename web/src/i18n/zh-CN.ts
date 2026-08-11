@@ -39,6 +39,9 @@ export default {
     settings: '设置',
     lightMode: '浅色模式',
     darkMode: '深色模式',
+    account: '账号',
+    accountSettings: '账号设置',
+    signOut: '退出登录',
   },
 
   cliAuth: {
@@ -303,6 +306,8 @@ export default {
       passwordChanged: '密码已修改。',
       failedToChange: '修改密码失败。',
       ssoNoPassword: '你通过单点登录使用本系统，没有本地密码可修改。',
+      signOut: '退出登录',
+      signOutHint: '只影响这个浏览器；命令行的登录状态请用 tolato auth logout 退出。',
     },
     llm: {
       title: 'LLM 配置',

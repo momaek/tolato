@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { CheckCircle, AlertCircle, Loader2, Copy, Check, Key, Trash2, Plus, Send } from 'lucide-vue-next'
+import { CheckCircle, AlertCircle, Loader2, Copy, Check, Key, Trash2, Plus, Send, LogOut } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -1668,6 +1668,20 @@ function closeCreateDialog() {
             </Button>
           </div>
         </template>
+
+        <Separator />
+
+        <!-- Second way out of a session, next to the identity it ends; the
+             sidebar account menu is the one people find without looking. -->
+        <div class="space-y-2">
+          <Button variant="outline" @click="appStore.logout()">
+            <LogOut class="mr-2 h-4 w-4" />
+            {{ $t('settings.account.signOut') }}
+          </Button>
+          <p class="text-xs" style="color: var(--muted-foreground)">
+            {{ $t('settings.account.signOutHint') }}
+          </p>
+        </div>
       </div>
 
       <!-- Create API Key Dialog -->

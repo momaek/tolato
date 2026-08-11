@@ -2,7 +2,6 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { login as apiLogin, getCurrentUser } from '@/services/api'
 import type { LoginRequest, UserItem } from '@/types/api'
-import router from '@/router'
 
 const USER_KEY = 'user'
 
@@ -68,7 +67,11 @@ export const useAppStore = defineStore('app', () => {
     token.value = null
     setUser(null)
     localStorage.removeItem('token')
-    router.push('/login')
+    // A hard navigation rather than router.push: it drops every in-memory
+    // store along with the token, so the next person to sign in on this
+    // browser doesn't inherit the previous one's conversations or node list.
+    // The unload also closes the chat WS through AppLayout's beforeunload.
+    window.location.assign('/login')
   }
 
   return {
