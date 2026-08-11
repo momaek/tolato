@@ -125,6 +125,16 @@ func DeleteGrant(deps *Deps) gin.HandlerFunc {
 	}
 }
 
+// userLabel names a user the way a human would recognise them. An SSO username
+// can be as anonymous as "user", so the display name leads and the username
+// stays alongside it to keep two people with the same display name apart.
+func userLabel(username, displayName string) string {
+	if displayName == "" || displayName == username {
+		return username
+	}
+	return displayName + " (" + username + ")"
+}
+
 // nameIndex resolves grant subject/object ids to display names in bulk.
 type nameIndex struct {
 	users      map[string]string
@@ -146,7 +156,7 @@ func grantNameIndex() (*nameIndex, error) {
 		return nil, err
 	}
 	for i := range users {
-		idx.users[users[i].ID] = users[i].Username
+		idx.users[users[i].ID] = userLabel(users[i].Username, users[i].DisplayName)
 	}
 
 	ugs, err := store.ListUserGroups()
