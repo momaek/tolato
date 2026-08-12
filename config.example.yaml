@@ -9,6 +9,10 @@ server:
   # Examples: ["https://tolato.example.com"]
   allowed_origins: []
   install_script_url: https://raw.githubusercontent.com/momaek/tolato/main/scripts/install.sh
+  # /skill.md redirects here — the agent skill users install into Claude Code /
+  # Codex from Settings → CLI. Repoint at a mirror if your users can't reach
+  # github.com.
+  skill_url: https://raw.githubusercontent.com/momaek/tolato/main/skills/tolato/SKILL.md
   # Public URL behind your reverse proxy. Used to generate the agent install
   # command and WebSocket URL. Leave empty only for same-host testing.
   # Example: https://tolato.example.com

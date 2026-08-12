@@ -18,38 +18,57 @@ tolato nodes list
 
 ### If the CLI is missing
 
-Binaries are published per CLI release under the `cli-v*` tags. They are
-deliberately *not* marked as the latest release — that pointer belongs to the
-agent — so download from the tag URL rather than `/releases/latest`:
+Download it from the Tolato server itself. A server's `/releases/` path mirrors
+the GitHub release assets, following the redirect to
+objects.githubusercontent.com and streaming the body back, so it works from
+machines that cannot reach github.com:
 
 ```bash
-# pick a tag from https://github.com/momaek/tolato/releases
+# the same server URL that goes into `tolato auth login --url`
 curl -fL -o /usr/local/bin/tolato \
-  https://github.com/momaek/tolato/releases/download/cli-v0.1.0/tolato-darwin-arm64
+  https://tolato.example.com/releases/download/cli-latest/tolato-darwin-arm64
 chmod +x /usr/local/bin/tolato
 ```
 
+`cli-latest` is republished on every CLI release, so it is always the newest
+build — do not substitute a specific `cli-v*` tag unless the user asked to pin
+one, and do not reach for `/releases/latest`, which points at the agent rather
+than the CLI.
+
 Assets are named `tolato-<os>-<arch>` for linux/darwin × amd64/arm64, each with
-a `.sha256` alongside it. From a checkout, `go build -C cli -o ~/bin/tolato .`
-works too.
+a `.sha256` alongside it. The same paths work against
+`https://github.com/momaek/tolato/releases` for anyone who can reach it. From a
+checkout, `go build -C cli -o ~/bin/tolato .` works too.
 
 ### If the CLI is unconfigured
 
-Have the user run:
+Run:
 
 ```bash
 tolato auth login --url https://tolato.example.com
 ```
 
-That opens a browser, they approve once, and the CLI writes
+That opens a browser, the user approves once, and the CLI writes
 `~/.config/tolato/config.yaml` itself with the key it was granted. The `--url`
 is only needed the first time. `tolato auth status` reports which server and
 profile are in play and whether the key still works; `tolato auth logout`
 revokes the key server-side and removes it locally.
 
-**Let the user run it.** The approval screen is the point of the design — it is
-where they choose read-only or read-and-run, and it should be a person clicking
-it. The key itself never appears in the terminal or in this conversation.
+You can run this one yourself — the key never reaches your output. On success
+the command prints the granted name, permission and config path, and nothing
+else; `auth status` masks the key too. Two conditions come with it:
+
+- **Say it is coming.** The command opens a browser and then blocks. Announce
+  it first, or the user is staring at a terminal that looks hung.
+- **Allow more than three minutes.** `auth login` waits three minutes for the
+  browser round trip, which is longer than a typical tool-call timeout. Cut it
+  short and you kill the loopback listener while the user is still reading the
+  consent screen; their approval then lands on a closed port and they have to
+  start over.
+
+**The consent screen is theirs.** It is where they choose read-only or
+read-and-run, and a person has to be the one clicking it. Do not fill it in or
+click through it on their behalf, even if you can drive a browser.
 
 The config file is `~/.config/tolato/config.yaml` on every platform, holding one
 entry per server under `profiles` with `current` naming the active one.

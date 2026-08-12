@@ -212,6 +212,18 @@ func SetupRouter(deps *Deps) *gin.Engine {
 		c.Redirect(http.StatusFound, url)
 	})
 
+	// Agent skill: 302 → GitHub raw (configurable via server.skill_url). The
+	// Settings page gives users a prompt telling their AI coding agent to fetch
+	// this path, so the URL they paste is always their own server.
+	r.GET("/skill.md", func(c *gin.Context) {
+		url := deps.Config.Server.SkillURL
+		if url == "" {
+			c.String(http.StatusNotFound, "skill url not configured")
+			return
+		}
+		c.Redirect(http.StatusFound, url)
+	})
+
 	// Agent binary mirror: streams GitHub release assets through this server so
 	// agents in regions that can't reach github.com can still install.
 	r.GET("/releases/*path", ReleaseProxy(deps))

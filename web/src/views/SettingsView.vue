@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { CheckCircle, AlertCircle, Loader2, Copy, Check, Key, Trash2, Plus, Send, LogOut } from 'lucide-vue-next'
+import { CheckCircle, AlertCircle, Loader2, Copy, Check, Key, Trash2, Plus, Send, LogOut, FileText } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -97,6 +97,7 @@ const tabs = computed(() => [
       ]
     : []),
   { id: 'api_keys', label: t('settings.tabs.apiKeys') },
+  { id: 'cli', label: t('settings.tabs.cli') },
   { id: 'account', label: t('settings.tabs.account') },
 ])
 
@@ -521,6 +522,53 @@ async function copyRedirectURL() {
   await navigator.clipboard.writeText(oidcRedirectURL.value)
   oidcRedirectCopied.value = true
   setTimeout(() => (oidcRedirectCopied.value = false), 1500)
+}
+
+// --- CLI & Skill ---
+//
+// The prompt is built against the origin the user is actually browsing, not
+// server.public_address: whatever host reached this page is a host their
+// machine can reach, which is the whole point of handing them a URL to paste.
+
+const serverOrigin = window.location.origin
+const skillUrl = `${serverOrigin}/skill.md`
+const installPrompt = computed(() => t('settings.cli.prompt', { url: serverOrigin }))
+const promptCopied = ref(false)
+
+async function copyInstallPrompt() {
+  // navigator.clipboard is undefined over plain http (LAN IP), which is a
+  // normal way to reach a self-hosted Tolato — fall back the way CodeBlock does.
+  const text = installPrompt.value
+  let ok = false
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      ok = true
+    } catch {
+      /* fall through */
+    }
+  }
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+    } catch {
+      ok = false
+    }
+  }
+  if (!ok) {
+    toast.error(t('common.copyFailed'))
+    return
+  }
+  promptCopied.value = true
+  setTimeout(() => (promptCopied.value = false), 1500)
 }
 
 // --- Account (self-service) ---
@@ -1615,6 +1663,55 @@ function closeCreateDialog() {
         </Table>
       </div>
 
+      <!-- CLI & Skill -->
+      <div v-if="activeTab === 'cli'" class="max-w-3xl space-y-6">
+        <div>
+          <h2 class="text-base font-semibold">{{ $t('settings.cli.title') }}</h2>
+          <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.cli.description') }}
+          </p>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-3">
+          <div>
+            <label class="text-sm font-medium">{{ $t('settings.cli.promptLabel') }}</label>
+            <p class="mt-1 text-sm" style="color: var(--muted-foreground)">
+              {{ $t('settings.cli.promptHelp') }}
+            </p>
+          </div>
+          <pre
+            class="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border p-3 text-xs leading-relaxed"
+            style="background: var(--muted); border-color: var(--border)"
+            >{{ installPrompt }}</pre
+          >
+          <Button variant="outline" @click="copyInstallPrompt">
+            <Check v-if="promptCopied" class="mr-2 h-4 w-4" />
+            <Copy v-else class="mr-2 h-4 w-4" />
+            {{ promptCopied ? $t('settings.cli.copied') : $t('settings.cli.copy') }}
+          </Button>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-2">
+          <h3 class="text-sm font-medium">{{ $t('settings.cli.manualTitle') }}</h3>
+          <p class="text-sm" style="color: var(--muted-foreground)">
+            {{ $t('settings.cli.manualHelp') }}
+          </p>
+          <a
+            :href="skillUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-1.5 text-sm underline underline-offset-4"
+            style="color: var(--primary)"
+          >
+            <FileText class="h-4 w-4" />
+            {{ $t('settings.cli.viewSkill') }}
+          </a>
+        </div>
+      </div>
 
       <div v-if="activeTab === 'account'" class="max-w-2xl space-y-6">
         <div>

@@ -31,7 +31,10 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:8080',
-      '/ws': { target: 'ws://localhost:8080', ws: true }
+      '/ws': { target: 'ws://localhost:8080', ws: true },
+      // Served by the Go server in production, where the SPA and the API share
+      // an origin. Proxy it here so the Settings → CLI link works in dev too.
+      '/skill.md': 'http://localhost:8080'
     }
   }
 })

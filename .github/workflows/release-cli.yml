@@ -11,6 +11,13 @@ name: release-cli
 # Hence make_latest: false below — a CLI release is published, but not marked
 # latest. Download the CLI from its own tag URL:
 #   https://github.com/<repo>/releases/download/cli-v<x.y.z>/tolato-<os>-<arch>
+#
+# Because /releases/latest is spoken for, every release here is also republished
+# under the moving `cli-latest` tag, so anything that wants "the newest CLI"
+# without naming a version has a URL to use:
+#   https://github.com/<repo>/releases/download/cli-latest/tolato-<os>-<arch>
+# The agent skill installs from that path (through a Tolato server's /releases
+# mirror), which is why it must keep working.
 
 on:
   push:
@@ -75,6 +82,10 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      # Checked out before the artifacts land: actions/checkout cleans the
+      # workspace, which would take `dist/` with it if it ran second.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -90,3 +101,29 @@ jobs:
           fail_on_unmatched_files: true
           # See the header comment: /releases/latest belongs to the agent.
           make_latest: false
+
+      # The moving pointer. action-gh-release updates an existing release in
+      # place but will not relocate the tag underneath it, so move the tag
+      # first — otherwise cli-latest keeps pointing at whichever commit first
+      # created it while its assets quietly advance.
+      - name: move the cli-latest tag onto this commit
+        run: |
+          git tag -f cli-latest
+          git push -f origin cli-latest
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cli-latest
+          name: cli-latest
+          files: dist/*
+          fail_on_unmatched_files: true
+          # Same reason as above, and doubly so: this one is republished on
+          # every CLI release and would otherwise steal the agent's pointer.
+          make_latest: false
+          body: |
+            Moving pointer to the newest `tolato` CLI build, republished on
+            every `cli-v*` release so that installers have a URL that does not
+            name a version. The binaries are byte-identical to the `cli-v*`
+            release they came from, and `tolato version` reports that version.
+
+            Pin a `cli-v*` tag instead when you want a specific build.

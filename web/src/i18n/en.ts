@@ -1,5 +1,6 @@
 export default {
   common: {
+    copyFailed: 'Could not copy — select the text and copy it yourself.',
     save: 'Save Changes',
     saving: 'Saving...',
     cancel: 'Cancel',
@@ -264,6 +265,7 @@ export default {
       notify: 'Offline Alerts',
       apiKeys: 'API Keys',
       oidc: 'Single Sign-On',
+      cli: 'CLI & Skill',
       account: 'Account',
     },
     oidc: {
@@ -421,6 +423,22 @@ export default {
       namePlaceholder: 'e.g., MCP Integration',
       copyWarning: "Copy your API key now. It won't be shown again.",
       noKeys: 'No API keys created yet',
+    },
+    cli: {
+      title: 'CLI & Skill',
+      description:
+        'Drive this fleet from your own AI coding agent. The skill teaches it the `tolato` CLI — what it can do, which fleet it is talking to, and when to stop and ask you.',
+      promptLabel: 'Paste this into Claude Code, Codex, or any coding agent',
+      promptHelp:
+        'It installs the skill and the CLI, then opens the login — the approval screen in the browser is still yours to click.',
+      prompt:
+        'Install the Tolato skill and CLI for me.\n\n1. Fetch {url}/skill.md and save it as a skill, keeping the file name SKILL.md:\n   - Claude Code: ~/.claude/skills/tolato/SKILL.md\n   - Codex: ~/.codex/skills/tolato/SKILL.md\n   - any other agent: the same tolato/SKILL.md layout under your own skills directory\n2. Follow the "Setup" section inside that skill to install the tolato CLI for my OS and architecture, somewhere on my PATH. Download it from {url}/releases/download/cli-latest/ — that path mirrors the release assets through my own server, so it works even where github.com does not, and cli-latest is always the newest build. Do not pin a version.\n3. Then run: tolato auth login --url {url}\n   Tell me before you run it — it opens a browser and then blocks waiting, for up to three minutes, so allow the command at least that long or you will kill it while I am still reading the page.\n   I approve it in the browser myself. Do not click through that page for me, even if you can drive a browser.',
+      copy: 'Copy prompt',
+      copied: 'Copied',
+      manualTitle: 'Or install it by hand',
+      manualHelp:
+        'Download the skill and drop it in yourself: ~/.claude/skills/tolato/SKILL.md for Claude Code, ~/.codex/skills/tolato/SKILL.md for Codex.',
+      viewSkill: 'View skill',
     },
     failedToLoad: 'Failed to load settings',
     saveFailed: 'Save failed',
