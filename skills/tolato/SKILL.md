@@ -18,20 +18,27 @@ tolato nodes list
 
 ### If the CLI is missing
 
-Binaries are published per CLI release under the `cli-v*` tags. They are
-deliberately *not* marked as the latest release — that pointer belongs to the
-agent — so download from the tag URL rather than `/releases/latest`:
+Download it from the Tolato server itself. A server's `/releases/` path mirrors
+the GitHub release assets, following the redirect to
+objects.githubusercontent.com and streaming the body back, so it works from
+machines that cannot reach github.com:
 
 ```bash
-# pick a tag from https://github.com/momaek/tolato/releases
+# the same server URL that goes into `tolato auth login --url`
 curl -fL -o /usr/local/bin/tolato \
-  https://github.com/momaek/tolato/releases/download/cli-v0.1.0/tolato-darwin-arm64
+  https://tolato.example.com/releases/download/cli-latest/tolato-darwin-arm64
 chmod +x /usr/local/bin/tolato
 ```
 
+`cli-latest` is republished on every CLI release, so it is always the newest
+build — do not substitute a specific `cli-v*` tag unless the user asked to pin
+one, and do not reach for `/releases/latest`, which points at the agent rather
+than the CLI.
+
 Assets are named `tolato-<os>-<arch>` for linux/darwin × amd64/arm64, each with
-a `.sha256` alongside it. From a checkout, `go build -C cli -o ~/bin/tolato .`
-works too.
+a `.sha256` alongside it. The same paths work against
+`https://github.com/momaek/tolato/releases` for anyone who can reach it. From a
+checkout, `go build -C cli -o ~/bin/tolato .` works too.
 
 ### If the CLI is unconfigured
 
