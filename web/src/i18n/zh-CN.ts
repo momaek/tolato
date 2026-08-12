@@ -430,11 +430,12 @@ export default {
       promptLabel: '把这段贴进 Claude Code、Codex 或任何编码助手',
       promptHelp: '它会替你装好 skill 和 CLI，再把登录拉起来 —— 浏览器里批准这一下还是你自己点。',
       prompt:
-        '帮我安装 Tolato 的 skill 和 CLI。\n\n1. 拉取 {url}/skill.md，存成一个 skill。Claude Code 放在 ~/.claude/skills/tolato/SKILL.md；如果你是别的 agent，按你自己的 skill 或 instructions 目录约定放。\n2. 按 skill 里「Setup」一节的说明，装上对应我操作系统和架构的 tolato CLI，放进 PATH。注意二进制发布在 cli-v* 这些 tag 下，不在 latest release 里。\n3. 然后运行：tolato auth login --url {url}\n   跑之前先跟我说一声 —— 它会打开浏览器然后阻塞等待，最长等三分钟，所以给这条命令留够三分钟以上的超时，否则我还在看批准页它就被你掐了。\n   浏览器里的批准我自己点。就算你能操作浏览器，也不要替我点那个页面。',
+        '帮我安装 Tolato 的 skill 和 CLI。\n\n1. 拉取 {url}/skill.md，存成一个 skill，文件名保持 SKILL.md：\n   - Claude Code：~/.claude/skills/tolato/SKILL.md\n   - Codex：~/.codex/skills/tolato/SKILL.md\n   - 其它 agent：在你自己的 skills 目录下照 tolato/SKILL.md 这个结构放\n2. 按 skill 里「Setup」一节的说明，装上对应我操作系统和架构的 tolato CLI，放进 PATH。注意二进制发布在 cli-v* 这些 tag 下，不在 latest release 里。\n3. 然后运行：tolato auth login --url {url}\n   跑之前先跟我说一声 —— 它会打开浏览器然后阻塞等待，最长等三分钟，所以给这条命令留够三分钟以上的超时，否则我还在看批准页它就被你掐了。\n   浏览器里的批准我自己点。就算你能操作浏览器，也不要替我点那个页面。',
       copy: '复制指令',
       copied: '已复制',
       manualTitle: '也可以手动装',
-      manualHelp: '把 skill 下载下来自己放好。Claude Code 从 ~/.claude/skills/tolato/SKILL.md 读取。',
+      manualHelp:
+        '把 skill 下载下来自己放好：Claude Code 放 ~/.claude/skills/tolato/SKILL.md，Codex 放 ~/.codex/skills/tolato/SKILL.md。',
       viewSkill: '查看 skill',
     },
     failedToLoad: '加载设置失败',

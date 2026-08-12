@@ -432,12 +432,12 @@ export default {
       promptHelp:
         'It installs the skill and the CLI, then opens the login — the approval screen in the browser is still yours to click.',
       prompt:
-        'Install the Tolato skill and CLI for me.\n\n1. Fetch {url}/skill.md and save it as a skill. For Claude Code that is ~/.claude/skills/tolato/SKILL.md; if you are a different agent, follow your own skill or instructions directory convention.\n2. Follow the "Setup" section inside that skill to install the tolato CLI for my OS and architecture, somewhere on my PATH. The binaries are published under the cli-v* release tags, not under the latest release.\n3. Then run: tolato auth login --url {url}\n   Tell me before you run it — it opens a browser and then blocks waiting, for up to three minutes, so allow the command at least that long or you will kill it while I am still reading the page.\n   I approve it in the browser myself. Do not click through that page for me, even if you can drive a browser.',
+        'Install the Tolato skill and CLI for me.\n\n1. Fetch {url}/skill.md and save it as a skill, keeping the file name SKILL.md:\n   - Claude Code: ~/.claude/skills/tolato/SKILL.md\n   - Codex: ~/.codex/skills/tolato/SKILL.md\n   - any other agent: the same tolato/SKILL.md layout under your own skills directory\n2. Follow the "Setup" section inside that skill to install the tolato CLI for my OS and architecture, somewhere on my PATH. The binaries are published under the cli-v* release tags, not under the latest release.\n3. Then run: tolato auth login --url {url}\n   Tell me before you run it — it opens a browser and then blocks waiting, for up to three minutes, so allow the command at least that long or you will kill it while I am still reading the page.\n   I approve it in the browser myself. Do not click through that page for me, even if you can drive a browser.',
       copy: 'Copy prompt',
       copied: 'Copied',
       manualTitle: 'Or install it by hand',
       manualHelp:
-        'Download the skill and drop it in yourself. Claude Code reads it from ~/.claude/skills/tolato/SKILL.md.',
+        'Download the skill and drop it in yourself: ~/.claude/skills/tolato/SKILL.md for Claude Code, ~/.codex/skills/tolato/SKILL.md for Codex.',
       viewSkill: 'View skill',
     },
     failedToLoad: 'Failed to load settings',
