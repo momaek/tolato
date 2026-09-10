@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/url"
 	"sync"
 	"time"
@@ -32,10 +34,27 @@ import (
 var Version = "dev"
 
 const (
+	initialBackoff = 1 * time.Second
+	maxBackoff     = 60 * time.Second
+)
+
+// Liveness tuning. These are vars (not consts) only so tests can shrink them.
+//
+// The connection is considered dead when nothing has been read from the
+// server for pongWait. Every heartbeat tick also sends a WebSocket Ping; the
+// server's default ping handler answers with a Pong, which (like any other
+// inbound frame) pushes the read deadline forward. Without this, a socket
+// whose peer silently vanished — or whose write side is wedged — stays
+// "open" forever: TCP keepalives keep the kernel happy, but no application
+// frame ever moves, and readLoop blocks until the heat death of the universe.
+// See momaek/tolato#15.
+var (
 	heartbeatInterval = 30 * time.Second
-	initialBackoff    = 1 * time.Second
-	maxBackoff        = 60 * time.Second
+	pongWait          = 90 * time.Second // must be > heartbeatInterval; 3 missed pongs
 	writeWait         = 10 * time.Second
+	// Command results and file reads can be large; on a lossy long-haul link
+	// a multi-megabyte frame can legitimately take more than writeWait.
+	bulkWriteWait = 60 * time.Second
 )
 
 // ---- Wire protocol types ----
@@ -235,10 +254,20 @@ func (c *Client) connectAndServe() error {
 
 	defer func() {
 		c.connMu.Lock()
-		_ = c.conn.Close()
-		c.conn = nil
+		_ = conn.Close()
+		if c.conn == conn {
+			c.conn = nil
+		}
 		c.connMu.Unlock()
 	}()
+
+	// Read-side liveness: any inbound frame (Pong, register_ack, command, ...)
+	// extends the deadline; silence for pongWait makes ReadJSON fail, which
+	// tears the connection down and lets Run() reconnect.
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
 
 	// Send register message
 	if err := c.sendRegister(); err != nil {
@@ -253,11 +282,11 @@ func (c *Client) connectAndServe() error {
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
-		c.heartbeatLoop(connCtx)
+		c.heartbeatLoop(connCtx, conn)
 	}()
 
 	// Read loop (blocks until error)
-	err = c.readLoop()
+	err = c.readLoop(conn)
 
 	// Cancel heartbeat and wait for it
 	connCancel()
@@ -305,8 +334,26 @@ func (c *Client) sendRegister() error {
 	return c.sendMessage("register", "", payload)
 }
 
-// sendMessage marshals and sends a WSMessage.
+// sendMessage marshals and sends a WSMessage with the default write deadline.
 func (c *Client) sendMessage(msgType, id string, payload interface{}) error {
+	return c.sendMessageWait(msgType, id, payload, writeWait)
+}
+
+// sendBulkMessage is sendMessage with the longer deadline for potentially
+// large frames (command results, file reads).
+func (c *Client) sendBulkMessage(msgType, id string, payload interface{}) error {
+	return c.sendMessageWait(msgType, id, payload, bulkWriteWait)
+}
+
+// sendMessageWait marshals and sends a WSMessage, failing the write after wait.
+//
+// A write error is terminal for the connection: gorilla records the first
+// fatal write error and returns it for every subsequent write without
+// touching the socket, so once one frame times out nothing else will ever
+// get through. Close the socket right here so readLoop unblocks, connectAndServe
+// returns, and Run() dials a fresh connection — instead of leaving a process
+// that looks alive but can never answer again.
+func (c *Client) sendMessageWait(msgType, id string, payload interface{}, wait time.Duration) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -325,18 +372,29 @@ func (c *Client) sendMessage(msgType, id string, payload interface{}) error {
 		return fmt.Errorf("connection closed")
 	}
 
-	_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-	return c.conn.WriteJSON(msg)
+	_ = c.conn.SetWriteDeadline(time.Now().Add(wait))
+	if err := c.conn.WriteJSON(msg); err != nil {
+		log.Printf("[ws] write %s failed, dropping connection: %v", msgType, err)
+		_ = c.conn.Close()
+		return err
+	}
+	return nil
 }
 
 // readLoop reads messages from the server until an error occurs.
-func (c *Client) readLoop() error {
+func (c *Client) readLoop(conn *websocket.Conn) error {
 	for {
 		var msg WSMessage
-		err := c.conn.ReadJSON(&msg)
+		err := conn.ReadJSON(&msg)
 		if err != nil {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				return fmt.Errorf("no frame or pong from server for %s, dropping connection: %w", pongWait, err)
+			}
 			return fmt.Errorf("read: %w", err)
 		}
+		// Server traffic proves the link is alive just as well as a Pong does.
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 
 		switch msg.Type {
 		case "register_ack":
@@ -409,13 +467,20 @@ func (c *Client) handleCommand(msg WSMessage) {
 		DurationMS: result.DurationMS,
 	}
 
-	if err := c.sendMessage("command_result", msg.ID, payload); err != nil {
+	if err := c.sendBulkMessage("command_result", msg.ID, payload); err != nil {
 		log.Printf("[ws] failed to send command_result: %v", err)
 	}
 }
 
-// heartbeatLoop sends periodic heartbeat messages.
-func (c *Client) heartbeatLoop(ctx context.Context) {
+// heartbeatLoop sends periodic heartbeat messages, each followed by a Ping
+// so the server's Pong keeps our read deadline (see connectAndServe) fresh.
+//
+// Any send failure closes conn: heartbeat frames go through sendMessage, which
+// already does that, and a failed Ping is handled here. Either way readLoop
+// wakes up with an error and the reconnect path runs. Merely returning from
+// this goroutine (the old behaviour) left readLoop parked on a dead socket
+// with nobody left to notice.
+func (c *Client) heartbeatLoop(ctx context.Context, conn *websocket.Conn) {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
@@ -434,6 +499,13 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 			}
 			if err := c.sendMessage("heartbeat", "", payload); err != nil {
 				log.Printf("[ws] heartbeat send failed: %v", err)
+				return
+			}
+			// WriteControl is safe to call concurrently with other writes and
+			// has its own deadline, so it doesn't need connMu.
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait)); err != nil {
+				log.Printf("[ws] ping failed, dropping connection: %v", err)
+				_ = conn.Close()
 				return
 			}
 		}
@@ -551,5 +623,5 @@ func (c *Client) handleFileOp(msg WSMessage) {
 		Offset: p.Offset,
 		Length: p.Length,
 	})
-	_ = c.sendMessage("file_result", msg.ID, resp)
+	_ = c.sendBulkMessage("file_result", msg.ID, resp)
 }
