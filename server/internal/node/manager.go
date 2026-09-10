@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"sync"
 	"time"
 
@@ -26,6 +27,23 @@ import (
 //   - SetSystemHandlers(onHB, onReRegister)
 //     registers callbacks for unsolicited agent messages
 // ============================================================================
+
+// Liveness tuning for agent sockets. Vars rather than consts so tests can
+// shrink them.
+//
+// Agents heartbeat every 30s, and every inbound frame extends the read
+// deadline, so a healthy agent never comes near agentPongWait. The Ping is
+// for the other case: an agent whose write side has wedged (gorilla makes the
+// first fatal write error permanent) can still *read*, and its default ping
+// handler will try to Pong — and fail — which errors out its read loop and
+// triggers its reconnect. Even if it doesn't, our deadline trips here and we
+// close the socket ourselves instead of letting a reverse proxy hold a dead
+// connection open forever. See momaek/tolato#15.
+var (
+	agentPingPeriod = 30 * time.Second
+	agentPongWait   = 90 * time.Second // must be > agentPingPeriod
+	agentWriteWait  = 10 * time.Second
+)
 
 // AgentFrame is a message decoded off the agent's socket. Payload is kept as
 // raw JSON so each handler can unmarshal it into its own typed struct via
@@ -200,14 +218,25 @@ func (ac *AgentConn) run() {
 		ac.mu.Unlock()
 	})
 
+	_ = ac.Conn.SetReadDeadline(time.Now().Add(agentPongWait))
+	ac.Conn.SetPongHandler(func(string) error {
+		return ac.Conn.SetReadDeadline(time.Now().Add(agentPongWait))
+	})
+	go ac.pingLoop()
+
 	for {
 		_, raw, err := ac.Conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			var ne net.Error
+			switch {
+			case errors.As(err, &ne) && ne.Timeout():
+				log.Printf("[agent_router] node=%s silent for %s (no frame, no pong), closing", ac.NodeID, agentPongWait)
+			case websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure):
 				log.Printf("[agent_router] node=%s read error: %v", ac.NodeID, err)
 			}
 			return
 		}
+		_ = ac.Conn.SetReadDeadline(time.Now().Add(agentPongWait))
 
 		var msg AgentFrame
 		if err := json.Unmarshal(raw, &msg); err != nil {
@@ -216,6 +245,27 @@ func (ac *AgentConn) run() {
 		}
 
 		ac.dispatch(&msg)
+	}
+}
+
+// pingLoop sends a WebSocket Ping every agentPingPeriod until run() finishes.
+// A failed Ping means the socket is gone; close it so run() unblocks.
+// WriteControl is safe to call concurrently with WriteJSON and has its own
+// deadline, so it does not take writeMu.
+func (ac *AgentConn) pingLoop() {
+	t := time.NewTicker(agentPingPeriod)
+	defer t.Stop()
+	for {
+		select {
+		case <-ac.done:
+			return
+		case <-t.C:
+			if err := ac.Conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(agentWriteWait)); err != nil {
+				log.Printf("[agent_router] node=%s ping failed, closing: %v", ac.NodeID, err)
+				_ = ac.Conn.Close()
+				return
+			}
+		}
 	}
 }
 
@@ -306,6 +356,22 @@ func (m *NodeManager) RemoveConn(nodeID string) {
 		_ = ac.Conn.Close()
 		delete(m.conns, nodeID)
 	}
+}
+
+// CloseConn closes the socket of a node that is still registered here but has
+// been judged dead elsewhere (the heartbeat-threshold monitor). Closing makes
+// run() return, after which the WS handler's deferred RemoveConn does the
+// bookkeeping — so this deliberately does not touch the map. Returns whether
+// there was a connection to close.
+func (m *NodeManager) CloseConn(nodeID string) bool {
+	m.mu.RLock()
+	ac, ok := m.conns[nodeID]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	_ = ac.Conn.Close()
+	return true
 }
 
 // GetConn returns the agent connection for a node.

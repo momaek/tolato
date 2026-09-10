@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -46,6 +47,10 @@ func preferredIP(agentIP, connPublicIP string) string {
 	return agentIP
 }
 
+// registerWait bounds how long a freshly upgraded, token-authenticated socket
+// may sit there without sending its register message.
+const registerWait = 30 * time.Second
+
 // agentUpgrader is initialized by InitUpgraders with origin checking.
 var agentUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -68,7 +73,7 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 
 		// Determine connection mode
 		var (
-			regToken    *model.RegistrationToken // non-nil = first-time registration
+			regToken     *model.RegistrationToken // non-nil = first-time registration
 			existingNode *model.Node              // non-nil = reconnection
 		)
 
@@ -169,6 +174,11 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 
 		// First-time registration: wait for the register message to create the Node
 		log.Printf("Agent connected with token, waiting for register message...")
+
+		// Don't let a client that upgrades and then goes quiet pin this handler
+		// forever. Once registered, the router (NodeManager.RegisterConn) takes
+		// over the read side and installs its own ping/pong-driven deadline.
+		_ = conn.SetReadDeadline(time.Now().Add(registerWait))
 
 		for {
 			_, raw, err := conn.ReadMessage()
@@ -318,4 +328,3 @@ func handleAgentHeartbeat(deps *Deps, nodeID string, payload json.RawMessage) {
 		LoadAvg: hb.LoadAvg,
 	})
 }
-

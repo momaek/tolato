@@ -102,7 +102,7 @@ func main() {
 		}
 	}
 
-	go runOfflineMonitor(rootCtx, settingsCache, notifier)
+	go runOfflineMonitor(rootCtx, settingsCache, notifier, nm)
 
 	<-rootCtx.Done()
 	log.Println("Shutdown signal received, draining...")
@@ -138,7 +138,13 @@ func runGeoIPRefresh(ctx context.Context, svc *geoip.Service, interval time.Dura
 // (kill -9, network partition, host crash). The conditional UPDATE in
 // store.MarkOffline guarantees each offline notification fires exactly once even
 // if the WS-disconnect path races this loop.
-func runOfflineMonitor(ctx context.Context, s *settings.Cache, n *notify.Dispatcher) {
+//
+// A stale node that still has a socket in the NodeManager is a zombie: the
+// agent stopped talking but nobody hung up (typically a wedged agent behind a
+// reverse proxy that keeps the TCP session alive). Close it so the slot is
+// freed and the agent, if its read side still works, sees the close and
+// reconnects.
+func runOfflineMonitor(ctx context.Context, s *settings.Cache, n *notify.Dispatcher, nm *node.NodeManager) {
 	const tick = 30 * time.Second
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
@@ -161,6 +167,9 @@ func runOfflineMonitor(ctx context.Context, s *settings.Cache, n *notify.Dispatc
 				if changed, _ := store.MarkOffline(nd.ID); changed {
 					log.Printf("offline monitor: node %s went stale (no heartbeat > %s)", nd.ID, threshold)
 					n.NotifyOffline(nd.ID)
+					if nm.CloseConn(nd.ID) {
+						log.Printf("offline monitor: node %s still had an open socket, closed it", nd.ID)
+					}
 				}
 			}
 		}
