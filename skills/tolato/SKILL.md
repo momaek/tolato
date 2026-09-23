@@ -157,17 +157,27 @@ Everything after `--` is the remote command, so its own flags are safe:
 `tolato exec web-01 -- ls --json` runs `ls --json` there rather than asking for
 JSON here.
 
-The words after `--` are rejoined with spaces into one string, and the shell on
-the node does the final splitting. Your local shell's quotes are consumed
-locally and never arrive, so anything that depends on quoting or on shell
-syntax must be passed as **one** argument, with the quotes inside it:
+Several words after `--` arrive exactly as your local shell split them: each is
+quoted on the way, so spaces, quotes and newlines inside a word survive.
 
 ```bash
-tolato exec web-01 -- "grep 'foo bar' /etc/hosts | head -1"   # correct
-tolato exec web-01 -- grep 'foo bar' /etc/hosts               # arrives as: grep foo bar /etc/hosts
+tolato exec web-01 -- grep 'foo bar' /etc/hosts
+tolato exec web-01 -- bash -c 'cd /srv/app
+git log -1'
 ```
 
-Plain commands with no quoting or pipes need none of this.
+That also means pipes, globs, `&&` and redirections in separate words are
+literal arguments on the node, not shell syntax. When the **remote** shell should
+interpret them, pass the whole script as **one** argument; it is sent verbatim,
+newlines included:
+
+```bash
+tolato exec web-01 -- "grep 'foo bar' /etc/hosts | head -1"
+tolato exec web-01 -- 'ls /var/log/*.log && df -h /'
+```
+
+On Windows nodes (cmd.exe) the words are still joined with plain spaces, so
+pass anything that needs quoting there as one argument too.
 
 ## What you cannot do
 
