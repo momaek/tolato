@@ -152,21 +152,21 @@ func (c *client) Exec(ctx context.Context, nodeID, command string, timeout int, 
 	return &res, nil
 }
 
-// resolveNode turns a user-supplied id, alias or hostname into a node id.
+// resolveNode turns a user-supplied id, alias or hostname into a node.
 //
 // An exact id match wins without a lookup. Otherwise the visible nodes are
 // searched case-insensitively, and an ambiguous name is an error rather than a
 // guess — running a command on the wrong machine is not a recoverable mistake.
-func (c *client) resolveNode(ctx context.Context, ref string) (string, error) {
+func (c *client) resolveNode(ctx context.Context, ref string) (Node, error) {
 	nodes, err := c.ListNodes(ctx)
 	if err != nil {
-		return "", err
+		return Node{}, err
 	}
 
 	var matches []Node
 	for _, n := range nodes {
 		if n.ID == ref {
-			return n.ID, nil
+			return n, nil
 		}
 		if strings.EqualFold(n.DisplayName(), ref) || strings.EqualFold(n.Name, ref) {
 			matches = append(matches, n)
@@ -175,14 +175,14 @@ func (c *client) resolveNode(ctx context.Context, ref string) (string, error) {
 
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("no node matches %q", ref)
+		return Node{}, fmt.Errorf("no node matches %q", ref)
 	case 1:
-		return matches[0].ID, nil
+		return matches[0], nil
 	default:
 		names := make([]string, 0, len(matches))
 		for _, m := range matches {
 			names = append(names, fmt.Sprintf("%s (%s)", m.DisplayName(), m.ID))
 		}
-		return "", fmt.Errorf("%q is ambiguous: %s — use the id", ref, strings.Join(names, ", "))
+		return Node{}, fmt.Errorf("%q is ambiguous: %s — use the id", ref, strings.Join(names, ", "))
 	}
 }

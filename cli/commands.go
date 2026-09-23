@@ -75,11 +75,11 @@ func runNodesGet(c *client, args []string) error {
 	}
 
 	ctx := context.Background()
-	id, err := c.resolveNode(ctx, fs.Arg(0))
+	ref, err := c.resolveNode(ctx, fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	n, err := c.GetNode(ctx, id)
+	n, err := c.GetNode(ctx, ref.ID)
 	if err != nil {
 		return err
 	}
@@ -106,10 +106,10 @@ func runNodesGet(c *client, args []string) error {
 // command: our own flags are never read out of it, so `tolato exec web-01 --
 // ls --json` runs `ls --json` remotely rather than printing JSON here.
 //
-// The words after `--` are rejoined with spaces into a single string that the
-// node's shell then splits, so the caller's local quoting does not survive the
-// trip. Anything depending on quotes or shell syntax has to arrive as one
-// argument: `-- "grep 'foo bar' /etc/hosts | head -1"`.
+// A single argument is a shell script and goes to the node's shell verbatim,
+// newlines, quotes and pipes included. Several arguments are an argv: each is
+// quoted so the node runs exactly the words the local shell handed us, rather
+// than re-splitting them on spaces. See remoteCommand.
 func runExec(c *client, args []string) error {
 	// Split at the first `--` before parsing. Without this the separator ends
 	// up inside the command string and the remote shell chokes on it.
@@ -154,18 +154,18 @@ func runExec(c *client, args []string) error {
 		return errUsage
 	}
 
-	command := strings.Join(remote, " ")
-	if strings.TrimSpace(command) == "" {
+	if strings.TrimSpace(strings.Join(remote, "")) == "" {
 		return errUsage
 	}
 
 	ctx := context.Background()
-	nodeID, err := c.resolveNode(ctx, nodeRef)
+	node, err := c.resolveNode(ctx, nodeRef)
 	if err != nil {
 		return err
 	}
+	command := remoteCommand(remote, isWindows(node))
 
-	res, err := c.Exec(ctx, nodeID, command, *timeout, *confirm)
+	res, err := c.Exec(ctx, node.ID, command, *timeout, *confirm)
 	if err != nil {
 		var apiErr *apiError
 		if errors.As(err, &apiErr) && apiErr.IsSensitive() {
@@ -203,4 +203,56 @@ func printJSON(v any) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// remoteCommand turns the words after `--` into the string the node's shell
+// runs.
+//
+// One word is taken as a whole script and sent untouched, which is how
+// multi-line scripts, pipes and redirections get there. More than one word is
+// an argv the local shell has already split and unquoted: joining it back with
+// bare spaces let the node split it a second time, so `grep 'foo bar' f`
+// arrived as `grep foo bar f` and `bash -c "a<newline>b"` ran `b` on its own.
+// Quoting each word makes the remote argv match the local one.
+//
+// cmd.exe has no single-quote syntax, so Windows nodes keep the plain join.
+func remoteCommand(words []string, windows bool) string {
+	if len(words) == 1 || windows {
+		return strings.Join(words, " ")
+	}
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = shellQuote(w)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// shellQuote quotes s for a POSIX shell. Words made only of characters no
+// shell treats specially are left bare so the command stays readable in the
+// audit log; everything else is single-quoted, the one form in which nothing
+// but the closing quote is special.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.IndexFunc(s, needsQuoting) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func needsQuoting(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return false
+	case strings.ContainsRune("@%+=:,./-_", r):
+		return false
+	}
+	return true
+}
+
+// isWindows reports whether the node's shell is cmd.exe. The agent reports its
+// platform name, e.g. "Microsoft Windows Server 2022 Datacenter".
+func isWindows(n Node) bool {
+	return strings.Contains(strings.ToLower(n.OS), "windows")
 }
