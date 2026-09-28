@@ -28,6 +28,8 @@ Usage:
   tolato nodes list [--status online|offline] [--json]
   tolato nodes get <node> [--json]
   tolato exec <node> -- <command>...
+  tolato cp <file> <node>:<path>     upload (path must be absolute)
+  tolato cp <node>:<path> <file>     download ("-" is stdin / stdout)
   tolato version
 
 Node arguments accept an id, an alias, or a hostname.
@@ -46,6 +48,7 @@ Flags:
   --json      print the raw JSON response instead of a table
   --timeout   seconds to allow a command to run (default 60)
   --confirm   proceed with a command the server flags as sensitive
+              (for cp: the chmod/mv that puts the upload in place)
 `
 
 func main() {
@@ -107,6 +110,8 @@ func run(args []string) error {
 		return runNodes(client, args[1:])
 	case "exec":
 		return runExec(client, args[1:])
+	case "cp":
+		return runCp(client, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}

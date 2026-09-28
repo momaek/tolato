@@ -198,6 +198,7 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	v1.GET("/nodes", ExternalListNodes(deps))
 	v1.GET("/nodes/:id", ExternalGetNode(deps))
 	v1.POST("/nodes/:id/execute", ExternalExecuteCommand(deps))
+	v1.POST("/nodes/:id/files", ExternalFileOp(deps))
 	// `tolato auth logout` — a key revoking itself, since the CLI holds no session.
 	v1.DELETE("/auth/key", RevokeOwnAPIKey(deps))
 

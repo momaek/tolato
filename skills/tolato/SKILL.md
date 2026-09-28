@@ -1,6 +1,6 @@
 ---
 name: tolato
-description: Inspect and operate servers managed by a Tolato instance using the `tolato` CLI. Use when the user asks about their VPS fleet, wants to check a server's status or metrics, or wants to run a shell command on a remote node they manage through Tolato.
+description: Inspect and operate servers managed by a Tolato instance using the `tolato` CLI. Use when the user asks about their VPS fleet, wants to check a server's status or metrics, wants to run a shell command on a remote node they manage through Tolato, or wants to upload or download a file on one.
 ---
 
 # Tolato
@@ -178,6 +178,33 @@ tolato exec web-01 -- 'ls /var/log/*.log && df -h /'
 
 On Windows nodes (cmd.exe) the words are still joined with plain spaces, so
 pass anything that needs quoting there as one argument too.
+
+### Copying files
+
+`tolato cp` moves one file between this machine and a node. The remote side is
+written `node:/absolute/path`; `-` stands for stdin or stdout.
+
+```bash
+tolato cp ./nginx.conf web-01:/etc/nginx/nginx.conf
+tolato cp ./app web-01:/usr/local/bin/        # into a directory, keeps the name
+tolato cp web-01:/var/log/syslog ./syslog
+tolato cp web-01:/etc/hosts -                  # print it
+tar czf - site/ | tolato cp - web-01:/tmp/site.tgz
+```
+
+- **Remote paths must be absolute.** The agent does not expand `~` and has no
+  working directory worth relying on.
+- **One file at a time**, no directories. For a tree, `tar` it and copy the
+  archive, then unpack it with `tolato exec`.
+- **Uploads land whole or not at all.** The data goes to `<path>.tolato-part`
+  and is moved over the target only when complete, so an interrupted copy
+  leaves the old file alone, and replacing a running binary works. The final
+  `chmod`/`mv` runs as a command, so a server that flags it as sensitive needs
+  `--confirm`.
+- The file keeps its permission bits in both directions; stdin uploads get
+  `0644`. Owner is whoever the agent runs as (usually root), so `chown` with
+  `tolato exec` afterwards if it matters.
+- Needs the same **writable** key and operator access as `exec`.
 
 ## What you cannot do
 
