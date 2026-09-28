@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -185,4 +186,45 @@ func (c *client) resolveNode(ctx context.Context, ref string) (Node, error) {
 		}
 		return Node{}, fmt.Errorf("%q is ambiguous: %s — use the id", ref, strings.Join(names, ", "))
 	}
+}
+
+// FileOp is one agent file operation, as POST /api/v1/nodes/:id/files takes it.
+type FileOp struct {
+	Op     string `json:"op"`
+	Path   string `json:"path"`
+	Data   string `json:"data,omitempty"` // base64, for write
+	Mode   uint32 `json:"mode,omitempty"`
+	Offset int64  `json:"offset,omitempty"`
+	Length int64  `json:"length,omitempty"`
+}
+
+// FileEntry describes a remote file. Mode carries Go's os.FileMode bits.
+type FileEntry struct {
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	Mode    uint32 `json:"mode"`
+	ModTime int64  `json:"mod_time"`
+	IsDir   bool   `json:"is_dir"`
+}
+
+// FileResult is the agent's reply to a FileOp.
+type FileResult struct {
+	OK    bool       `json:"ok"`
+	Error string     `json:"error,omitempty"`
+	Data  string     `json:"data,omitempty"` // base64, for read
+	Stat  *FileEntry `json:"stat,omitempty"`
+	EOF   bool       `json:"eof,omitempty"`
+}
+
+// File runs one file op on a node. A failure the agent reports (no such file,
+// permission denied) comes back as an error, like a failed request does.
+func (c *client) File(ctx context.Context, nodeID string, op FileOp) (*FileResult, error) {
+	var res FileResult
+	if err := c.do(ctx, http.MethodPost, "/api/v1/nodes/"+nodeID+"/files", op, &res); err != nil {
+		return nil, err
+	}
+	if !res.OK {
+		return nil, errors.New(res.Error)
+	}
+	return &res, nil
 }
