@@ -212,6 +212,20 @@ export async function getVersionInfo(): Promise<VersionInfo> {
   return res.data
 }
 
+// --- Onboarding ---
+
+// What the home checklist needs beyond the node list: whether this user has
+// finished a `tolato auth login`, and whether web chat can run at all.
+export interface OnboardingStatus {
+  cli_connected: boolean
+  llm_configured: boolean
+}
+
+export async function getOnboarding(): Promise<OnboardingStatus> {
+  const res = await api.get<OnboardingStatus>('/onboarding')
+  return res.data
+}
+
 // --- Conversations ---
 
 export async function getConversations(): Promise<ConversationSummary[]> {

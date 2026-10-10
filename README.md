@@ -1,38 +1,65 @@
 # Tolato
 > English · [简体中文](README.zh-CN.md)
 
-Natural-language server management. Talk to a chat UI; it drives remote nodes through an agent that executes commands, collects metrics, and probes network links.
+Manage your server fleet from the AI agent you already use. Deploy Tolato, put a small agent on each server, paste one prompt into Claude Code or Codex — and from then on "which box is running out of disk?" is something your agent just answers. Every command it runs is audited, and the dangerous ones wait for your OK.
+
+There is no LLM to configure on the server: the model is whatever already runs your coding agent.
+
+## How it works
+
+1. **Deploy the server** — one line, see [Deploy](#deploy-docker-compose).
+2. **Add your nodes** — log in, click *Add node*, run the install command it gives you on each server.
+3. **Install Tolato into your AI agent** — the home page hands you a prompt. Paste it into Claude Code, Codex, or any coding agent and it will:
+   - fetch the [skill](skills/tolato/SKILL.md) from your own server (`/skill.md`) into its skills directory,
+   - install the `tolato` CLI from your server's release mirror (works where github.com doesn't),
+   - run `tolato auth login`, which opens a consent screen in your browser — you pick read-only or read-and-run, and you click approve yourself.
+
+That's it. Ask in plain language:
+
+> Which of my servers are low on disk?
+>
+> nginx on web-01 is returning 502s — take a look.
+>
+> Push this nginx.conf to web-01, test it, and reload.
+
+Under the hood the agent drives the CLI — `tolato nodes list`, `tolato exec web-01 -- …`, `tolato cp ./nginx.conf web-01:/etc/nginx/` — and the skill teaches it when to stop and ask you.
+
+## Guardrails
+
+- **You choose the reach.** Each CLI login is its own key, read-only or read-and-run, chosen by you on the consent screen. Keys are listed and revocable in the web UI; `tolato auth logout` revokes from the terminal.
+- **Dangerous commands wait.** `rm -rf`, `reboot`, `mkfs` and friends are refused unless confirmed, and the skill tells the agent to ask you before it confirms. A blacklist is refused outright. Both lists are editable in Settings.
+- **Everything is audited.** Every command, from any client, lands in the audit log with who ran it and from where.
+- **Team access.** Users, groups and per-node-group grants decide who can see and who can operate which machines; SSO via OIDC with group sync.
+- **Several fleets.** The CLI keeps one profile per server, so a work fleet and a personal one live side by side — and the skill makes the agent name the profile on every command once there's more than one.
 
 ## Screenshots
-
-![Chat — ask about a node, get a rendered answer](docs/screenshots/chat_3.png)
 
 | Nodes inventory | Audit log |
 |---|---|
 | ![Nodes](docs/screenshots/nodelist.png) | ![Audit log](docs/screenshots/auditlog.png) |
-| ![Inspect iptables via chat](docs/screenshots/chat_1.png) | ![Tool calls in action](docs/screenshots/chat_2.png) |
 
 ## Architecture
 
 ```
-┌──────────┐    WebSocket     ┌──────────┐    WebSocket    ┌──────────┐
-│   web    │ ◄──────────────► │  server  │ ◄─────────────► │  agent   │
-│ (Vue 3)  │   /ws/chat       │   (Go)   │   /ws/agent     │   (Go)   │
-└──────────┘                  └────┬─────┘                 └──────────┘
-                                   │                            nodes
-                                   ▼
-                              ┌─────────┐
-                              │Postgres │
-                              └─────────┘
-                                   ▲
-                                   │   LLM (OpenAI-compatible)
-                                   ▼
-                              Chat loop + tool calls
+  Claude Code / Codex / …
+    └─ tolato CLI (+ skill) ── HTTPS /api/v1 ──┐
+                                               ▼
+┌──────────┐     /api, /ws      ┌──────────┐    /ws/agent    ┌──────────┐
+│   web    │ ◄────────────────► │  server  │ ◄─────────────► │  agent   │
+│ (Vue 3)  │                    │   (Go)   │                 │   (Go)   │
+└──────────┘                    └────┬─────┘                 └──────────┘
+                                     │                           nodes
+                                     ▼
+                                ┌─────────┐
+                                │Postgres │
+                                └─────────┘
 ```
 
-- **server/** — Gin HTTP + WebSocket, GORM/Postgres, LLM chat loop, tool executor, session manager, probe/alert engine, Telegram notifier, JWT + API-key auth.
-- **agent/** — Binary running on managed nodes. Command executor, system metrics collector, ICMP/TCP/bandwidth probes. Registers via one-time token; persistent identity in `~/.tolato`.
-- **web/** — Vue 3 + Vite + shadcn-vue. Chat, nodes, audit log, settings, topology monitor, alerts.
+- **server/** — Gin HTTP + WebSocket, GORM/Postgres, external API for the CLI, MCP endpoint, permissions and audit, probe/alert engine, notifications, JWT + API-key auth. Also serves `/skill.md` and mirrors release assets under `/releases/`.
+- **agent/** — Binary running on managed nodes. Command executor, file transfer, system metrics collector, ICMP/TCP/bandwidth probes. Registers via one-time token; persistent identity in `~/.tolato`.
+- **cli/** — The `tolato` command your AI agent drives: `nodes`, `exec`, `cp`, `auth`, `profile`.
+- **skills/** — The skill that teaches a coding agent how to use the CLI safely.
+- **web/** — Vue 3 + Vite + shadcn-vue. Onboarding, nodes, web terminal, audit log, users and permissions, settings, optional web chat.
 - **docs/** — Design, loop architecture, frontend architecture, nodeprobe, implementation plan.
 
 ## Deploy (docker-compose)
@@ -69,7 +96,7 @@ cp config.example.yaml config.yaml
 docker compose up -d
 ```
 
-Open `http://localhost:8080` and log in with the `auth` credentials.
+Open `http://localhost:8080` and log in with the `auth` credentials. The home page walks you through adding a node and installing Tolato into your AI agent.
 
 **Version pinning.** The compose file uses `${TOLATO_VERSION:-latest}`. For reproducible deploys pin to a release tag:
 
@@ -156,15 +183,28 @@ For bandwidth probing, run a file server on the target node:
 | `auth`     | `username`, `password`                   | Bootstrap admin (default: `admin/admin`)        |
 | `probe`    | `enabled`, `retention_days`, `telegram`, `alert_rules` | NodeProbe link monitoring            |
 
-LLM endpoint, API key, model, sensitive-command rules, and Telegram bot credentials are stored in the database via the **Settings** UI.
+Everything else — sensitive-command rules, offline notifications, SSO, and the optional web-chat LLM — lives in the database and is edited on the **Settings** page.
 
-## Use from Claude Code (MCP)
+## Other ways to connect
 
-Tolato exposes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at `/mcp`, so Claude Code (and other MCP clients) can drive your fleet directly. Auth reuses the existing **API Keys** — generate one in **Settings → API Keys**, pick the permission tier you want Claude to operate at, then:
+The skill + CLI route above is the recommended one. These cover the cases it doesn't.
+
+### Over SSH, without a browser
+
+`tolato auth login` needs a browser on the same machine. On a remote box, create a key in **Settings → API Keys** and export it instead:
+
+```sh
+export TOLATO_URL=https://tolato.example.com
+export TOLATO_API_KEY=tlat_...
+```
+
+### MCP
+
+For MCP clients that can't run a CLI, Tolato also exposes a [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at `/mcp`. It authenticates with an API key — create one in **Settings → API Keys** with the permission tier you want, then:
 
 ```sh
 claude mcp add --transport http tolato https://tolato.example.com/mcp \
-  --header "Authorization: Bearer tlt_xxxxxxxxxxxxxxxx"
+  --header "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx"
 ```
 
 Tools exposed:
@@ -181,22 +221,31 @@ The transport is plain JSON-RPC 2.0 over HTTP — no streaming, no session heade
 
 ```sh
 curl -s https://tolato.example.com/mcp \
-  -H "Authorization: Bearer tlt_xxxxxxxxxxxxxxxx" \
+  -H "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
 ```
+
+### Web chat (optional)
+
+The web UI also has a built-in chat that drives the same nodes, for when you're away from your coding agent. It's the one feature that needs an LLM on the server: an admin adds an OpenAI-compatible endpoint and key under **Settings → LLM Config**. Until then the chat page says so and points back to the AI agent setup.
+
+| Ask about a node | Tool calls in action |
+|---|---|
+| ![Chat — ask about a node, get a rendered answer](docs/screenshots/chat_3.png) | ![Tool calls in action](docs/screenshots/chat_2.png) |
 
 ## Development
 
 - Server build: `cd server && go build ./cmd/server`
 - Agent build: `cd agent && go build ./cmd/agent`
+- CLI build: `go build -C cli -o ~/bin/tolato .`
 - Web build: `cd web && pnpm build`
 - Branch layout: `main` is the release branch.
 
 ## Docs
 
 - [Design overview](docs/design.md)
-- [Loop architecture](docs/loop-architecture.md) — chat loop goroutine + channel model
+- [Loop architecture](docs/loop-architecture.md) — web chat loop goroutine + channel model
 - [Frontend architecture](docs/frontend-architecture.md)
 - [NodeProbe](docs/nodeprobe.md) — link monitoring design
 - [Implementation plan](docs/implementation-plan.md) — phase-by-phase status

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, Search, Copy, Check, Terminal as TerminalIcon, Eye, Pencil, Rows3, LayoutGrid } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -37,6 +37,7 @@ import { getNodeGroups } from '@/services/api'
 import { useAppStore } from '@/stores/app'
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const nodesStore = useNodesStore()
 
@@ -136,6 +137,12 @@ function cancelEditAlias() {
 
 onMounted(() => {
   nodesStore.fetchNodes()
+  // The home checklist's "Add node" lands here with ?add=1. Drop the query so
+  // a reload or a back-navigation doesn't pop the dialog again.
+  if (route.query.add && appStore.isAdmin) {
+    dialogOpen.value = true
+    router.replace({ query: {} })
+  }
 })
 
 const filteredNodes = computed(() => {

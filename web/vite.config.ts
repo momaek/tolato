@@ -33,7 +33,7 @@ export default defineConfig({
       '/api': 'http://localhost:8080',
       '/ws': { target: 'ws://localhost:8080', ws: true },
       // Served by the Go server in production, where the SPA and the API share
-      // an origin. Proxy it here so the Settings → CLI link works in dev too.
+      // an origin. Proxy it here so the AI agent setup page's skill link works in dev too.
       '/skill.md': 'http://localhost:8080'
     }
   }

@@ -192,6 +192,9 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	// Version / update check
 	protected.GET("/version", VersionInfo(deps))
 
+	// Home page checklist: CLI login done? chat usable?
+	protected.GET("/onboarding", Onboarding(deps))
+
 	// External API (API Key auth)
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.APIKeyAuth())

@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 )
@@ -97,5 +98,20 @@ func TestCLIKeyNameIsBoundedAndLabelled(t *testing.T) {
 	}
 	if got := cliKeyName(string(long)); len(got) > 60 {
 		t.Errorf("cliKeyName kept %d chars, want <= 60", len(got))
+	}
+}
+
+// The onboarding checklist spots a CLI login by the key name cliKeyName chose;
+// the two must keep agreeing.
+func TestIsCLIKeyNameMatchesCLIKeyName(t *testing.T) {
+	for _, label := range []string{"", "my-laptop", strings.Repeat("x", 200)} {
+		if name := cliKeyName(label); !isCLIKeyName(name) {
+			t.Errorf("isCLIKeyName(%q) = false for a name cliKeyName produced", name)
+		}
+	}
+	for _, name := range []string{"MCP", "ci", "CLIENT", "my CLI"} {
+		if isCLIKeyName(name) {
+			t.Errorf("isCLIKeyName(%q) = true, want false", name)
+		}
 	}
 }

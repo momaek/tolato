@@ -149,8 +149,8 @@ Next steps:
        server.public_address   — your public URL (e.g. https://tolato.example.com)
        server.allowed_origins  — [ "https://tolato.example.com" ]
      then:  docker compose restart server
-  3. Log in, open Settings, configure your LLM (endpoint + API key + model).
-  4. On the Nodes page, click "Add Node" to get an agent install command.
+  3. Log in. The home page walks you through adding your first node and
+     installing Tolato into your AI agent (Claude Code, Codex, ...).
 
 Useful commands (run in $(pwd)):
   docker compose logs -f server
