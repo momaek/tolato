@@ -1,40 +1,67 @@
 # Tolato
 
-自然语言服务器运维。在聊天界面里下命令，后端通过 agent 在远端节点上执行命令、采集指标、探测网络链路。
+用你手边的 AI 助手管理服务器。部署好 Tolato，每台机器装一个小 agent，再往 Claude Code 或 Codex 里贴一段指令 —— 之后「哪台机器磁盘快满了？」这种问题，直接问你的助手就行。它跑的每条命令都有审计记录，危险命令会先停下来等你点头。
+
+服务端不需要配置任何 LLM：用的模型就是你的编码助手本来在用的那个。
 
 > [English](README.md) · 简体中文
 
-## 截图
+## 怎么用
 
-![聊天 — 问一句，节点信息直接渲染出来](docs/screenshots/chat_3.png)
+1. **部署 server** —— 一行命令，见 [部署](#部署docker-compose)。
+2. **接入节点** —— 登录后点 *添加节点*，把生成的安装命令拿到每台服务器上跑一下。
+3. **把 Tolato 装进你的 AI 助手** —— 首页会给你一段指令，贴进 Claude Code、Codex 或任何编码助手，它会：
+   - 从你自己的 server（`/skill.md`）拉取 [skill](skills/tolato/SKILL.md)，放进它的 skills 目录；
+   - 从你 server 的 release 镜像安装 `tolato` CLI（github.com 不通也能装）；
+   - 运行 `tolato auth login`，浏览器里弹出授权页 —— 选只读还是可执行，由你自己点批准。
+
+然后就可以直接用大白话问了：
+
+> 哪几台机器磁盘快满了？
+>
+> web-01 上的 nginx 一直报 502，帮我看看。
+>
+> 把这份 nginx.conf 传到 web-01，测一下配置没问题就 reload。
+
+助手在背后调用的是 CLI —— `tolato nodes list`、`tolato exec web-01 -- …`、`tolato cp ./nginx.conf web-01:/etc/nginx/` —— skill 会告诉它什么时候该停下来问你。
+
+## 安全边界
+
+- **权限你来定。** 每次 CLI 登录都是一把独立的 key，只读还是可执行由你在授权页选。所有 key 都能在 Web UI 里查看和吊销，终端里 `tolato auth logout` 也能直接吊销。
+- **危险命令要确认。** `rm -rf`、`reboot`、`mkfs` 这类命令不带确认会被拒绝，skill 会让助手先问过你再确认；黑名单里的命令直接拒绝。两份名单都可以在设置里改。
+- **全程审计。** 不管从哪个入口执行的命令，都会记进审计日志：谁跑的、从哪儿来的。
+- **团队协作。** 用户、用户组、按节点组授权，决定谁能看、谁能操作哪些机器；支持 OIDC 单点登录和用户组同步。
+- **多套部署。** CLI 按 server 分 profile，公司和个人的机器可以并存；一旦有多个 profile，skill 会要求助手每条命令都写明用哪个。
+
+## 截图
 
 | 节点列表 | 审计日志 |
 |---|---|
 | ![节点列表](docs/screenshots/nodelist.png) | ![审计日志](docs/screenshots/auditlog.png) |
-| ![聊天里查 iptables](docs/screenshots/chat_1.png) | ![工具调用过程](docs/screenshots/chat_2.png) |
 
 ## 架构
 
 ```
-┌──────────┐    WebSocket     ┌──────────┐    WebSocket    ┌──────────┐
-│   web    │ ◄──────────────► │  server  │ ◄─────────────► │  agent   │
-│ (Vue 3)  │   /ws/chat       │   (Go)   │   /ws/agent     │   (Go)   │
-└──────────┘                  └────┬─────┘                 └──────────┘
-                                   │                         被管理节点
-                                   ▼
-                              ┌─────────┐
-                              │Postgres │
-                              └─────────┘
-                                   ▲
-                                   │   LLM（OpenAI 兼容接口）
-                                   ▼
-                              聊天循环 + 工具调用
+  Claude Code / Codex / …
+    └─ tolato CLI（+ skill）── HTTPS /api/v1 ──┐
+                                               ▼
+┌──────────┐     /api, /ws      ┌──────────┐    /ws/agent    ┌──────────┐
+│   web    │ ◄────────────────► │  server  │ ◄─────────────► │  agent   │
+│ (Vue 3)  │                    │   (Go)   │                 │   (Go)   │
+└──────────┘                    └────┬─────┘                 └──────────┘
+                                     │                         被管理节点
+                                     ▼
+                                ┌─────────┐
+                                │Postgres │
+                                └─────────┘
 ```
 
-- **server/** — Gin HTTP + WebSocket、GORM / Postgres、LLM 聊天循环、工具执行器、会话管理、探测 / 告警引擎、Telegram 通知、JWT + API-key 认证。
-- **agent/** — 跑在被管理节点上的二进制。命令执行、系统指标采集、ICMP / TCP / 带宽探测。通过一次性 token 注册，持久身份写入 `~/.tolato`。
-- **web/** — Vue 3 + Vite + shadcn-vue。聊天、节点、审计日志、设置、拓扑监控、告警。
-- **docs/** — 设计文档、循环架构、前端架构、NodeProbe、实施计划。
+- **server/** —— Gin HTTP + WebSocket、GORM / Postgres、给 CLI 用的外部 API、MCP 端点、权限与审计、探测 / 告警引擎、离线通知、JWT + API-key 认证。同时提供 `/skill.md`，并在 `/releases/` 下镜像 release 资源。
+- **agent/** —— 跑在被管理节点上的二进制。命令执行、文件传输、系统指标采集、ICMP / TCP / 带宽探测。通过一次性 token 注册，持久身份写入 `~/.tolato`。
+- **cli/** —— 你的 AI 助手调用的 `tolato` 命令：`nodes`、`exec`、`cp`、`auth`、`profile`。
+- **skills/** —— 教编码助手安全使用 CLI 的 skill。
+- **web/** —— Vue 3 + Vite + shadcn-vue。上手引导、节点、Web 终端、审计日志、用户与权限、设置、可选的网页对话。
+- **docs/** —— 设计文档、循环架构、前端架构、NodeProbe、实施计划。
 
 ## 部署（docker-compose）
 
@@ -70,7 +97,7 @@ cp config.example.yaml config.yaml
 docker compose up -d
 ```
 
-打开 `http://localhost:8080`，用 `auth` 里配置的账号登录。
+打开 `http://localhost:8080`，用 `auth` 里配置的账号登录。首页会一步步带你接入节点、把 Tolato 装进 AI 助手。
 
 **锁版本。** compose 文件里用 `${TOLATO_VERSION:-latest}`，生产环境建议固定到具体 tag：
 
@@ -157,15 +184,28 @@ Agent 会把身份信息保存到 `~/.tolato/`，后续重启靠它重连，不�
 | `auth`     | `username`、`password`                   | 初始管理员账号（默认 `admin/admin`）              |
 | `probe`    | `enabled`、`retention_days`、`telegram`、`alert_rules` | NodeProbe 链路监控配置              |
 
-LLM 的接入点、API key、模型、敏感命令规则、Telegram bot 凭证都存在数据库里，通过 Web UI 的 **设置** 页面配置。
+其余配置 —— 敏感命令规则、离线通知、单点登录、可选的网页对话 LLM —— 都存在数据库里，在 Web UI 的 **设置** 页面修改。
 
-## 在 Claude Code 中使用（MCP）
+## 其它接入方式
 
-Tolato 内置 [Model Context Protocol](https://modelcontextprotocol.io/) 端点 `/mcp`，可以直接被 Claude Code（以及其它 MCP 客户端）调用来管理你的机器。鉴权复用现有的 **API Keys** —— 在 **设置 → API Keys** 里生成一个、选好权限级别，然后:
+上面的 skill + CLI 是推荐的方式。下面这些用来覆盖它管不到的场景。
+
+### 通过 SSH、没有浏览器
+
+`tolato auth login` 需要同一台机器上有浏览器。在远程机器上，改为在 **设置 → API Keys** 里生成一个 key，用环境变量提供：
+
+```sh
+export TOLATO_URL=https://tolato.example.com
+export TOLATO_API_KEY=tlat_...
+```
+
+### MCP
+
+不能跑 CLI 的 MCP 客户端，可以用 Tolato 内置的 [Model Context Protocol](https://modelcontextprotocol.io/) 端点 `/mcp`。它用 API key 鉴权 —— 在 **设置 → API Keys** 里生成一个、选好权限级别，然后：
 
 ```sh
 claude mcp add --transport http tolato https://tolato.example.com/mcp \
-  --header "Authorization: Bearer tlt_xxxxxxxxxxxxxxxx"
+  --header "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx"
 ```
 
 暴露的工具:
@@ -182,22 +222,31 @@ claude mcp add --transport http tolato https://tolato.example.com/mcp \
 
 ```sh
 curl -s https://tolato.example.com/mcp \
-  -H "Authorization: Bearer tlt_xxxxxxxxxxxxxxxx" \
+  -H "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
 ```
+
+### 网页对话（可选）
+
+Web UI 里也内置了一个对话界面，能操作同样的节点，适合手边没有编码助手的时候。这是唯一需要在 server 上配置 LLM 的功能：管理员在 **设置 → LLM 配置** 里填上 OpenAI 兼容的接入点和 key。没配置之前，对话页会提示，并引导你去「接入 AI 助手」。
+
+| 问一句，节点信息直接渲染出来 | 工具调用过程 |
+|---|---|
+| ![聊天 — 问一句，节点信息直接渲染出来](docs/screenshots/chat_3.png) | ![工具调用过程](docs/screenshots/chat_2.png) |
 
 ## 开发
 
 - 编译 server：`cd server && go build ./cmd/server`
 - 编译 agent：`cd agent && go build ./cmd/agent`
+- 编译 CLI：`go build -C cli -o ~/bin/tolato .`
 - 编译 web：`cd web && pnpm build`
 - 分支策略：`main` 是发布分支。
 
 ## 文档
 
 - [设计总览](docs/design.md)
-- [循环架构](docs/loop-architecture.md) —— 聊天循环的 goroutine + channel 模型
+- [循环架构](docs/loop-architecture.md) —— 网页对话循环的 goroutine + channel 模型
 - [前端架构](docs/frontend-architecture.md)
 - [NodeProbe](docs/nodeprobe.md) —— 链路监控设计
 - [实施计划](docs/implementation-plan.md) —— 按阶段记录进度
