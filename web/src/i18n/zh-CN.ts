@@ -32,6 +32,9 @@ export default {
   },
 
   sidebar: {
+    home: '开始使用',
+    skill: '接入 AI 助手',
+    chatNeedsLlm: '未配置',
     chat: '对话',
     nodes: '节点',
     auditLog: '审计日志',
@@ -43,6 +46,51 @@ export default {
     account: '账号',
     accountSettings: '账号设置',
     signOut: '退出登录',
+  },
+
+  home: {
+    title: '开始使用 Tolato',
+    subtitle: '两步之后，你就能在自己的 AI 助手里管理这批机器 —— Claude Code、Codex 都行，不需要在这里配 LLM。',
+    progress: '{done} / 2 已完成',
+    skip: '跳过引导',
+    step1: {
+      title: '接入第一台节点',
+      desc: '在服务器上跑一条安装命令，agent 连上来之后节点就会出现在列表里。',
+      action: '添加节点',
+      waiting: '已经生成了安装命令？跑完之后这里会自动打勾。',
+      done: '已接入 {count} 台节点',
+      member: '还没有分给你的节点，请管理员给你授权。',
+      viewNodes: '查看节点',
+    },
+    step2: {
+      title: '把 Tolato 装进你的 AI 助手',
+      desc: '复制下面这段，贴进 Claude Code、Codex 或任何编码助手。它会装好 skill 和 CLI，再拉起登录 —— 浏览器里的批准还是你自己点。',
+      waiting: '等待 CLI 登录…',
+      done: 'CLI 已登录。在你的助手里说一句「看看我的服务器」试试。',
+    },
+    allSet: {
+      title: '都准备好了',
+      desc: '以后直接在 AI 助手里管理这些机器。网页这边用来看节点、查审计、管权限。',
+      action: '查看节点',
+    },
+  },
+
+  skill: {
+    title: '接入 AI 助手',
+    description:
+      '在你自己的 AI 编码助手里操作这批机器。Skill 会告诉它 `tolato` CLI 怎么用、当前对着哪个部署、以及什么时候该停下来问你。',
+    promptLabel: '把这段贴进 Claude Code、Codex 或任何编码助手',
+    promptHelp: '它会替你装好 skill 和 CLI，再把登录拉起来 —— 浏览器里批准这一下还是你自己点。',
+    prompt:
+      '帮我安装 Tolato 的 skill 和 CLI。\n\n1. 拉取 {url}/skill.md，存成一个 skill，文件名保持 SKILL.md：\n   - Claude Code：~/.claude/skills/tolato/SKILL.md\n   - Codex：~/.codex/skills/tolato/SKILL.md\n   - 其它 agent：在你自己的 skills 目录下照 tolato/SKILL.md 这个结构放\n2. 按 skill 里「Setup」一节的说明，装上对应我操作系统和架构的 tolato CLI，放进 PATH。从 {url}/releases/download/cli-latest/ 下载 —— 这个路径经我自己的服务器镜像 release 资源，github.com 不通也能用，而且 cli-latest 永远是最新构建。不要写死某个版本。\n3. 然后运行：tolato auth login --url {url}\n   跑之前先跟我说一声 —— 它会打开浏览器然后阻塞等待，最长等三分钟，所以给这条命令留够三分钟以上的超时，否则我还在看批准页它就被你掐了。\n   浏览器里的批准我自己点。就算你能操作浏览器，也不要替我点那个页面。',
+    copy: '复制指令',
+    copied: '已复制',
+    manualTitle: '也可以手动装',
+    manualHelp:
+      '把 skill 下载下来自己放好：Claude Code 放 ~/.claude/skills/tolato/SKILL.md，Codex 放 ~/.codex/skills/tolato/SKILL.md。',
+    viewSkill: '查看 skill',
+    connected: 'CLI 已登录',
+    connectedHelp: '你的账号已经通过 `tolato auth login` 登录过。换一台电脑或换一个助手时，再贴一次上面的指令就行。',
   },
 
   cliAuth: {
@@ -94,6 +142,14 @@ export default {
   },
 
   chat: {
+    llmMissing: {
+      title: '网页对话需要先配置 LLM',
+      admin: '在 设置 → LLM 配置 里填上接入点和 API Key 就能用。',
+      member: '需要管理员先在设置里配置 LLM。',
+      skillHint: '不想配也没关系：在你自己的 AI 助手里用 Tolato，不需要这里的 LLM。',
+      configure: '配置 LLM',
+      useSkill: '接入 AI 助手',
+    },
     newConversation: '新对话',
     conversations: '对话列表',
     noConversations: '暂无对话',
@@ -264,7 +320,6 @@ export default {
       notify: '离线通知',
       apiKeys: 'API 密钥',
       oidc: '单点登录',
-      cli: 'CLI 与 Skill',
       account: '账号',
     },
     oidc: {
@@ -422,21 +477,6 @@ export default {
       namePlaceholder: '例如：MCP 集成',
       copyWarning: '请立即复制 API 密钥，之后将不再显示。',
       noKeys: '尚未创建 API 密钥',
-    },
-    cli: {
-      title: 'CLI 与 Skill',
-      description:
-        '在你自己的 AI 编码助手里操作这批机器。Skill 会告诉它 `tolato` CLI 怎么用、当前对着哪个部署、以及什么时候该停下来问你。',
-      promptLabel: '把这段贴进 Claude Code、Codex 或任何编码助手',
-      promptHelp: '它会替你装好 skill 和 CLI，再把登录拉起来 —— 浏览器里批准这一下还是你自己点。',
-      prompt:
-        '帮我安装 Tolato 的 skill 和 CLI。\n\n1. 拉取 {url}/skill.md，存成一个 skill，文件名保持 SKILL.md：\n   - Claude Code：~/.claude/skills/tolato/SKILL.md\n   - Codex：~/.codex/skills/tolato/SKILL.md\n   - 其它 agent：在你自己的 skills 目录下照 tolato/SKILL.md 这个结构放\n2. 按 skill 里「Setup」一节的说明，装上对应我操作系统和架构的 tolato CLI，放进 PATH。从 {url}/releases/download/cli-latest/ 下载 —— 这个路径经我自己的服务器镜像 release 资源，github.com 不通也能用，而且 cli-latest 永远是最新构建。不要写死某个版本。\n3. 然后运行：tolato auth login --url {url}\n   跑之前先跟我说一声 —— 它会打开浏览器然后阻塞等待，最长等三分钟，所以给这条命令留够三分钟以上的超时，否则我还在看批准页它就被你掐了。\n   浏览器里的批准我自己点。就算你能操作浏览器，也不要替我点那个页面。',
-      copy: '复制指令',
-      copied: '已复制',
-      manualTitle: '也可以手动装',
-      manualHelp:
-        '把 skill 下载下来自己放好：Claude Code 放 ~/.claude/skills/tolato/SKILL.md，Codex 放 ~/.codex/skills/tolato/SKILL.md。',
-      viewSkill: '查看 skill',
     },
     failedToLoad: '加载设置失败',
     saveFailed: '保存失败',

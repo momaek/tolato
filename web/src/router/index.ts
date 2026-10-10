@@ -20,7 +20,17 @@ const router = createRouter({
       path: '/',
       component: () => import('@/components/layout/AppLayout.vue'),
       children: [
-        { path: '', redirect: '/chat' },
+        {
+          // The get-started checklist; sends anyone already set up on to /nodes.
+          path: '',
+          name: 'home',
+          component: () => import('@/views/HomeView.vue'),
+        },
+        {
+          path: 'skill',
+          name: 'skill',
+          component: () => import('@/views/SkillView.vue'),
+        },
         {
           path: 'chat',
           name: 'chat',
@@ -80,7 +90,7 @@ router.beforeEach(async (to) => {
     // Carry the destination through the login so a deep link survives it. This
     // matters for /cli-auth, which is meaningless without its query string:
     // dropping it would send the CLI's request into the void and leave the user
-    // staring at a chat window wondering what happened.
+    // staring at the home page wondering what happened.
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (to.path === '/login' && appStore.isAuthenticated) {
@@ -89,7 +99,7 @@ router.beforeEach(async (to) => {
   // Cosmetic guard — it keeps a member from landing on a page whose every
   // request would 403. The server is what actually enforces the role.
   if (to.meta.requiresAdmin && !appStore.isAdmin) {
-    return '/chat'
+    return '/'
   }
 })
 

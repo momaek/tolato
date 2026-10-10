@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Server, FileText, Settings, Users, ShieldCheck, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink, LogOut, ChevronsUpDown } from 'lucide-vue-next'
+import { MessageSquare, Server, FileText, Rocket, Sparkles, Settings, Users, ShieldCheck, Zap, Sun, Moon, Languages, Github, Copy, Check, ExternalLink, LogOut, ChevronsUpDown } from 'lucide-vue-next'
 import { useTheme } from '@/composables/useTheme'
 import { setLocale, getLocale } from '@/i18n'
 import {
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { getVersionInfo, type VersionInfo } from '@/services/api'
 import { useAppStore } from '@/stores/app'
+import { useOnboardingStore } from '@/stores/onboarding'
 
 const REPO_URL = 'https://github.com/momaek/tolato'
 const appVersion = __APP_VERSION__
@@ -30,11 +31,24 @@ import ConversationList from './ConversationList.vue'
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
+const onboarding = useOnboardingStore()
 
+// Nodes and the agent setup lead: driving the fleet from the user's own coding
+// agent is the main path now. Web chat stays, lower down — it is the one
+// feature that needs an LLM key configured here.
 const navItems = computed(() => [
-  { label: t('sidebar.chat'), icon: MessageSquare, path: '/chat' },
+  ...(onboarding.pending
+    ? [{ label: t('sidebar.home'), icon: Rocket, path: '/', tag: `${onboarding.doneCount}/2` }]
+    : []),
   { label: t('sidebar.nodes'), icon: Server, path: '/nodes' },
+  { label: t('sidebar.skill'), icon: Sparkles, path: '/skill' },
   { label: t('sidebar.auditLog'), icon: FileText, path: '/audit' },
+  {
+    label: t('sidebar.chat'),
+    icon: MessageSquare,
+    path: '/chat',
+    tag: onboarding.llmConfigured ? undefined : t('sidebar.chatNeedsLlm'),
+  },
   ...(appStore.isAdmin
     ? [
         { label: t('sidebar.users'), icon: Users, path: '/users' },
@@ -75,6 +89,7 @@ const hasUpdate = computed(() => versionInfo.value?.has_update ?? false)
 const copied = ref(false)
 
 onMounted(async () => {
+  onboarding.refresh()
   try {
     versionInfo.value = await getVersionInfo()
   } catch {
@@ -140,7 +155,7 @@ async function copyPrompt() {
     style="background-color: var(--sidebar); border-color: var(--sidebar-border)"
   >
     <!-- Logo -->
-    <div class="flex items-center gap-2 px-5 py-5">
+    <button type="button" class="flex items-center gap-2 px-5 py-5 text-left" @click="navigate('/')">
       <div
         class="flex h-8 w-8 items-center justify-center rounded-lg"
         style="background-color: var(--primary)"
@@ -150,7 +165,7 @@ async function copyPrompt() {
       <span class="text-lg font-semibold" style="color: var(--sidebar-foreground)">
         Tolato
       </span>
-    </div>
+    </button>
 
     <!-- Navigation -->
     <nav class="flex flex-col gap-1 px-3">
@@ -171,7 +186,8 @@ async function copyPrompt() {
         @click="navigate(item.path)"
       >
         <component :is="item.icon" class="h-4 w-4" />
-        {{ item.label }}
+        <span class="flex-1 text-left">{{ item.label }}</span>
+        <span v-if="item.tag" class="text-[11px] font-normal opacity-70">{{ item.tag }}</span>
       </button>
     </nav>
 

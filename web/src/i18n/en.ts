@@ -32,6 +32,9 @@ export default {
   },
 
   sidebar: {
+    home: 'Get started',
+    skill: 'AI agent setup',
+    chatNeedsLlm: 'Not set up',
     chat: 'Chat',
     nodes: 'Nodes',
     auditLog: 'Audit Log',
@@ -43,6 +46,52 @@ export default {
     account: 'Account',
     accountSettings: 'Account settings',
     signOut: 'Sign out',
+  },
+
+  home: {
+    title: 'Get started with Tolato',
+    subtitle: 'Two steps and you can run this fleet from your own AI agent — Claude Code, Codex, whichever. No LLM to configure here.',
+    progress: '{done} / 2 done',
+    skip: 'Skip setup',
+    step1: {
+      title: 'Bring your first node online',
+      desc: 'Run one install command on a server. Once its agent connects, the node shows up in the list.',
+      action: 'Add node',
+      waiting: 'Already ran the install command? This ticks itself once the node checks in.',
+      done: '{count} node(s) connected',
+      member: 'No nodes have been shared with you yet — ask an admin for access.',
+      viewNodes: 'View nodes',
+    },
+    step2: {
+      title: 'Install Tolato in your AI agent',
+      desc: 'Copy this and paste it into Claude Code, Codex, or any coding agent. It installs the skill and the CLI, then opens the login — the approval in the browser is still yours to click.',
+      waiting: 'Waiting for the CLI to sign in…',
+      done: 'CLI signed in. Ask your agent "how are my servers doing?" to try it.',
+    },
+    allSet: {
+      title: "You're all set",
+      desc: 'Manage these machines from your AI agent from now on. The web UI is here for the node list, the audit log, and permissions.',
+      action: 'View nodes',
+    },
+  },
+
+  skill: {
+    title: 'AI agent setup',
+    description:
+      'Drive this fleet from your own AI coding agent. The skill teaches it the `tolato` CLI — what it can do, which fleet it is talking to, and when to stop and ask you.',
+    promptLabel: 'Paste this into Claude Code, Codex, or any coding agent',
+    promptHelp:
+      'It installs the skill and the CLI, then opens the login — the approval screen in the browser is still yours to click.',
+    prompt:
+      'Install the Tolato skill and CLI for me.\n\n1. Fetch {url}/skill.md and save it as a skill, keeping the file name SKILL.md:\n   - Claude Code: ~/.claude/skills/tolato/SKILL.md\n   - Codex: ~/.codex/skills/tolato/SKILL.md\n   - any other agent: the same tolato/SKILL.md layout under your own skills directory\n2. Follow the "Setup" section inside that skill to install the tolato CLI for my OS and architecture, somewhere on my PATH. Download it from {url}/releases/download/cli-latest/ — that path mirrors the release assets through my own server, so it works even where github.com does not, and cli-latest is always the newest build. Do not pin a version.\n3. Then run: tolato auth login --url {url}\n   Tell me before you run it — it opens a browser and then blocks waiting, for up to three minutes, so allow the command at least that long or you will kill it while I am still reading the page.\n   I approve it in the browser myself. Do not click through that page for me, even if you can drive a browser.',
+    copy: 'Copy prompt',
+    copied: 'Copied',
+    manualTitle: 'Or install it by hand',
+    manualHelp:
+      'Download the skill and drop it in yourself: ~/.claude/skills/tolato/SKILL.md for Claude Code, ~/.codex/skills/tolato/SKILL.md for Codex.',
+    viewSkill: 'View skill',
+    connected: 'CLI signed in',
+    connectedHelp: 'Your account has signed in through `tolato auth login`. On another machine or another agent, paste the prompt above again.',
   },
 
   cliAuth: {
@@ -95,6 +144,14 @@ export default {
   },
 
   chat: {
+    llmMissing: {
+      title: 'Web chat needs an LLM first',
+      admin: 'Add an endpoint and API key under Settings → LLM Config to turn it on.',
+      member: 'An admin needs to configure an LLM in Settings first.',
+      skillHint: "Don't want to? Using Tolato from your own AI agent doesn't need an LLM here.",
+      configure: 'Configure LLM',
+      useSkill: 'AI agent setup',
+    },
     newConversation: 'New Conversation',
     conversations: 'Conversations',
     noConversations: 'No conversations yet',
@@ -265,7 +322,6 @@ export default {
       notify: 'Offline Alerts',
       apiKeys: 'API Keys',
       oidc: 'Single Sign-On',
-      cli: 'CLI & Skill',
       account: 'Account',
     },
     oidc: {
@@ -423,22 +479,6 @@ export default {
       namePlaceholder: 'e.g., MCP Integration',
       copyWarning: "Copy your API key now. It won't be shown again.",
       noKeys: 'No API keys created yet',
-    },
-    cli: {
-      title: 'CLI & Skill',
-      description:
-        'Drive this fleet from your own AI coding agent. The skill teaches it the `tolato` CLI — what it can do, which fleet it is talking to, and when to stop and ask you.',
-      promptLabel: 'Paste this into Claude Code, Codex, or any coding agent',
-      promptHelp:
-        'It installs the skill and the CLI, then opens the login — the approval screen in the browser is still yours to click.',
-      prompt:
-        'Install the Tolato skill and CLI for me.\n\n1. Fetch {url}/skill.md and save it as a skill, keeping the file name SKILL.md:\n   - Claude Code: ~/.claude/skills/tolato/SKILL.md\n   - Codex: ~/.codex/skills/tolato/SKILL.md\n   - any other agent: the same tolato/SKILL.md layout under your own skills directory\n2. Follow the "Setup" section inside that skill to install the tolato CLI for my OS and architecture, somewhere on my PATH. Download it from {url}/releases/download/cli-latest/ — that path mirrors the release assets through my own server, so it works even where github.com does not, and cli-latest is always the newest build. Do not pin a version.\n3. Then run: tolato auth login --url {url}\n   Tell me before you run it — it opens a browser and then blocks waiting, for up to three minutes, so allow the command at least that long or you will kill it while I am still reading the page.\n   I approve it in the browser myself. Do not click through that page for me, even if you can drive a browser.',
-      copy: 'Copy prompt',
-      copied: 'Copied',
-      manualTitle: 'Or install it by hand',
-      manualHelp:
-        'Download the skill and drop it in yourself: ~/.claude/skills/tolato/SKILL.md for Claude Code, ~/.codex/skills/tolato/SKILL.md for Codex.',
-      viewSkill: 'View skill',
     },
     failedToLoad: 'Failed to load settings',
     saveFailed: 'Save failed',
