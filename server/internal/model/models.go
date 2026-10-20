@@ -274,7 +274,11 @@ type AuditLog struct {
 	Confirmed   bool      `json:"confirmed" gorm:"default:false"`             // required 2FA confirmation
 	Source      string    `json:"source" gorm:"type:text;not null;default:'webui'"` // webui, terminal, api, cli
 	APIKeyID    *string   `json:"api_key_id,omitempty" gorm:"type:text"`
-	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime;index"`
+	// Metadata is whatever the API caller tagged the call with (a ticket, a
+	// run id, the person it acted for). Stored verbatim and never interpreted;
+	// the GIN index serves the audit page's exact-match filter.
+	Metadata  map[string]string `json:"metadata,omitempty" gorm:"type:jsonb;serializer:json;index:idx_audit_logs_metadata,type:gin"`
+	CreatedAt time.Time         `json:"created_at" gorm:"autoCreateTime;index"`
 }
 
 // --- Core: Settings (key-value) ---

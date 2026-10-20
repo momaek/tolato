@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -66,5 +69,39 @@ func TestRemoteCommandPlainJoinOnWindows(t *testing.T) {
 	}
 	if !isWindows(Node{OS: "Microsoft Windows Server 2022 Datacenter"}) || isWindows(Node{OS: "ubuntu 22.04"}) {
 		t.Error("isWindows misreads the platform name")
+	}
+}
+
+// --meta is easy to swallow into the remote command or drop on the floor, so
+// check it reaches the request body from either side of the node argument.
+func TestExecSendsMetadata(t *testing.T) {
+	var got map[string]string
+	var command string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]Node{{ID: "n1", Name: "box", Status: "online"}})
+	})
+	mux.HandleFunc("POST /api/v1/nodes/n1/execute", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Command  string
+			Metadata map[string]string
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		got, command = req.Metadata, req.Command
+		_ = json.NewEncoder(w).Encode(ExecResult{})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := newClient(Config{URL: srv.URL, APIKey: "k"})
+
+	if err := runExec(c, []string{"--meta", "ticket=T-42", "box", "--meta", "note=a=b", "--", "uptime"}); err != nil {
+		t.Fatal(err)
+	}
+	if command != "uptime" || len(got) != 2 || got["ticket"] != "T-42" || got["note"] != "a=b" {
+		t.Errorf("sent command %q, metadata %v", command, got)
+	}
+
+	if err := runExec(c, []string{"--meta", "novalue", "box", "--", "uptime"}); err == nil {
+		t.Error("accepted --meta without =")
 	}
 }

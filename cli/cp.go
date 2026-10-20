@@ -186,7 +186,7 @@ func upload(ctx context.Context, c *client, node Node, local, remote string, con
 	} else {
 		cmd = fmt.Sprintf("chmod %o %s && mv -f %s %s", perm, shellQuote(part), shellQuote(part), shellQuote(dst))
 	}
-	res, err := c.Exec(ctx, node.ID, cmd, 60, confirm)
+	res, err := c.Exec(ctx, node.ID, cmd, ExecOptions{Timeout: 60, Confirm: confirm})
 	if err != nil {
 		cleanup()
 		var apiErr *apiError

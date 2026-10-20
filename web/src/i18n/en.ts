@@ -309,6 +309,8 @@ export default {
     durationMs: 'Duration: {ms}ms',
     noLogs: 'No audit logs found',
     failedToLoad: 'Failed to load audit logs',
+    removeFilter: 'Remove filter',
+    filterByMetadata: 'Show only calls with this tag',
   },
 
   settings: {

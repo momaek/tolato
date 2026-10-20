@@ -307,6 +307,8 @@ export default {
     durationMs: '耗时：{ms}ms',
     noLogs: '未找到审计日志',
     failedToLoad: '加载审计日志失败',
+    removeFilter: '移除筛选',
+    filterByMetadata: '只看带这个标签的调用',
   },
 
   settings: {

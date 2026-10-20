@@ -462,10 +462,12 @@ export interface NotifyPreset {
 // ============================================================================
 
 export interface AuditLogQuery extends PaginationQuery {
+  id?: number
   node_id?: string
   keyword?: string
   from?: string  // RFC3339
   to?: string    // RFC3339
+  metadata?: Record<string, string> // sent as metadata.<key>=<value>, all must match
 }
 
 export interface AuditLogItem {
@@ -480,6 +482,7 @@ export interface AuditLogItem {
   duration_ms?: number
   confirmed: boolean
   source: 'webui' | 'terminal' | 'terminal/file_op' | 'api' | 'cli'
+  metadata?: Record<string, string> // tags the API caller attached to the call
   created_at: string
 }
 
@@ -492,10 +495,11 @@ export interface ExecuteCommandRequest {
   timeout?: number
   confirm?: boolean
   stream?: boolean
+  metadata?: Record<string, string>
 }
 
 export interface ExecuteCommandResponse {
-  id: string
+  id: number | null // the audit row; null if it could not be written
   node_id: string
   command: string
   exit_code: number

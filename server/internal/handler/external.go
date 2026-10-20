@@ -32,6 +32,9 @@ type ExecuteCommandRequest struct {
 	Command string `json:"command" binding:"required"`
 	Timeout int    `json:"timeout"`
 	Confirm bool   `json:"confirm"`
+	// Metadata is stored on the audit row as-is, for callers acting on behalf
+	// of someone or something to find their calls again. See validateMetadata.
+	Metadata map[string]string `json:"metadata"`
 }
 
 // ExternalListNodes returns the nodes the API key's owner may see.
@@ -143,6 +146,10 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 		if req.Timeout <= 0 {
 			req.Timeout = 60
 		}
+		if err := validateMetadata(req.Metadata); err != nil {
+			c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: "invalid_request", Message: err.Error()})
+			return
+		}
 
 		// Check sensitive operation
 		checker := security.NewChecker(deps.Settings)
@@ -185,6 +192,7 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 				Command:  req.Command,
 				Source:   externalSource(c),
 				APIKeyID: &apiKeyID,
+				Metadata: req.Metadata,
 			})
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error:   "execution_failed",
@@ -196,7 +204,7 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 		// Audit log
 		stdout := result.Stdout
 		stderr := result.Stderr
-		store.CreateAuditLog(&model.AuditLog{
+		entry := &model.AuditLog{
 			NodeID:     nodeID,
 			NodeName:   n.Name,
 			UserID:     middleware.CurrentUserID(c),
@@ -209,10 +217,18 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 			Confirmed:  req.Confirm,
 			Source:     externalSource(c),
 			APIKeyID:   &apiKeyID,
-		})
+			Metadata:   req.Metadata,
+		}
+		// The row id lets the caller link straight to its entry on the audit
+		// page (/audit?id=). null if the row could not be written: the command
+		// has run either way, so that is not a reason to fail the call.
+		var auditID *uint
+		if err := store.CreateAuditLog(entry); err == nil {
+			auditID = &entry.ID
+		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"id":          "",
+			"id":          auditID,
 			"node_id":     nodeID,
 			"command":     req.Command,
 			"exit_code":   result.ExitCode,
@@ -345,7 +361,7 @@ func ListNodeCommands(deps *Deps) gin.HandlerFunc {
 			query.PageSize = 20
 		}
 
-		logs, total, err := store.ListAuditLogs(query.Page, query.PageSize, &nodeID, nil, nil, nil)
+		logs, total, err := store.ListAuditLogs(query.Page, query.PageSize, store.AuditLogFilter{NodeID: &nodeID})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: "db_error", Message: "Failed to list commands"})
 			return
@@ -353,20 +369,7 @@ func ListNodeCommands(deps *Deps) gin.HandlerFunc {
 
 		items := make([]model.AuditLogItem, 0, len(logs))
 		for _, l := range logs {
-			items = append(items, model.AuditLogItem{
-				ID:         l.ID,
-				NodeID:     l.NodeID,
-				NodeName:   l.NodeName,
-				Actor:      l.Actor,
-				Command:    l.Command,
-				ExitCode:   l.ExitCode,
-				Stdout:     l.Stdout,
-				Stderr:     l.Stderr,
-				DurationMS: l.DurationMS,
-				Confirmed:  l.Confirmed,
-				Source:     l.Source,
-				CreatedAt:  l.CreatedAt,
-			})
+			items = append(items, auditLogItem(l))
 		}
 
 		totalPages := int(total) / query.PageSize

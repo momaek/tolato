@@ -40,6 +40,9 @@ func (n Node) DisplayName() string {
 
 // ExecResult is the outcome of a command run on a node.
 type ExecResult struct {
+	// ID is the audit log row the call produced; nil if the server could not
+	// write one, or predates returning it.
+	ID         *uint  `json:"id"`
 	NodeID     string `json:"node_id"`
 	Command    string `json:"command"`
 	ExitCode   int    `json:"exit_code"`
@@ -144,8 +147,19 @@ func (c *client) GetNode(ctx context.Context, id string) (*Node, error) {
 	return &n, nil
 }
 
-func (c *client) Exec(ctx context.Context, nodeID, command string, timeout int, confirm bool) (*ExecResult, error) {
-	body := map[string]any{"command": command, "timeout": timeout, "confirm": confirm}
+// ExecOptions are the optional parts of an execute call.
+type ExecOptions struct {
+	Timeout int
+	Confirm bool
+	// Metadata tags the call's audit row, for finding it again later.
+	Metadata map[string]string
+}
+
+func (c *client) Exec(ctx context.Context, nodeID, command string, opt ExecOptions) (*ExecResult, error) {
+	body := map[string]any{"command": command, "timeout": opt.Timeout, "confirm": opt.Confirm}
+	if len(opt.Metadata) > 0 {
+		body["metadata"] = opt.Metadata
+	}
 	var res ExecResult
 	if err := c.do(ctx, http.MethodPost, "/api/v1/nodes/"+nodeID+"/execute", body, &res); err != nil {
 		return nil, err

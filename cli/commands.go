@@ -126,6 +126,8 @@ func runExec(c *client, args []string) error {
 	timeout := fs.Int("timeout", 60, "seconds to allow the command to run")
 	confirm := fs.Bool("confirm", false, "proceed with a command the server flags as sensitive")
 	asJSON := fs.Bool("json", false, "print raw JSON")
+	meta := metaFlag{}
+	fs.Var(meta, "meta", "tag the audit log entry with key=value (repeatable)")
 	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
@@ -165,7 +167,7 @@ func runExec(c *client, args []string) error {
 	}
 	command := remoteCommand(remote, isWindows(node))
 
-	res, err := c.Exec(ctx, node.ID, command, *timeout, *confirm)
+	res, err := c.Exec(ctx, node.ID, command, ExecOptions{Timeout: *timeout, Confirm: *confirm, Metadata: meta})
 	if err != nil {
 		var apiErr *apiError
 		if errors.As(err, &apiErr) && apiErr.IsSensitive() {
@@ -196,6 +198,20 @@ func runExec(c *client, args []string) error {
 	if res.ExitCode != 0 {
 		os.Exit(res.ExitCode)
 	}
+	return nil
+}
+
+// metaFlag collects repeated --meta key=value flags.
+type metaFlag map[string]string
+
+func (m metaFlag) String() string { return "" }
+
+func (m metaFlag) Set(s string) error {
+	k, v, ok := strings.Cut(s, "=")
+	if !ok || k == "" {
+		return fmt.Errorf("--meta wants key=value, got %q", s)
+	}
+	m[k] = v
 	return nil
 }
 

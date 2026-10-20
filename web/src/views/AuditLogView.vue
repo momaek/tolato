@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Search, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-vue-next'
+import { useRoute, useRouter, type LocationQuery } from 'vue-router'
+import { Search, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,6 +27,8 @@ import { useNodesStore } from '@/stores/nodes'
 import type { AuditLogItem, PaginatedResponse } from '@/types/api'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const nodesStore = useNodesStore()
 
 const logs = ref<AuditLogItem[]>([])
@@ -38,12 +41,68 @@ const expandedRows = ref<Set<number>>(new Set())
 const searchQuery = ref('')
 const nodeFilter = ref('all')
 
+// Filters that come from a link rather than the header controls: an API
+// caller gets the audit row id back from execute and its own metadata tags,
+// and links here with ?id=123 or ?metadata.ticket=T-42.
+const idFilter = ref<number>()
+const metadataFilter = ref<Record<string, string>>({})
+const METADATA_PREFIX = 'metadata.'
+
+const linkFilters = computed(() => [
+  ...(idFilter.value !== undefined ? [{ key: 'id', label: `#${idFilter.value}` }] : []),
+  ...Object.entries(metadataFilter.value).map(([k, v]) => ({ key: METADATA_PREFIX + k, label: `${k}=${v}` })),
+])
+
+function readLinkFilters(query: LocationQuery) {
+  const first = (v: LocationQuery[string]) => (Array.isArray(v) ? v[0] : v) ?? undefined
+  const id = Number(first(query.id))
+  idFilter.value = Number.isInteger(id) && id > 0 ? id : undefined
+  const meta: Record<string, string> = {}
+  for (const [k, v] of Object.entries(query)) {
+    const value = first(v)
+    if (k.startsWith(METADATA_PREFIX) && value != null) meta[k.slice(METADATA_PREFIX.length)] = value
+  }
+  metadataFilter.value = meta
+}
+
+// The URL is the source of truth for link filters, so the filtered view can
+// itself be copied and shared.
+function writeLinkFilters() {
+  const query: Record<string, string> = {}
+  if (idFilter.value !== undefined) query.id = String(idFilter.value)
+  for (const [k, v] of Object.entries(metadataFilter.value)) query[METADATA_PREFIX + k] = v
+  router.replace({ query })
+}
+
+function addMetadataFilter(key: string, value: string) {
+  metadataFilter.value = { ...metadataFilter.value, [key]: value }
+  writeLinkFilters()
+}
+
+function removeLinkFilter(key: string) {
+  if (key === 'id') {
+    idFilter.value = undefined
+  } else {
+    const { [key.slice(METADATA_PREFIX.length)]: _, ...rest } = metadataFilter.value
+    metadataFilter.value = rest
+  }
+  writeLinkFilters()
+}
+
 onMounted(() => {
   nodesStore.fetchNodes()
+  readLinkFilters(route.query)
   fetchLogs()
 })
 
 watch([searchQuery, nodeFilter], () => {
+  page.value = 1
+  fetchLogs()
+})
+
+watch(() => route.query, (query) => {
+  if (route.name !== 'audit') return // navigating away
+  readLinkFilters(query)
   page.value = 1
   fetchLogs()
 })
@@ -56,11 +115,17 @@ async function fetchLogs() {
       page_size: 20,
       node_id: nodeFilter.value === 'all' ? undefined : nodeFilter.value,
       keyword: searchQuery.value || undefined,
+      id: idFilter.value,
+      metadata: metadataFilter.value,
     })
     logs.value = res.items
     totalPages.value = res.total_pages
     total.value = res.total
     expandedRows.value.clear()
+    // A link to one row is a request to see it, output included.
+    if (idFilter.value !== undefined && res.items.length === 1) {
+      expandedRows.value.add(res.items[0].id)
+    }
   } catch {
     toast.error(t('auditLog.failedToLoad'))
   } finally {
@@ -127,6 +192,26 @@ function formatTime(iso: string) {
       </div>
     </div>
 
+    <!-- Filters that arrived by link -->
+    <div v-if="linkFilters.length" class="flex flex-wrap items-center gap-2 border-b px-6 py-2">
+      <Badge
+        v-for="f in linkFilters"
+        :key="f.key"
+        variant="secondary"
+        class="gap-1 font-mono text-xs"
+      >
+        {{ f.label }}
+        <button
+          type="button"
+          class="rounded-sm opacity-60 hover:opacity-100"
+          :aria-label="$t('auditLog.removeFilter')"
+          @click="removeLinkFilter(f.key)"
+        >
+          <X class="h-3 w-3" />
+        </button>
+      </Badge>
+    </div>
+
     <!-- Table -->
     <div class="flex-1 overflow-auto px-6 py-4">
       <Table>
@@ -165,8 +250,21 @@ function formatTime(iso: string) {
                   {{ log.source }}
                 </Badge>
               </TableCell>
-              <TableCell class="max-w-md truncate font-mono text-sm">
-                {{ log.command }}
+              <TableCell class="max-w-md">
+                <div class="truncate font-mono text-sm">{{ log.command }}</div>
+                <div v-if="log.metadata" class="mt-1 flex flex-wrap gap-1">
+                  <button
+                    v-for="(value, key) in log.metadata"
+                    :key="key"
+                    type="button"
+                    class="max-w-full truncate rounded border px-1.5 py-0.5 font-mono text-[10px] hover:bg-[var(--secondary)]"
+                    style="color: var(--muted-foreground)"
+                    :title="$t('auditLog.filterByMetadata')"
+                    @click.stop="addMetadataFilter(String(key), value)"
+                  >
+                    {{ key }}={{ value }}
+                  </button>
+                </div>
               </TableCell>
               <TableCell>
                 <Badge

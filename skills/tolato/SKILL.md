@@ -238,6 +238,18 @@ Every command run through the CLI is written to the Tolato audit log against the
 API key's owner, with its output. Treat that as a reason for care, not secrecy:
 say what you are about to run and why.
 
+When a run belongs to something bigger — a ticket, a change, one task fanned
+out over several nodes — tag it so the entries can be found together later:
+
+```bash
+tolato exec web-01 --meta ticket=T-42 --meta step=drain -- systemctl stop app
+```
+
+`--meta key=value` is repeatable (keys are letters, digits, `_`, `-`, `.`;
+values up to 256 bytes). The audit page shows the tags and filters on them, and
+`/audit?metadata.ticket=T-42` links straight to that view. `--json` output
+includes `id`, the audit row's number; `/audit?id=<id>` opens that one entry.
+
 When more than one profile is configured, say **which deployment** you are about
 to run against as part of that, and pass `--profile <name>` rather than relying
 on whichever is current. The audit entry lands on the server that actually ran
