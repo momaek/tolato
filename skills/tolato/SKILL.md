@@ -250,6 +250,12 @@ values up to 256 bytes). The audit page shows the tags and filters on them, and
 `/audit?metadata.ticket=T-42` links straight to that view. `--json` output
 includes `id`, the audit row's number; `/audit?id=<id>` opens that one entry.
 
+Output is logged in full by default. When a command prints something that
+should not sit in the database afterwards — credentials, a full `env`, a large
+dump you only need once — add `--redact-output`: you still get the output, and
+the audit row keeps only its length and sha256. The command line itself is
+always logged, so a secret passed *as an argument* is not protected by this.
+
 When more than one profile is configured, say **which deployment** you are about
 to run against as part of that, and pass `--profile <name>` rather than relying
 on whichever is current. The audit entry lands on the server that actually ran

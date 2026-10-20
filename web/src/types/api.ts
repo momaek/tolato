@@ -470,6 +470,11 @@ export interface AuditLogQuery extends PaginationQuery {
   metadata?: Record<string, string> // sent as metadata.<key>=<value>, all must match
 }
 
+export interface OutputDigest {
+  bytes: number
+  sha256: string // hex
+}
+
 export interface AuditLogItem {
   id: number
   node_id: string
@@ -479,6 +484,10 @@ export interface AuditLogItem {
   exit_code?: number
   stdout?: string
   stderr?: string
+  // The caller kept stdout/stderr out of the log; only these are left of them.
+  output_redacted: boolean
+  stdout_digest?: OutputDigest
+  stderr_digest?: OutputDigest
   duration_ms?: number
   confirmed: boolean
   source: 'webui' | 'terminal' | 'terminal/file_op' | 'api' | 'cli'
@@ -496,6 +505,7 @@ export interface ExecuteCommandRequest {
   confirm?: boolean
   stream?: boolean
   metadata?: Record<string, string>
+  redact_output?: boolean // audit row keeps only length + sha256 of the output
 }
 
 export interface ExecuteCommandResponse {

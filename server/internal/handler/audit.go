@@ -113,19 +113,22 @@ func ListAuditLogs(deps *Deps) gin.HandlerFunc {
 // auditLogItem is the API view of one audit row.
 func auditLogItem(l model.AuditLog) model.AuditLogItem {
 	return model.AuditLogItem{
-		ID:         l.ID,
-		NodeID:     l.NodeID,
-		NodeName:   l.NodeName,
-		Actor:      l.Actor,
-		Command:    l.Command,
-		ExitCode:   l.ExitCode,
-		Stdout:     l.Stdout,
-		Stderr:     l.Stderr,
-		DurationMS: l.DurationMS,
-		Confirmed:  l.Confirmed,
-		Source:     l.Source,
-		Metadata:   l.Metadata,
-		CreatedAt:  l.CreatedAt,
+		ID:             l.ID,
+		NodeID:         l.NodeID,
+		NodeName:       l.NodeName,
+		Actor:          l.Actor,
+		Command:        l.Command,
+		ExitCode:       l.ExitCode,
+		Stdout:         l.Stdout,
+		Stderr:         l.Stderr,
+		OutputRedacted: l.StdoutDigest != nil || l.StderrDigest != nil,
+		StdoutDigest:   l.StdoutDigest,
+		StderrDigest:   l.StderrDigest,
+		DurationMS:     l.DurationMS,
+		Confirmed:      l.Confirmed,
+		Source:         l.Source,
+		Metadata:       l.Metadata,
+		CreatedAt:      l.CreatedAt,
 	}
 }
 

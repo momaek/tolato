@@ -35,6 +35,9 @@ type ExecuteCommandRequest struct {
 	// Metadata is stored on the audit row as-is, for callers acting on behalf
 	// of someone or something to find their calls again. See validateMetadata.
 	Metadata map[string]string `json:"metadata"`
+	// RedactOutput keeps stdout/stderr out of the audit row: the caller still
+	// gets them in the response, the row records only their length and sha256.
+	RedactOutput bool `json:"redact_output"`
 }
 
 // ExternalListNodes returns the nodes the API key's owner may see.
@@ -202,8 +205,6 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 		}
 
 		// Audit log
-		stdout := result.Stdout
-		stderr := result.Stderr
 		entry := &model.AuditLog{
 			NodeID:     nodeID,
 			NodeName:   n.Name,
@@ -211,13 +212,18 @@ func ExternalExecuteCommand(deps *Deps) gin.HandlerFunc {
 			Actor:      middleware.CurrentUsername(c),
 			Command:    req.Command,
 			ExitCode:   &result.ExitCode,
-			Stdout:     &stdout,
-			Stderr:     &stderr,
 			DurationMS: &result.DurationMS,
 			Confirmed:  req.Confirm,
 			Source:     externalSource(c),
 			APIKeyID:   &apiKeyID,
 			Metadata:   req.Metadata,
+		}
+		if req.RedactOutput {
+			entry.StdoutDigest = model.DigestOutput(result.Stdout)
+			entry.StderrDigest = model.DigestOutput(result.Stderr)
+		} else {
+			stdout, stderr := result.Stdout, result.Stderr
+			entry.Stdout, entry.Stderr = &stdout, &stderr
 		}
 		// The row id lets the caller link straight to its entry on the audit
 		// page (/audit?id=). null if the row could not be written: the command

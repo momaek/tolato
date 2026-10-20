@@ -72,22 +72,25 @@ func TestRemoteCommandPlainJoinOnWindows(t *testing.T) {
 	}
 }
 
-// --meta is easy to swallow into the remote command or drop on the floor, so
-// check it reaches the request body from either side of the node argument.
-func TestExecSendsMetadata(t *testing.T) {
+// --meta and --redact-output are easy to swallow into the remote command or
+// drop on the floor, so check they reach the request body from either side of
+// the node argument.
+func TestExecSendsAuditOptions(t *testing.T) {
 	var got map[string]string
 	var command string
+	var redacted bool
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/nodes", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]Node{{ID: "n1", Name: "box", Status: "online"}})
 	})
 	mux.HandleFunc("POST /api/v1/nodes/n1/execute", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Command  string
-			Metadata map[string]string
+			Command      string
+			Metadata     map[string]string
+			RedactOutput bool `json:"redact_output"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		got, command = req.Metadata, req.Command
+		got, command, redacted = req.Metadata, req.Command, req.RedactOutput
 		_ = json.NewEncoder(w).Encode(ExecResult{})
 	})
 	srv := httptest.NewServer(mux)
@@ -99,6 +102,16 @@ func TestExecSendsMetadata(t *testing.T) {
 	}
 	if command != "uptime" || len(got) != 2 || got["ticket"] != "T-42" || got["note"] != "a=b" {
 		t.Errorf("sent command %q, metadata %v", command, got)
+	}
+	if redacted {
+		t.Error("asked for redaction without --redact-output")
+	}
+
+	if err := runExec(c, []string{"box", "--redact-output", "--", "env"}); err != nil {
+		t.Fatal(err)
+	}
+	if !redacted || got != nil {
+		t.Errorf("--redact-output: sent redact_output=%v, metadata %v", redacted, got)
 	}
 
 	if err := runExec(c, []string{"--meta", "novalue", "box", "--", "uptime"}); err == nil {

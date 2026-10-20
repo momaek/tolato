@@ -311,6 +311,9 @@ export default {
     failedToLoad: 'Failed to load audit logs',
     removeFilter: 'Remove filter',
     filterByMetadata: 'Show only calls with this tag',
+    redacted: 'redacted',
+    outputRedacted: 'Output not recorded: the caller asked for it to be kept out of the log.',
+    digest: '{bytes} bytes · sha256 {sha256}',
   },
 
   settings: {

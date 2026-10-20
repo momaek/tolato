@@ -153,12 +153,18 @@ type ExecOptions struct {
 	Confirm bool
 	// Metadata tags the call's audit row, for finding it again later.
 	Metadata map[string]string
+	// RedactOutput keeps the output out of the audit row, which then records
+	// only its length and sha256. The output still comes back here.
+	RedactOutput bool
 }
 
 func (c *client) Exec(ctx context.Context, nodeID, command string, opt ExecOptions) (*ExecResult, error) {
 	body := map[string]any{"command": command, "timeout": opt.Timeout, "confirm": opt.Confirm}
 	if len(opt.Metadata) > 0 {
 		body["metadata"] = opt.Metadata
+	}
+	if opt.RedactOutput {
+		body["redact_output"] = true
 	}
 	var res ExecResult
 	if err := c.do(ctx, http.MethodPost, "/api/v1/nodes/"+nodeID+"/execute", body, &res); err != nil {

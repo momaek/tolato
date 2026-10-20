@@ -523,17 +523,22 @@ type AuditLogQuery struct {
 }
 
 type AuditLogItem struct {
-	ID         uint              `json:"id"`
-	NodeID     string            `json:"node_id"`
-	NodeName   string            `json:"node_name"`
-	Actor      string            `json:"actor,omitempty"` // username that ran it
-	Command    string            `json:"command"`
-	ExitCode   *int              `json:"exit_code,omitempty"`
-	Stdout     *string           `json:"stdout,omitempty"`
-	Stderr     *string           `json:"stderr,omitempty"`
-	DurationMS *int64            `json:"duration_ms,omitempty"`
-	Confirmed  bool              `json:"confirmed"`
-	Source     string            `json:"source"` // webui, terminal, api, cli
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
+	ID       uint    `json:"id"`
+	NodeID   string  `json:"node_id"`
+	NodeName string  `json:"node_name"`
+	Actor    string  `json:"actor,omitempty"` // username that ran it
+	Command  string  `json:"command"`
+	ExitCode *int    `json:"exit_code,omitempty"`
+	Stdout   *string `json:"stdout,omitempty"`
+	Stderr   *string `json:"stderr,omitempty"`
+	// OutputRedacted means the caller kept stdout/stderr out of the log; the
+	// digests are what is left of them.
+	OutputRedacted bool              `json:"output_redacted"`
+	StdoutDigest   *OutputDigest     `json:"stdout_digest,omitempty"`
+	StderrDigest   *OutputDigest     `json:"stderr_digest,omitempty"`
+	DurationMS     *int64            `json:"duration_ms,omitempty"`
+	Confirmed      bool              `json:"confirmed"`
+	Source         string            `json:"source"` // webui, terminal, api, cli
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
 }

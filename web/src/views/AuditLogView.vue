@@ -275,6 +275,9 @@ function formatTime(iso: string) {
                 >
                   {{ log.exit_code !== undefined ? `exit: ${log.exit_code}` : t('common.pending') }}
                 </Badge>
+                <Badge v-if="log.output_redacted" variant="outline" class="ml-1.5 text-[10px]" :title="$t('auditLog.outputRedacted')">
+                  {{ $t('auditLog.redacted') }}
+                </Badge>
               </TableCell>
               <TableCell>
                 <Badge variant="outline">
@@ -283,7 +286,7 @@ function formatTime(iso: string) {
               </TableCell>
             </TableRow>
             <!-- Expanded output -->
-            <TableRow v-if="expandedRows.has(log.id) && (log.stdout || log.stderr)">
+            <TableRow v-if="expandedRows.has(log.id) && (log.stdout || log.stderr || log.output_redacted)">
               <TableCell :colspan="7" class="p-0">
                 <div class="mx-6 my-2 rounded-lg p-3 text-xs font-mono" style="background-color: var(--secondary)">
                   <div v-if="log.stdout" class="whitespace-pre-wrap break-all" style="color: var(--foreground)">
@@ -293,6 +296,17 @@ function formatTime(iso: string) {
                   <div v-if="log.stderr" class="mt-2 whitespace-pre-wrap break-all" style="color: var(--color-error-foreground)">
                     <div class="mb-1 text-[10px] font-sans font-medium" style="color: var(--muted-foreground)">{{ $t('auditLog.stderr') }}</div>
                     {{ log.stderr }}
+                  </div>
+                  <div v-if="log.output_redacted">
+                    <div class="mb-1 font-sans" style="color: var(--muted-foreground)">{{ $t('auditLog.outputRedacted') }}</div>
+                    <div v-if="log.stdout_digest" class="break-all" style="color: var(--foreground)">
+                      <span class="font-sans" style="color: var(--muted-foreground)">{{ $t('auditLog.stdout') }}</span>
+                      {{ $t('auditLog.digest', log.stdout_digest) }}
+                    </div>
+                    <div v-if="log.stderr_digest" class="break-all" style="color: var(--foreground)">
+                      <span class="font-sans" style="color: var(--muted-foreground)">{{ $t('auditLog.stderr') }}</span>
+                      {{ $t('auditLog.digest', log.stderr_digest) }}
+                    </div>
                   </div>
                   <div
                     v-if="log.duration_ms"

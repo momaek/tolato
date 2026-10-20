@@ -128,6 +128,7 @@ func runExec(c *client, args []string) error {
 	asJSON := fs.Bool("json", false, "print raw JSON")
 	meta := metaFlag{}
 	fs.Var(meta, "meta", "tag the audit log entry with key=value (repeatable)")
+	redact := fs.Bool("redact-output", false, "keep the output out of the audit log (it records length and sha256 only)")
 	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
@@ -167,7 +168,7 @@ func runExec(c *client, args []string) error {
 	}
 	command := remoteCommand(remote, isWindows(node))
 
-	res, err := c.Exec(ctx, node.ID, command, ExecOptions{Timeout: *timeout, Confirm: *confirm, Metadata: meta})
+	res, err := c.Exec(ctx, node.ID, command, ExecOptions{Timeout: *timeout, Confirm: *confirm, Metadata: meta, RedactOutput: *redact})
 	if err != nil {
 		var apiErr *apiError
 		if errors.As(err, &apiErr) && apiErr.IsSensitive() {
