@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,16 +20,17 @@ import (
 const cpChunk = 512 << 10
 
 // partSuffix marks an upload in progress. The data lands in <dst>.tolato-part
-// and is moved over <dst> only once all of it arrived, so an interrupted copy
-// never leaves a half-written file under the real name, and replacing a
-// running binary works (writing into it in place fails with "text file busy").
+// and is moved over <dst> only once all of it arrived intact, so an
+// interrupted or corrupted copy never shows up under the real name, and
+// replacing a running binary works (writing into it in place fails with "text
+// file busy").
 const partSuffix = ".tolato-part"
 
 // runCp copies one file between this machine and a node. Exactly one side is
 // remote, written node:/absolute/path; `-` stands for stdin or stdout.
 func runCp(c *client, args []string) error {
 	fs := flag.NewFlagSet("cp", flag.ContinueOnError)
-	confirm := fs.Bool("confirm", false, "proceed if the server flags the final move as sensitive")
+	confirm := fs.Bool("confirm", false, "with an older server or agent, proceed if it flags the final chmod/mv as sensitive")
 
 	// Accept flags before, between or after the two paths.
 	var paths []string
@@ -142,6 +145,11 @@ func upload(ctx context.Context, c *client, node Node, local, remote string, con
 	part := dst + partSuffix
 	cleanup := func() { _, _ = c.File(ctx, node.ID, FileOp{Op: "delete", Path: part}) }
 
+	// Hash on the way out, so the agent can check what it received against
+	// what was read here.
+	hash := sha256.New()
+	src = io.TeeReader(src, hash)
+
 	prog := newProgress(name, size)
 	buf := make([]byte, cpChunk)
 	var off int64
@@ -172,16 +180,43 @@ func upload(ctx context.Context, c *client, node Node, local, remote string, con
 	}
 	prog.done()
 
+	// The agent verifies the digest, sets the mode and renames the part file
+	// over dst, in one step. A mismatch fails the copy and the agent removes
+	// the part file itself.
+	commit := FileOp{Op: "commit", From: part, Path: dst, SHA256: hex.EncodeToString(hash.Sum(nil)), Mode: uint32(perm)}
+	_, err := c.File(ctx, node.ID, commit)
+	if err == nil {
+		return nil
+	}
+	if !isUnknownOp(err) {
+		cleanup()
+		return fmt.Errorf("put %s:%s in place: %w", node.DisplayName(), dst, err)
+	}
+	return legacyMoveIntoPlace(ctx, c, node, part, dst, off, perm, confirm)
+}
+
+// isUnknownOp reports a file op the server or the agent does not know yet:
+// the server's request validation and the agent's dispatcher both answer
+// "unknown op".
+func isUnknownOp(err error) bool {
+	return strings.Contains(err.Error(), "unknown op")
+}
+
+// legacyMoveIntoPlace finishes an upload for a server or agent without the
+// commit op: it checks the size, then moves the part file with a command.
+// There is no digest check, and the move goes through the sensitive-command
+// check like any other exec.
+func legacyMoveIntoPlace(ctx context.Context, c *client, node Node, part, dst string, size int64, perm os.FileMode, confirm bool) error {
+	cleanup := func() { _, _ = c.File(ctx, node.ID, FileOp{Op: "delete", Path: part}) }
+
 	st, err := c.File(ctx, node.ID, FileOp{Op: "stat", Path: part})
-	if err != nil || st.Stat == nil || st.Stat.Size != off {
+	if err != nil || st.Stat == nil || st.Stat.Size != size {
 		cleanup()
 		return fmt.Errorf("upload to %s:%s did not arrive intact", node.DisplayName(), part)
 	}
 
-	// The agent has no rename, so the final move goes through exec. That also
-	// puts it in the audit log next to the write.
 	var cmd string
-	if windows {
+	if isWindows(node) {
 		cmd = fmt.Sprintf(`move /Y "%s" "%s"`, part, dst)
 	} else {
 		cmd = fmt.Sprintf("chmod %o %s && mv -f %s %s", perm, shellQuote(part), shellQuote(part), shellQuote(dst))

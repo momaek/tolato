@@ -216,6 +216,8 @@ type FileOp struct {
 	Mode   uint32 `json:"mode,omitempty"`
 	Offset int64  `json:"offset,omitempty"`
 	Length int64  `json:"length,omitempty"`
+	From   string `json:"from,omitempty"`   // for commit: the staged file
+	SHA256 string `json:"sha256,omitempty"` // for commit: hex digest From must match
 }
 
 // FileEntry describes a remote file. Mode carries Go's os.FileMode bits.
@@ -229,11 +231,12 @@ type FileEntry struct {
 
 // FileResult is the agent's reply to a FileOp.
 type FileResult struct {
-	OK    bool       `json:"ok"`
-	Error string     `json:"error,omitempty"`
-	Data  string     `json:"data,omitempty"` // base64, for read
-	Stat  *FileEntry `json:"stat,omitempty"`
-	EOF   bool       `json:"eof,omitempty"`
+	OK     bool       `json:"ok"`
+	Error  string     `json:"error,omitempty"`
+	Data   string     `json:"data,omitempty"` // base64, for read
+	Stat   *FileEntry `json:"stat,omitempty"`
+	EOF    bool       `json:"eof,omitempty"`
+	SHA256 string     `json:"sha256,omitempty"` // for commit
 }
 
 // File runs one file op on a node. A failure the agent reports (no such file,

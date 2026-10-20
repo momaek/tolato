@@ -17,6 +17,7 @@ import (
 // agent that the browser could not already send it.
 var externalFileOps = map[string]bool{
 	"list": true, "stat": true, "read": true, "write": true, "mkdir": true, "delete": true,
+	"commit": true,
 }
 
 // ExternalFileOp forwards one file op to a node's agent. It is what `tolato
@@ -56,6 +57,10 @@ func ExternalFileOp(deps *Deps) gin.HandlerFunc {
 			badRequest(c, "path is required")
 			return
 		}
+		if req.Op == "commit" && req.From == "" {
+			badRequest(c, "from is required for commit")
+			return
+		}
 
 		n, err := store.GetNodeByID(nodeID)
 		if err != nil {
@@ -71,17 +76,27 @@ func ExternalFileOp(deps *Deps) gin.HandlerFunc {
 		// A transfer is many requests, one per chunk. Auditing only the first
 		// (offset 0) keeps it to one row per file instead of hundreds, and
 		// stat, which `tolato cp` sends around every transfer, only reads
-		// metadata.
-		audit := func(errMsg string) {
+		// metadata. A commit names the digest: the agent's own once the file
+		// is in place, otherwise the one the caller expected.
+		audit := func(errMsg, digest string) {
 			if req.Op == "stat" || (req.Op == "read" || req.Op == "write") && req.Offset != 0 {
 				return
+			}
+			command := fmt.Sprintf("file:%s %s", req.Op, req.Path)
+			if req.Op == "commit" {
+				if digest == "" {
+					digest = req.SHA256
+				}
+				if digest != "" {
+					command += " sha256=" + digest
+				}
 			}
 			entry := &model.AuditLog{
 				NodeID:   nodeID,
 				NodeName: n.Name,
 				UserID:   middleware.CurrentUserID(c),
 				Actor:    middleware.CurrentUsername(c),
-				Command:  fmt.Sprintf("file:%s %s", req.Op, req.Path),
+				Command:  command,
 				Source:   externalSource(c),
 				APIKeyID: &apiKeyID,
 			}
@@ -95,18 +110,22 @@ func ExternalFileOp(deps *Deps) gin.HandlerFunc {
 		defer cancel()
 		reply, err := ac.Request(ctx, model.AgentTypeFileOp, req, 30*time.Second)
 		if err != nil {
-			audit(err.Error())
+			audit(err.Error(), "")
 			c.JSON(http.StatusBadGateway, model.ErrorResponse{Error: "agent_error", Message: err.Error()})
 			return
 		}
 
 		var res model.AgentFileResultPayload
 		if err := reply.Decode(&res); err != nil {
-			audit(err.Error())
+			audit(err.Error(), "")
 			c.JSON(http.StatusBadGateway, model.ErrorResponse{Error: "agent_error", Message: "malformed agent reply"})
 			return
 		}
-		audit(res.Error)
+		placed := ""
+		if res.OK {
+			placed = res.SHA256
+		}
+		audit(res.Error, placed)
 
 		// A failed op (missing file, permission denied) is still a successful
 		// round trip; the caller reads OK/Error the same way the browser does.

@@ -196,11 +196,14 @@ tar czf - site/ | tolato cp - web-01:/tmp/site.tgz
   working directory worth relying on.
 - **One file at a time**, no directories. For a tree, `tar` it and copy the
   archive, then unpack it with `tolato exec`.
-- **Uploads land whole or not at all.** The data goes to `<path>.tolato-part`
-  and is moved over the target only when complete, so an interrupted copy
-  leaves the old file alone, and replacing a running binary works. The final
-  `chmod`/`mv` runs as a command, so a server that flags it as sensitive needs
-  `--confirm`.
+- **Uploads land whole and verified, or not at all.** The data goes to
+  `<path>.tolato-part`; the agent then checks its sha256 against the local
+  file and only on a match renames it over the target. An interrupted or
+  damaged copy leaves the old file alone, and replacing a running binary
+  works. No separate `sha256sum` or `chmod` afterwards is needed.
+- With an older server or agent, the final `chmod`/`mv` runs as a command
+  instead (size-checked, not hashed), so a server that flags it as sensitive
+  needs `--confirm`.
 - The file keeps its permission bits in both directions; stdin uploads get
   `0644`. Owner is whoever the agent runs as (usually root), so `chown` with
   `tolato exec` afterwards if it matters.

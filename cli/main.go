@@ -48,7 +48,8 @@ Flags:
   --json      print the raw JSON response instead of a table
   --timeout   seconds to allow a command to run (default 60)
   --confirm   proceed with a command the server flags as sensitive
-              (for cp: the chmod/mv that puts the upload in place)
+              (for cp: only with an older server or agent, where the
+              upload is put in place by a chmod/mv command)
   --meta      tag exec's audit log entry with key=value; repeatable, and
               the audit page can filter on it (?metadata.key=value)
   --redact-output
