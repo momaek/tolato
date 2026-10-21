@@ -2,7 +2,9 @@
 package model
 
 import (
+	"crypto/sha256"
 	"database/sql/driver"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"time"
@@ -270,11 +272,33 @@ type AuditLog struct {
 	ExitCode    *int      `json:"exit_code,omitempty"`
 	Stdout      *string   `json:"stdout,omitempty" gorm:"type:text"`
 	Stderr      *string   `json:"stderr,omitempty" gorm:"type:text"`
+	// The digests replace Stdout/Stderr when the caller asked for its output
+	// to stay out of the audit log (redact_output). Either being set is what
+	// marks the row as redacted.
+	StdoutDigest *OutputDigest `json:"stdout_digest,omitempty" gorm:"type:jsonb;serializer:json"`
+	StderrDigest *OutputDigest `json:"stderr_digest,omitempty" gorm:"type:jsonb;serializer:json"`
 	DurationMS  *int64    `json:"duration_ms,omitempty"`
 	Confirmed   bool      `json:"confirmed" gorm:"default:false"`             // required 2FA confirmation
 	Source      string    `json:"source" gorm:"type:text;not null;default:'webui'"` // webui, terminal, api, cli
 	APIKeyID    *string   `json:"api_key_id,omitempty" gorm:"type:text"`
-	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime;index"`
+	// Metadata is whatever the API caller tagged the call with (a ticket, a
+	// run id, the person it acted for). Stored verbatim and never interpreted;
+	// the GIN index serves the audit page's exact-match filter.
+	Metadata  map[string]string `json:"metadata,omitempty" gorm:"type:jsonb;serializer:json;index:idx_audit_logs_metadata,type:gin"`
+	CreatedAt time.Time         `json:"created_at" gorm:"autoCreateTime;index"`
+}
+
+// OutputDigest stands in for a stream of command output that was not kept:
+// enough to prove what was returned, without a second copy of it.
+type OutputDigest struct {
+	Bytes  int    `json:"bytes"`
+	SHA256 string `json:"sha256"` // hex
+}
+
+// DigestOutput summarizes s for an audit row that must not hold it.
+func DigestOutput(s string) *OutputDigest {
+	sum := sha256.Sum256([]byte(s))
+	return &OutputDigest{Bytes: len(s), SHA256: hex.EncodeToString(sum[:])}
 }
 
 // --- Core: Settings (key-value) ---

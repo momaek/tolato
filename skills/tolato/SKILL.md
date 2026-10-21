@@ -196,11 +196,14 @@ tar czf - site/ | tolato cp - web-01:/tmp/site.tgz
   working directory worth relying on.
 - **One file at a time**, no directories. For a tree, `tar` it and copy the
   archive, then unpack it with `tolato exec`.
-- **Uploads land whole or not at all.** The data goes to `<path>.tolato-part`
-  and is moved over the target only when complete, so an interrupted copy
-  leaves the old file alone, and replacing a running binary works. The final
-  `chmod`/`mv` runs as a command, so a server that flags it as sensitive needs
-  `--confirm`.
+- **Uploads land whole and verified, or not at all.** The data goes to
+  `<path>.tolato-part`; the agent then checks its sha256 against the local
+  file and only on a match renames it over the target. An interrupted or
+  damaged copy leaves the old file alone, and replacing a running binary
+  works. No separate `sha256sum` or `chmod` afterwards is needed.
+- With an older server or agent, the final `chmod`/`mv` runs as a command
+  instead (size-checked, not hashed), so a server that flags it as sensitive
+  needs `--confirm`.
 - The file keeps its permission bits in both directions; stdin uploads get
   `0644`. Owner is whoever the agent runs as (usually root), so `chown` with
   `tolato exec` afterwards if it matters.
@@ -237,6 +240,24 @@ outright and no flag overrides them.
 Every command run through the CLI is written to the Tolato audit log against the
 API key's owner, with its output. Treat that as a reason for care, not secrecy:
 say what you are about to run and why.
+
+When a run belongs to something bigger — a ticket, a change, one task fanned
+out over several nodes — tag it so the entries can be found together later:
+
+```bash
+tolato exec web-01 --meta ticket=T-42 --meta step=drain -- systemctl stop app
+```
+
+`--meta key=value` is repeatable (keys are letters, digits, `_`, `-`, `.`;
+values up to 256 bytes). The audit page shows the tags and filters on them, and
+`/audit?metadata.ticket=T-42` links straight to that view. `--json` output
+includes `id`, the audit row's number; `/audit?id=<id>` opens that one entry.
+
+Output is logged in full by default. When a command prints something that
+should not sit in the database afterwards — credentials, a full `env`, a large
+dump you only need once — add `--redact-output`: you still get the output, and
+the audit row keeps only its length and sha256. The command line itself is
+always logged, so a secret passed *as an argument* is not protected by this.
 
 When more than one profile is configured, say **which deployment** you are about
 to run against as part of that, and pass `--profile <name>` rather than relying

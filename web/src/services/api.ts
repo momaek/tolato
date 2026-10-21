@@ -394,7 +394,10 @@ export async function testNotifyChannel(name: string): Promise<void> {
 // --- Audit Logs ---
 
 export async function getAuditLogs(query: AuditLogQuery): Promise<PaginatedResponse<AuditLogItem>> {
-  const res = await api.get<PaginatedResponse<AuditLogItem>>('/audit-logs', { params: query })
+  const { metadata, ...rest } = query
+  const params: Record<string, unknown> = { ...rest }
+  for (const [k, v] of Object.entries(metadata ?? {})) params[`metadata.${k}`] = v
+  const res = await api.get<PaginatedResponse<AuditLogItem>>('/audit-logs', { params })
   return res.data
 }
 

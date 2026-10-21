@@ -27,7 +27,7 @@ Usage:
   tolato profile remove <name> [--force]
   tolato nodes list [--status online|offline] [--json]
   tolato nodes get <node> [--json]
-  tolato exec <node> -- <command>...
+  tolato exec <node> [--meta key=value]... [--redact-output] -- <command>...
   tolato cp <file> <node>:<path>     upload (path must be absolute)
   tolato cp <node>:<path> <file>     download ("-" is stdin / stdout)
   tolato version
@@ -48,7 +48,13 @@ Flags:
   --json      print the raw JSON response instead of a table
   --timeout   seconds to allow a command to run (default 60)
   --confirm   proceed with a command the server flags as sensitive
-              (for cp: the chmod/mv that puts the upload in place)
+              (for cp: only with an older server or agent, where the
+              upload is put in place by a chmod/mv command)
+  --meta      tag exec's audit log entry with key=value; repeatable, and
+              the audit page can filter on it (?metadata.key=value)
+  --redact-output
+              keep exec's output out of the audit log, which records only
+              its length and sha256; you still see the output
 `
 
 func main() {

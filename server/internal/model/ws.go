@@ -192,14 +192,21 @@ type AgentPTYResizePayload struct {
 type AgentPTYClosePayload struct{}
 
 // AgentFileOpPayload is a single file operation request.
-// Op: list | stat | read | write | mkdir | delete
+// Op: list | stat | read | write | mkdir | delete | commit
+//
+// commit moves a staged file (From, written beforehand with write) to Path:
+// the agent checks it against SHA256 if given, applies Mode, and renames it
+// into place, so Path never holds a partial or corrupted file. Agents that
+// predate it answer "unknown op".
 type AgentFileOpPayload struct {
 	Op     string `json:"op"`
 	Path   string `json:"path"`
 	Data   string `json:"data,omitempty"`   // base64 for write
-	Mode   uint32 `json:"mode,omitempty"`   // for mkdir (default 0755)
-	Offset int64  `json:"offset,omitempty"` // for read
+	Mode   uint32 `json:"mode,omitempty"`   // permission bits: mkdir (default 0755), write, commit (default: keep the replaced file's)
+	Offset int64  `json:"offset,omitempty"` // for read and write
 	Length int64  `json:"length,omitempty"` // for read (0 = read to EOF; capped at server limit)
+	From   string `json:"from,omitempty"`   // for commit: the staged file
+	SHA256 string `json:"sha256,omitempty"` // for commit: hex digest From must match
 }
 
 // Agent -> Server
@@ -231,6 +238,7 @@ type AgentFileResultPayload struct {
 	Data    string      `json:"data,omitempty"`    // base64 for read
 	Stat    *FileEntry  `json:"stat,omitempty"`    // for stat
 	EOF     bool        `json:"eof,omitempty"`     // for read (true → no more bytes after Offset+len(Data))
+	SHA256  string      `json:"sha256,omitempty"`  // for commit: digest of the file as found
 }
 
 // ============================================================================

@@ -142,6 +142,8 @@ type FileOpPayload struct {
 	Mode   uint32 `json:"mode,omitempty"`
 	Offset int64  `json:"offset,omitempty"`
 	Length int64  `json:"length,omitempty"`
+	From   string `json:"from,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
 }
 
 // ---- Client ----
@@ -622,6 +624,8 @@ func (c *Client) handleFileOp(msg WSMessage) {
 		Mode:   p.Mode,
 		Offset: p.Offset,
 		Length: p.Length,
+		From:   p.From,
+		SHA256: p.SHA256,
 	})
 	_ = c.sendBulkMessage("file_result", msg.ID, resp)
 }

@@ -40,6 +40,9 @@ func (n Node) DisplayName() string {
 
 // ExecResult is the outcome of a command run on a node.
 type ExecResult struct {
+	// ID is the audit log row the call produced; nil if the server could not
+	// write one, or predates returning it.
+	ID         *uint  `json:"id"`
 	NodeID     string `json:"node_id"`
 	Command    string `json:"command"`
 	ExitCode   int    `json:"exit_code"`
@@ -144,8 +147,25 @@ func (c *client) GetNode(ctx context.Context, id string) (*Node, error) {
 	return &n, nil
 }
 
-func (c *client) Exec(ctx context.Context, nodeID, command string, timeout int, confirm bool) (*ExecResult, error) {
-	body := map[string]any{"command": command, "timeout": timeout, "confirm": confirm}
+// ExecOptions are the optional parts of an execute call.
+type ExecOptions struct {
+	Timeout int
+	Confirm bool
+	// Metadata tags the call's audit row, for finding it again later.
+	Metadata map[string]string
+	// RedactOutput keeps the output out of the audit row, which then records
+	// only its length and sha256. The output still comes back here.
+	RedactOutput bool
+}
+
+func (c *client) Exec(ctx context.Context, nodeID, command string, opt ExecOptions) (*ExecResult, error) {
+	body := map[string]any{"command": command, "timeout": opt.Timeout, "confirm": opt.Confirm}
+	if len(opt.Metadata) > 0 {
+		body["metadata"] = opt.Metadata
+	}
+	if opt.RedactOutput {
+		body["redact_output"] = true
+	}
 	var res ExecResult
 	if err := c.do(ctx, http.MethodPost, "/api/v1/nodes/"+nodeID+"/execute", body, &res); err != nil {
 		return nil, err
@@ -196,6 +216,8 @@ type FileOp struct {
 	Mode   uint32 `json:"mode,omitempty"`
 	Offset int64  `json:"offset,omitempty"`
 	Length int64  `json:"length,omitempty"`
+	From   string `json:"from,omitempty"`   // for commit: the staged file
+	SHA256 string `json:"sha256,omitempty"` // for commit: hex digest From must match
 }
 
 // FileEntry describes a remote file. Mode carries Go's os.FileMode bits.
@@ -209,11 +231,12 @@ type FileEntry struct {
 
 // FileResult is the agent's reply to a FileOp.
 type FileResult struct {
-	OK    bool       `json:"ok"`
-	Error string     `json:"error,omitempty"`
-	Data  string     `json:"data,omitempty"` // base64, for read
-	Stat  *FileEntry `json:"stat,omitempty"`
-	EOF   bool       `json:"eof,omitempty"`
+	OK     bool       `json:"ok"`
+	Error  string     `json:"error,omitempty"`
+	Data   string     `json:"data,omitempty"` // base64, for read
+	Stat   *FileEntry `json:"stat,omitempty"`
+	EOF    bool       `json:"eof,omitempty"`
+	SHA256 string     `json:"sha256,omitempty"` // for commit
 }
 
 // File runs one file op on a node. A failure the agent reports (no such file,

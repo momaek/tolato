@@ -307,6 +307,11 @@ export default {
     durationMs: '耗时：{ms}ms',
     noLogs: '未找到审计日志',
     failedToLoad: '加载审计日志失败',
+    removeFilter: '移除筛选',
+    filterByMetadata: '只看带这个标签的调用',
+    redacted: '未留存输出',
+    outputRedacted: '输出未记录：调用方要求不把它留在日志里。',
+    digest: '{bytes} 字节 · sha256 {sha256}',
   },
 
   settings: {

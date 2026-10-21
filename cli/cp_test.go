@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -62,11 +65,15 @@ func TestCheckRemotePath(t *testing.T) {
 
 // fakeNode stands in for the server plus one agent. Remote paths are real
 // paths on this machine, file ops follow the agent's files package (including
-// its 1 MiB read cap), and exec runs through sh -c — so a test exercises the
-// same chunking, part file and final chmod/mv that a real node would see.
+// its 1 MiB read cap and its commit), and exec runs through sh -c — so a test
+// exercises the same chunking, part file and final move that a real node
+// would see.
 type fakeNode struct {
 	failWriteAt int64 // fail a write at this offset; <0 never
+	corrupt     bool  // flip the first byte of every chunk written
+	legacy      bool  // an agent from before the commit op
 	writes      atomic.Int32
+	execs       atomic.Int32
 }
 
 func newFakeServer(t *testing.T, fn *fakeNode) *client {
@@ -76,6 +83,7 @@ func newFakeServer(t *testing.T, fn *fakeNode) *client {
 		_ = json.NewEncoder(w).Encode([]Node{{ID: "n1", Name: "box", Status: "online", OS: "Ubuntu 24.04"}})
 	})
 	mux.HandleFunc("POST /api/v1/nodes/n1/execute", func(w http.ResponseWriter, r *http.Request) {
+		fn.execs.Add(1)
 		var req struct{ Command string }
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		var stderr bytes.Buffer
@@ -112,6 +120,9 @@ func (fn *fakeNode) handle(op FileOp) FileResult {
 			return fail(errors.New("disk full"))
 		}
 		raw, _ := base64.StdEncoding.DecodeString(op.Data)
+		if fn.corrupt && len(raw) > 0 {
+			raw[0] ^= 0xff
+		}
 		flag := os.O_WRONLY | os.O_CREATE
 		if op.Offset == 0 {
 			flag |= os.O_TRUNC
@@ -146,8 +157,30 @@ func (fn *fakeNode) handle(op FileOp) FileResult {
 			return fail(err)
 		}
 		return FileResult{OK: true}
+	case "commit":
+		if fn.legacy {
+			break
+		}
+		data, err := os.ReadFile(op.From)
+		if err != nil {
+			return fail(err)
+		}
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); got != op.SHA256 {
+			_ = os.Remove(op.From)
+			return FileResult{Error: "sha256 mismatch: " + got, SHA256: got}
+		}
+		if op.Mode != 0 {
+			if err := os.Chmod(op.From, os.FileMode(op.Mode).Perm()); err != nil {
+				return fail(err)
+			}
+		}
+		if err := os.Rename(op.From, op.Path); err != nil {
+			return fail(err)
+		}
+		return FileResult{OK: true, SHA256: op.SHA256}
 	}
-	return fail(errors.New("unknown op"))
+	return fail(fmt.Errorf("unknown op: %q", op.Op))
 }
 
 func randomFile(t *testing.T, dir string, size int, perm os.FileMode) (string, []byte) {
@@ -186,8 +219,17 @@ func TestCpRoundTrip(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake node execs through sh")
 	}
-	c := newFakeServer(t, &fakeNode{failWriteAt: -1})
+	for _, legacy := range []bool{false, true} {
+		fn := &fakeNode{failWriteAt: -1, legacy: legacy}
+		testCpRoundTrip(t, newFakeServer(t, fn))
+		// With commit, nothing about an upload goes through exec.
+		if !legacy && fn.execs.Load() != 0 {
+			t.Errorf("%d execs on an agent with commit", fn.execs.Load())
+		}
+	}
+}
 
+func testCpRoundTrip(t *testing.T, c *client) {
 	for _, size := range []int{0, 1, cpChunk, 2*cpChunk + 17} {
 		local, remote := t.TempDir(), t.TempDir()
 		src, data := randomFile(t, local, size, 0o750)
@@ -235,6 +277,23 @@ func TestCpFailedUploadLeavesNothing(t *testing.T) {
 		t.Fatalf("got %v, want the agent's write error", err)
 	}
 	// The old file is untouched and the part file is gone.
+	assertFile(t, dst, []byte("old"), 0o644)
+}
+
+// What arrives is checked against what was sent; a damaged upload fails and
+// never replaces the destination.
+func TestCpCorruptedUploadIsRefused(t *testing.T) {
+	c := newFakeServer(t, &fakeNode{failWriteAt: -1, corrupt: true})
+	src, _ := randomFile(t, t.TempDir(), 2*cpChunk, 0o644)
+	dst := filepath.Join(t.TempDir(), "out.bin")
+	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runCp(c, []string{src, "box:" + dst})
+	if err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("got %v, want a digest mismatch", err)
+	}
 	assertFile(t, dst, []byte("old"), 0o644)
 }
 

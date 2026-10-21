@@ -509,9 +509,13 @@ type NotifyWebhookSpec struct {
 
 // --- Audit Logs ---
 
-// GET /api/audit-logs?node_id=&keyword=&from=&to=&page=&page_size=
+// GET /api/audit-logs?id=&node_id=&keyword=&from=&to=&page=&page_size=&metadata.<key>=
+//
+// metadata.<key> parameters are read off the raw query, not bound here; see
+// the handler.
 type AuditLogQuery struct {
 	PaginationQuery
+	ID      *uint   `form:"id"`
 	NodeID  *string `form:"node_id"`
 	Keyword *string `form:"keyword"`
 	From    *string `form:"from"` // RFC3339
@@ -519,16 +523,22 @@ type AuditLogQuery struct {
 }
 
 type AuditLogItem struct {
-	ID         uint      `json:"id"`
-	NodeID     string    `json:"node_id"`
-	NodeName   string    `json:"node_name"`
-	Actor      string    `json:"actor,omitempty"` // username that ran it
-	Command    string    `json:"command"`
-	ExitCode   *int      `json:"exit_code,omitempty"`
-	Stdout     *string   `json:"stdout,omitempty"`
-	Stderr     *string   `json:"stderr,omitempty"`
-	DurationMS *int64    `json:"duration_ms,omitempty"`
-	Confirmed  bool      `json:"confirmed"`
-	Source     string    `json:"source"` // webui, terminal, api, cli
-	CreatedAt  time.Time `json:"created_at"`
+	ID       uint    `json:"id"`
+	NodeID   string  `json:"node_id"`
+	NodeName string  `json:"node_name"`
+	Actor    string  `json:"actor,omitempty"` // username that ran it
+	Command  string  `json:"command"`
+	ExitCode *int    `json:"exit_code,omitempty"`
+	Stdout   *string `json:"stdout,omitempty"`
+	Stderr   *string `json:"stderr,omitempty"`
+	// OutputRedacted means the caller kept stdout/stderr out of the log; the
+	// digests are what is left of them.
+	OutputRedacted bool              `json:"output_redacted"`
+	StdoutDigest   *OutputDigest     `json:"stdout_digest,omitempty"`
+	StderrDigest   *OutputDigest     `json:"stderr_digest,omitempty"`
+	DurationMS     *int64            `json:"duration_ms,omitempty"`
+	Confirmed      bool              `json:"confirmed"`
+	Source         string            `json:"source"` // webui, terminal, api, cli
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
 }
