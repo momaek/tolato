@@ -55,7 +55,7 @@ Under the hood the agent drives the CLI — `tolato nodes list`, `tolato exec we
                                 └─────────┘
 ```
 
-- **server/** — Gin HTTP + WebSocket, GORM/Postgres, external API for the CLI, MCP endpoint, permissions and audit, probe/alert engine, notifications, JWT + API-key auth. Also serves `/skill.md` and mirrors release assets under `/releases/`.
+- **server/** — Gin HTTP + WebSocket, GORM/Postgres, external API (`/api/v1`) for the CLI, permissions and audit, probe/alert engine, notifications, JWT + API-key auth. Also serves `/skill.md` and mirrors release assets under `/releases/`.
 - **agent/** — Binary running on managed nodes. Command executor, file transfer, system metrics collector, ICMP/TCP/bandwidth probes. Registers via one-time token; persistent identity in `~/.tolato`.
 - **cli/** — The `tolato` command your AI agent drives: `nodes`, `exec`, `cp`, `auth`, `profile`.
 - **skills/** — The skill that teaches a coding agent how to use the CLI safely.
@@ -198,32 +198,13 @@ export TOLATO_URL=https://tolato.example.com
 export TOLATO_API_KEY=tlat_...
 ```
 
-### MCP
+### Scripts, via the HTTP API
 
-For MCP clients that can't run a CLI, Tolato also exposes a [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at `/mcp`. It authenticates with an API key — create one in **Settings → API Keys** with the permission tier you want, then:
-
-```sh
-claude mcp add --transport http tolato https://tolato.example.com/mcp \
-  --header "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx"
-```
-
-Tools exposed:
-
-| Tool | What it does |
-|---|---|
-| `list_nodes` | All nodes with status, region, and live CPU/mem/disk |
-| `get_node` | Single-node detail (hardware, OS/kernel, agent version, metrics, `extra` metadata/notes) |
-| `edit_node` | Update a node's alias and `extra` metadata (provider, expiry, notes, …). Read-only keys are rejected. |
-| `execute_command` | Run a shell command on a node. Read-only keys are rejected; sensitive commands (rm, reboot, …) return `needs_confirmation` and require `confirm: true` on retry; blacklisted commands are refused. Every call is written to the audit log with `source = "mcp"`. |
-| `web_fetch` | Fetch a public URL via the server's configured Jina Reader and return Markdown |
-
-The transport is plain JSON-RPC 2.0 over HTTP — no streaming, no session header. A quick smoke test:
+The CLI is a thin client over the external API under `/api/v1` (list/get nodes, run a command, file operations). Scripts can call it directly with the same kind of key, sent as `Authorization: Bearer tlat_...`; the key's permission tier applies just as it does for the CLI.
 
 ```sh
-curl -s https://tolato.example.com/mcp \
-  -H "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
+curl -s https://tolato.example.com/api/v1/nodes \
+  -H "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx" | jq
 ```
 
 ### Web chat (optional)

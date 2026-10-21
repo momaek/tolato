@@ -8,8 +8,7 @@ import (
 )
 
 // executeWebFetch adapts the shared webfetch package into a ToolResultItem for
-// the LLM tool loop. The fetch core lives in internal/webfetch so the MCP
-// handler can reuse it without pulling in this package.
+// the LLM tool loop. The fetch core lives in internal/webfetch.
 func (te *ToolExecutor) executeWebFetch(ctx context.Context, target string) *model.ToolResultItem {
 	res, err := webfetch.Fetch(ctx, te.settings, target)
 	if err != nil {

@@ -56,7 +56,7 @@
                                 └─────────┘
 ```
 
-- **server/** —— Gin HTTP + WebSocket、GORM / Postgres、给 CLI 用的外部 API、MCP 端点、权限与审计、探测 / 告警引擎、离线通知、JWT + API-key 认证。同时提供 `/skill.md`，并在 `/releases/` 下镜像 release 资源。
+- **server/** —— Gin HTTP + WebSocket、GORM / Postgres、给 CLI 用的外部 API（`/api/v1`）、权限与审计、探测 / 告警引擎、离线通知、JWT + API-key 认证。同时提供 `/skill.md`，并在 `/releases/` 下镜像 release 资源。
 - **agent/** —— 跑在被管理节点上的二进制。命令执行、文件传输、系统指标采集、ICMP / TCP / 带宽探测。通过一次性 token 注册，持久身份写入 `~/.tolato`。
 - **cli/** —— 你的 AI 助手调用的 `tolato` 命令：`nodes`、`exec`、`cp`、`auth`、`profile`。
 - **skills/** —— 教编码助手安全使用 CLI 的 skill。
@@ -199,32 +199,13 @@ export TOLATO_URL=https://tolato.example.com
 export TOLATO_API_KEY=tlat_...
 ```
 
-### MCP
+### 脚本：直接调 HTTP API
 
-不能跑 CLI 的 MCP 客户端，可以用 Tolato 内置的 [Model Context Protocol](https://modelcontextprotocol.io/) 端点 `/mcp`。它用 API key 鉴权 —— 在 **设置 → API Keys** 里生成一个、选好权限级别，然后：
-
-```sh
-claude mcp add --transport http tolato https://tolato.example.com/mcp \
-  --header "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx"
-```
-
-暴露的工具:
-
-| 工具 | 作用 |
-|---|---|
-| `list_nodes` | 列出所有节点,带状态、区域、实时 CPU/内存/磁盘 |
-| `get_node` | 单节点详情(硬件、OS/kernel、agent 版本、metrics、`extra` 备注元数据) |
-| `edit_node` | 更新节点的别名和 `extra` 备注元数据(供应商、到期日、笔记等)。readonly key 直接拒绝。 |
-| `execute_command` | 在节点上执行 shell 命令。readonly key 直接拒绝;敏感命令(rm、reboot 等)返回 `needs_confirmation`,需要重试时带上 `confirm: true`;黑名单命令直接拒绝。所有调用都会写审计日志,`source = "mcp"`。 |
-| `web_fetch` | 通过服务器配置的 Jina Reader 抓取公开 URL,返回 Markdown |
-
-传输协议就是裸 JSON-RPC 2.0 over HTTP —— 不走流式,不依赖会话头。快速 smoke test:
+CLI 本身就是 `/api/v1` 下外部 API 的一层薄封装（列出 / 查看节点、执行命令、文件操作）。脚本可以用同样的 key 直接调用，放在 `Authorization: Bearer tlat_...` 头里；key 的权限级别和 CLI 一样生效。
 
 ```sh
-curl -s https://tolato.example.com/mcp \
-  -H "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
+curl -s https://tolato.example.com/api/v1/nodes \
+  -H "Authorization: Bearer tlat_xxxxxxxxxxxxxxxx" | jq
 ```
 
 ### 网页对话（可选）

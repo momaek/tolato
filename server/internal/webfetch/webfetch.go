@@ -1,7 +1,7 @@
 // Package webfetch fetches a remote URL through a configured upstream (Jina
 // Reader today) and returns its readable Markdown rendering. The package is
-// settings-driven and has no transport-specific dependencies, so it is shared
-// by the agent tool executor and the MCP handler.
+// settings-driven and has no transport-specific dependencies, so the agent tool
+// executor can use it without pulling in fetch details.
 package webfetch
 
 import (
@@ -26,7 +26,7 @@ import (
 const jinaReaderBase = "https://r.jina.ai/"
 
 // Result is the structured outcome of a fetch. Callers serialize it into their
-// transport-specific result type (ToolResultItem for the LLM loop, JSON for MCP).
+// transport-specific result type (ToolResultItem for the LLM loop).
 type Result struct {
 	URL         string `json:"url"`
 	Source      string `json:"source"`
