@@ -102,26 +102,28 @@ const (
 
 // Server -> Agent event types
 const (
-	AgentTypeCommand     = "command"
-	AgentTypePTYOpen     = "pty_open"
-	AgentTypePTYInput    = "pty_input"
-	AgentTypePTYResize   = "pty_resize"
-	AgentTypePTYClose    = "pty_close"
-	AgentTypeFileOp      = "file_op"
-	AgentTypeUpdate      = "update"
+	AgentTypeCommand   = "command"
+	AgentTypePTYOpen   = "pty_open"
+	AgentTypePTYInput  = "pty_input"
+	AgentTypePTYResize = "pty_resize"
+	AgentTypePTYClose  = "pty_close"
+	AgentTypeFileOp    = "file_op"
+	AgentTypeUpdate    = "update"
 )
 
 // --- Agent -> Server payloads ---
 
 type AgentRegisterPayload struct {
-	Hostname      string `json:"hostname"`
-	OS            string `json:"os"`
-	Kernel        string `json:"kernel"`
-	IP            string `json:"ip"`
-	AgentVersion  string `json:"agent_version"`
-	CPUCores      int    `json:"cpu_cores"`
-	MemoryTotalMB int    `json:"memory_total_mb"`
-	DiskTotalGB   int    `json:"disk_total_gb"`
+	NodeExporterEnabled    bool    `json:"node_exporter_enabled,omitempty"`
+	MetricsIntervalSeconds float64 `json:"metrics_interval_seconds,omitempty"`
+	Hostname               string  `json:"hostname"`
+	OS                     string  `json:"os"`
+	Kernel                 string  `json:"kernel"`
+	IP                     string  `json:"ip"`
+	AgentVersion           string  `json:"agent_version"`
+	CPUCores               int     `json:"cpu_cores"`
+	MemoryTotalMB          int     `json:"memory_total_mb"`
+	DiskTotalGB            int     `json:"disk_total_gb"`
 }
 
 type AgentHeartbeatPayload struct {
@@ -155,15 +157,16 @@ type AgentUpdateResultPayload struct {
 // --- Server -> Agent payloads ---
 
 type AgentCommandPayload struct {
-	Action  string `json:"action"`  // "execute_command"
+	Action  string `json:"action"` // "execute_command"
 	Command string `json:"command"`
 	Timeout int    `json:"timeout"` // seconds
 }
 
 // AgentAuthResponse is sent to the agent after successful token validation.
 type AgentAuthResponse struct {
-	NodeID string `json:"node_id"`
-	Secret string `json:"secret"`
+	MetricsVersion int    `json:"metrics_version,omitempty"`
+	NodeID         string `json:"node_id"`
+	Secret         string `json:"secret"`
 }
 
 // ============================================================================
@@ -247,12 +250,12 @@ type AgentFileResultPayload struct {
 
 const (
 	// Client -> Server
-	WSTermTypeAuth    = "auth"
-	WSTermTypeOpen    = "open"
-	WSTermTypeInput   = "input"
-	WSTermTypeResize  = "resize"
-	WSTermTypeClose   = "close"
-	WSTermTypeFileOp  = "file_op"
+	WSTermTypeAuth   = "auth"
+	WSTermTypeOpen   = "open"
+	WSTermTypeInput  = "input"
+	WSTermTypeResize = "resize"
+	WSTermTypeClose  = "close"
+	WSTermTypeFileOp = "file_op"
 
 	// Server -> Client
 	WSTermTypeAuthOK     = "auth_ok"
@@ -315,6 +318,6 @@ type WSTermErrorPayload struct {
 }
 
 type WSTermFileResultPayload struct {
-	ReqID string                  `json:"req_id"`
+	ReqID  string                 `json:"req_id"`
 	Result AgentFileResultPayload `json:"result"`
 }

@@ -68,14 +68,16 @@ type WSMessage struct {
 
 // RegisterPayload is sent from agent to server on connect.
 type RegisterPayload struct {
-	Hostname      string `json:"hostname"`
-	OS            string `json:"os"`
-	Kernel        string `json:"kernel"`
-	IP            string `json:"ip"`
-	AgentVersion  string `json:"agent_version"`
-	CPUCores      int    `json:"cpu_cores"`
-	MemoryTotalMB int    `json:"memory_total_mb"`
-	DiskTotalGB   int    `json:"disk_total_gb"`
+	NodeExporterEnabled    bool    `json:"node_exporter_enabled,omitempty"`
+	MetricsIntervalSeconds float64 `json:"metrics_interval_seconds,omitempty"`
+	Hostname               string  `json:"hostname"`
+	OS                     string  `json:"os"`
+	Kernel                 string  `json:"kernel"`
+	IP                     string  `json:"ip"`
+	AgentVersion           string  `json:"agent_version"`
+	CPUCores               int     `json:"cpu_cores"`
+	MemoryTotalMB          int     `json:"memory_total_mb"`
+	DiskTotalGB            int     `json:"disk_total_gb"`
 }
 
 // HeartbeatPayload is the periodic metrics report.
@@ -104,8 +106,9 @@ type CommandResultPayload struct {
 
 // RegisterAckPayload is received from the server after registration.
 type RegisterAckPayload struct {
-	NodeID string `json:"node_id"`
-	Secret string `json:"secret"`
+	MetricsVersion int    `json:"metrics_version,omitempty"`
+	NodeID         string `json:"node_id"`
+	Secret         string `json:"secret"`
 }
 
 // --- PTY / File op payloads (agent side) ---
@@ -156,8 +159,9 @@ type Client struct {
 	identityStore *identity.Store
 	ident         *identity.Identity
 
-	collector *collector.Collector
-	executor  *executor.Executor
+	nodeExporter *metricsConfig
+	collector    *collector.Collector
+	executor     *executor.Executor
 
 	conn   *websocket.Conn
 	connMu sync.Mutex // protects conn writes
@@ -287,12 +291,17 @@ func (c *Client) connectAndServe() error {
 		c.heartbeatLoop(connCtx, conn)
 	}()
 
+	// Wait for capability negotiation before collecting or sending metrics.
+	metricsReady := make(chan int, 1)
+	metricsDone := make(chan struct{})
+	go func() { defer close(metricsDone); c.metricsLoop(connCtx, conn, metricsReady) }()
 	// Read loop (blocks until error)
-	err = c.readLoop(conn)
+	err = c.readLoop(conn, metricsReady)
 
 	// Cancel heartbeat and wait for it
 	connCancel()
 	<-heartbeatDone
+	<-metricsDone
 
 	return err
 }
@@ -323,16 +332,20 @@ func (c *Client) sendRegister() error {
 	sysInfo := c.collector.GetSystemInfo()
 
 	payload := RegisterPayload{
-		Hostname:      sysInfo.Hostname,
-		OS:            sysInfo.OS,
-		Kernel:        sysInfo.Kernel,
-		IP:            sysInfo.IP,
-		AgentVersion:  Version,
-		CPUCores:      sysInfo.CPUCores,
-		MemoryTotalMB: sysInfo.MemoryTotalMB,
-		DiskTotalGB:   sysInfo.DiskTotalGB,
+		NodeExporterEnabled: c.nodeExporter != nil,
+		Hostname:            sysInfo.Hostname,
+		OS:                  sysInfo.OS,
+		Kernel:              sysInfo.Kernel,
+		IP:                  sysInfo.IP,
+		AgentVersion:        Version,
+		CPUCores:            sysInfo.CPUCores,
+		MemoryTotalMB:       sysInfo.MemoryTotalMB,
+		DiskTotalGB:         sysInfo.DiskTotalGB,
 	}
 
+	if c.nodeExporter != nil {
+		payload.MetricsIntervalSeconds = c.nodeExporter.interval.Seconds()
+	}
 	return c.sendMessage("register", "", payload)
 }
 
@@ -384,7 +397,7 @@ func (c *Client) sendMessageWait(msgType, id string, payload interface{}, wait t
 }
 
 // readLoop reads messages from the server until an error occurs.
-func (c *Client) readLoop(conn *websocket.Conn) error {
+func (c *Client) readLoop(conn *websocket.Conn, metricsReady chan<- int) error {
 	for {
 		var msg WSMessage
 		err := conn.ReadJSON(&msg)
@@ -401,6 +414,13 @@ func (c *Client) readLoop(conn *websocket.Conn) error {
 		switch msg.Type {
 		case "register_ack":
 			c.handleRegisterAck(msg)
+			var ack RegisterAckPayload
+			if json.Unmarshal(msg.Payload, &ack) == nil {
+				select {
+				case metricsReady <- ack.MetricsVersion:
+				default:
+				}
+			}
 		case "command":
 			go c.handleCommand(msg)
 		case "update":

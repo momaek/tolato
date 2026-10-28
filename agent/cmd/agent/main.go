@@ -1,13 +1,16 @@
 package main
 
 import (
-	"flag"
 	"fmt"
+	"github.com/alecthomas/kingpin/v2"
+	"github.com/momaek/tolato/agent/internal/nodeexporter"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/momaek/tolato/agent/internal/client"
 	"github.com/momaek/tolato/agent/internal/collector"
@@ -23,11 +26,15 @@ func main() {
 		showVersion bool
 	)
 
-	flag.StringVar(&serverURL, "server", "", "Server WebSocket URL (required, e.g. ws://localhost:8080/ws/agent)")
-	flag.StringVar(&token, "token", "", "One-time registration token (required for first run)")
-	flag.StringVar(&dataDir, "data-dir", "", "Data directory for identity storage (default: ~/.tolato)")
-	flag.BoolVar(&showVersion, "version", false, "Print the agent version and exit")
-	flag.Parse()
+	enabled := kingpin.Flag("node-exporter.enabled", "Enable embedded node_exporter collection over the server WebSocket.").Default("false").Bool()
+	interval := kingpin.Flag("node-exporter.interval", "Metrics collection interval (minimum 5s).").Default("30s").Duration()
+	timeout := kingpin.Flag("node-exporter.timeout", "Collection deadline; timed-out collectors cannot overlap subsequent runs.").Default("10s").Duration()
+	kingpin.Flag("server", "Server WebSocket URL (required, e.g. ws://localhost:8080/ws/agent)").StringVar(&serverURL)
+	kingpin.Flag("token", "One-time registration token (required for first run)").StringVar(&token)
+	kingpin.Flag("data-dir", "Data directory for identity storage (default: ~/.tolato)").StringVar(&dataDir)
+	kingpin.Flag("version", "Print the agent version and exit").BoolVar(&showVersion)
+	kingpin.CommandLine.HelpFlag.Short('h')
+	kingpin.Parse()
 
 	// --version prints just the version string; the self-update flow relies on
 	// this to verify a freshly downloaded binary before swapping it in.
@@ -38,7 +45,7 @@ func main() {
 
 	if serverURL == "" {
 		fmt.Fprintln(os.Stderr, "error: --server is required")
-		flag.Usage()
+		kingpin.Usage()
 		os.Exit(1)
 	}
 
@@ -63,7 +70,7 @@ func main() {
 	} else {
 		if token == "" {
 			fmt.Fprintln(os.Stderr, "error: --token is required for first run (no existing identity found)")
-			flag.Usage()
+			kingpin.Usage()
 			os.Exit(1)
 		}
 		log.Println("no existing identity, will register with token")
@@ -73,6 +80,17 @@ func main() {
 	col := collector.NewCollector()
 	exec := executor.NewExecutor()
 	wsClient := client.NewClient(serverURL, token, store, ident, col, exec)
+
+	if *enabled {
+		if *interval < 5*time.Second || *interval > time.Hour || *timeout <= 0 || *timeout > *interval {
+			log.Fatal("node-exporter.interval must be between 5s and 1h; timeout must be positive and <= interval")
+		}
+		exporter, err := nodeexporter.New(slog.Default())
+		if err != nil {
+			log.Fatalf("initialize node_exporter: %v", err)
+		}
+		wsClient.EnableNodeExporter(exporter, *interval, *timeout)
+	}
 
 	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)

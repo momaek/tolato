@@ -36,7 +36,7 @@ func serveOne(t *testing.T, nm *NodeManager, nodeID string) (wsURL string, acCh 
 		ac := nm.RegisterConn(nodeID, conn)
 		ch <- ac
 		<-ac.Done()
-		nm.RemoveConn(nodeID)
+		nm.RemoveConn(nodeID, ac)
 	}))
 	t.Cleanup(srv.Close)
 	return "ws" + strings.TrimPrefix(srv.URL, "http"), ch
