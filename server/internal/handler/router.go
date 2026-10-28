@@ -198,6 +198,7 @@ func SetupRouter(deps *Deps) *gin.Engine {
 	// External API (API Key auth)
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.APIKeyAuth())
+	v1.GET("/metrics", ExternalMetrics(deps))
 	v1.GET("/nodes", ExternalListNodes(deps))
 	v1.GET("/nodes/:id", ExternalGetNode(deps))
 	v1.POST("/nodes/:id/execute", ExternalExecuteCommand(deps))

@@ -50,3 +50,10 @@ auth:
   # CHANGE ME — login credentials for the web UI.
   username: admin
   password: admin
+
+# Node metrics received over the agent WebSocket. Prometheus scrapes
+# /api/v1/metrics with a Bearer API key and sees only its owner's visible nodes.
+metrics:
+  # 0s = three times each agent's configured node-exporter.interval.
+  # Expired snapshots are omitted; tolato status metrics remain available.
+  freshness_ttl: 0s

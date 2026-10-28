@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -9,12 +10,18 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
+	Metrics  MetricsConfig  `yaml:"metrics"`
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
 	Security SecurityConfig `yaml:"security"`
 	Defaults DefaultsConfig `yaml:"defaults"`
 	Auth     AuthConfig     `yaml:"auth"`
 	GeoIP    GeoIPConfig    `yaml:"geoip"`
+}
+
+// MetricsConfig controls the server cache. Zero TTL follows each agent's interval.
+type MetricsConfig struct {
+	FreshnessTTL time.Duration `yaml:"freshness_ttl"`
 }
 
 type GeoIPConfig struct {
@@ -127,5 +134,8 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if cfg.Metrics.FreshnessTTL < 0 {
+		return nil, fmt.Errorf("metrics.freshness_ttl must not be negative")
+	}
 	return cfg, nil
 }

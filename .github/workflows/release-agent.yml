@@ -22,25 +22,33 @@ permissions:
 jobs:
   build:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - goos: linux
             goarch: amd64
+            runner: ubuntu-latest
+            cgo: '0'
           - goos: linux
             goarch: arm64
+            runner: ubuntu-latest
+            cgo: '0'
           - goos: darwin
             goarch: amd64
+            runner: macos-15
+            cgo: '1'
           - goos: darwin
             goarch: arm64
+            runner: macos-15
+            cgo: '1'
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.25'
           cache-dependency-path: agent/go.sum
 
       - name: build
@@ -48,7 +56,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '0'
+          CGO_ENABLED: ${{ matrix.cgo }}
           # Tag push → e.g. "agent-v0.2.0"; manual run → branch name. The
           # self-update flow compares this to the running version, so it must be
           # accurate. Strip the "agent-" tag prefix so the reported version is
@@ -59,7 +67,7 @@ jobs:
           OUT="tolato-agent-${GOOS}-${GOARCH}"
           LDFLAGS="-s -w -X github.com/momaek/tolato/agent/internal/client.Version=${VERSION}"
           go build -trimpath -ldflags "${LDFLAGS}" -o "../dist/${OUT}" ./cmd/agent
-          (cd ../dist && sha256sum "${OUT}" > "${OUT}.sha256")
+          (cd ../dist && shasum -a 256 "${OUT}" > "${OUT}.sha256")
 
       - uses: actions/upload-artifact@v4
         with:

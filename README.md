@@ -32,6 +32,10 @@ Under the hood the agent drives the CLI — `tolato nodes list`, `tolato exec we
 - **Team access.** Users, groups and per-node-group grants decide who can see and who can operate which machines; SSO via OIDC with group sync.
 - **Several fleets.** The CLI keeps one profile per server, so a work fleet and a personal one live side by side — and the skill makes the agent name the profile on every command once there's more than one.
 
+## Prometheus monitoring
+
+Enable the embedded upstream node_exporter with `--node-exporter.enabled` on tolato-agent. One binary and service per node sends metrics over the existing WebSocket; Prometheus scrapes the server's authenticated `/api/v1/metrics` endpoint. Collection is disabled by default. See [configuration, collector options, and dashboard queries](docs/prometheus.md).
+
 ## Screenshots
 
 | Nodes inventory | Audit log |

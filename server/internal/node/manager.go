@@ -73,9 +73,10 @@ type SystemHandlers struct {
 
 // AgentConn represents a connected agent with a message router.
 type AgentConn struct {
-	NodeID  string
-	Conn    *websocket.Conn
-	Metrics *model.NodeMetrics // cached metrics from last heartbeat
+	exporter exporterCache
+	NodeID   string
+	Conn     *websocket.Conn
+	Metrics  *model.NodeMetrics // cached metrics from last heartbeat
 
 	writeMu sync.Mutex
 
@@ -298,7 +299,13 @@ func (ac *AgentConn) dispatch(msg *AgentFrame) {
 		if ac.handlers.OnHeartbeat != nil {
 			ac.handlers.OnHeartbeat(msg.Payload)
 		}
+	case "node_metrics":
+		ac.acceptNodeMetrics(msg.Payload)
 	case model.AgentTypeRegister:
+		var reg model.AgentRegisterPayload
+		if json.Unmarshal(msg.Payload, &reg) == nil {
+			ac.ConfigureExporter(reg)
+		}
 		if ac.handlers.OnReRegister != nil {
 			ac.handlers.OnReRegister(msg.Payload)
 		}
@@ -326,7 +333,7 @@ func NewNodeManager() *NodeManager {
 
 // RegisterConn registers a new agent connection and starts its read loop.
 // Any existing connection for the same node is closed first.
-func (m *NodeManager) RegisterConn(nodeID string, conn *websocket.Conn) *AgentConn {
+func (m *NodeManager) RegisterConn(nodeID string, conn *websocket.Conn, setup ...func(*AgentConn)) *AgentConn {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -343,19 +350,29 @@ func (m *NodeManager) RegisterConn(nodeID string, conn *websocket.Conn) *AgentCo
 	}
 	m.conns[nodeID] = ac
 
+	for _, configure := range setup {
+		configure(ac)
+	}
 	go ac.run()
 	return ac
 }
 
-// RemoveConn removes an agent connection (called after run() returns).
-func (m *NodeManager) RemoveConn(nodeID string) {
+// RemoveConn removes an agent connection (called after run() returns). If an
+// expected connection is provided, a superseded handler cannot remove its
+// replacement. The result tells the caller whether it should notify disconnect.
+func (m *NodeManager) RemoveConn(nodeID string, expected ...*AgentConn) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ac, ok := m.conns[nodeID]; ok {
+		if len(expected) > 0 && ac != expected[0] {
+			return false
+		}
 		// Ensure run() has terminated / resources released.
 		_ = ac.Conn.Close()
 		delete(m.conns, nodeID)
+		return true
 	}
+	return false
 }
 
 // CloseConn closes the socket of a node that is still registered here but has
@@ -405,8 +422,8 @@ func (m *NodeManager) GetMetrics(nodeID string) *model.NodeMetrics {
 
 // UpdateMetrics updates the cached metrics for a node.
 func (m *NodeManager) UpdateMetrics(nodeID string, metrics *model.NodeMetrics) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if ac, ok := m.conns[nodeID]; ok {
 		ac.Metrics = metrics
 	}

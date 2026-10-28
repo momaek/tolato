@@ -5,6 +5,7 @@
 # Usage (typically via the command shown in the Web UI):
 #   curl -fsSL http://<server>/install.sh | bash -s -- --token <token> --server <host:port>
 #
+# Optional: --node-exporter.enabled enables the embedded upstream node_exporter.
 # Env overrides:
 #   TOLATO_AGENT_VERSION   release tag to install (default: latest)
 #   TOLATO_REPO            github repo slug       (default: momaek/tolato)
@@ -24,6 +25,7 @@ VERSION="${TOLATO_AGENT_VERSION:-latest}"
 
 TOKEN=""
 SERVER=""
+NODE_EXPORTER_ARG=""
 
 # ----- parse args -------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -32,6 +34,7 @@ while [[ $# -gt 0 ]]; do
     --token=*)  TOKEN="${1#*=}"; shift ;;
     --server)   SERVER="$2"; shift 2 ;;
     --server=*) SERVER="${1#*=}"; shift ;;
+    --node-exporter.enabled) NODE_EXPORTER_ARG=" --node-exporter.enabled"; shift ;;
     -h|--help)
       sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
@@ -151,7 +154,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=${INSTALL_DIR}/${BIN_NAME} --server ${WS_URL} --token ${TOKEN} --data-dir ${DATA_DIR}
+ExecStart=${INSTALL_DIR}/${BIN_NAME} --server ${WS_URL} --token ${TOKEN} --data-dir ${DATA_DIR}${NODE_EXPORTER_ARG}
 Restart=always
 RestartSec=5
 # Note: --token is only used on first run; subsequent restarts reuse the stored identity.
@@ -168,6 +171,6 @@ EOF
 else
   cat <<EOF
 >>> systemd not detected. Run manually:
-    ${INSTALL_DIR}/${BIN_NAME} --server ${WS_URL} --token ${TOKEN} --data-dir ${DATA_DIR}
+    ${INSTALL_DIR}/${BIN_NAME} --server ${WS_URL} --token ${TOKEN} --data-dir ${DATA_DIR}${NODE_EXPORTER_ARG}
 EOF
 fi

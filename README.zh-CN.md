@@ -33,6 +33,10 @@
 - **团队协作。** 用户、用户组、按节点组授权，决定谁能看、谁能操作哪些机器；支持 OIDC 单点登录和用户组同步。
 - **多套部署。** CLI 按 server 分 profile，公司和个人的机器可以并存；一旦有多个 profile，skill 会要求助手每条命令都写明用哪个。
 
+## Prometheus 监控
+
+给 tolato-agent 添加 `--node-exporter.enabled`，即可启用内置的完整上游 node_exporter collector 能力。每台机器仍只需一个二进制和一个服务，指标经现有 WebSocket 发送到 server，由 Prometheus 抓取鉴权后的 `/api/v1/metrics`。默认关闭，可按上游配置单独启停 collector。详见 [配置、采集项和 Grafana 查询示例](docs/prometheus.md)。
+
 ## 截图
 
 | 节点列表 | 审计日志 |

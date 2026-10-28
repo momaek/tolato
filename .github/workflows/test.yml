@@ -1,0 +1,65 @@
+name: test
+
+on:
+  pull_request:
+    paths:
+      - 'agent/**'
+      - 'server/**'
+      - 'scripts/install.sh'
+      - '.github/workflows/test.yml'
+      - '.github/workflows/release-agent.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'agent/**'
+      - 'server/**'
+      - 'scripts/install.sh'
+      - '.github/workflows/test.yml'
+      - '.github/workflows/release-agent.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: agent/go.sum
+      - run: go test -race ./...
+        working-directory: agent
+      - run: bash -n scripts/install.sh
+
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: tolato-test-only
+          POSTGRES_DB: tolato_metrics_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: server/go.sum
+      - run: go test -race ./...
+        working-directory: server
+        env:
+          TOLATO_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=tolato-test-only dbname=tolato_metrics_test sslmode=disable

@@ -207,3 +207,18 @@ func ListStaleOnlineNodes(threshold time.Duration) ([]model.Node, error) {
 		Find(&nodes).Error
 	return nodes, err
 }
+
+// ListMetricsNodesScoped returns metadata for all visible nodes without the
+// interactive API's page limit. Metrics must not silently omit nodes after 200.
+func ListMetricsNodesScoped(visibleIDs []string, unrestricted bool) ([]model.Node, error) {
+	var nodes []model.Node
+	q := DB.Model(&model.Node{}).Select("id", "name", "alias", "ip")
+	if !unrestricted {
+		if len(visibleIDs) == 0 {
+			return nodes, nil
+		}
+		q = q.Where("id IN ?", visibleIDs)
+	}
+	err := q.Order("id ASC").Find(&nodes).Error
+	return nodes, err
+}

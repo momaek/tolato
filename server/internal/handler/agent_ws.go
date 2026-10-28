@@ -12,7 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/momaek/tolato/server/internal/geoip"
 	"github.com/momaek/tolato/server/internal/model"
-	"github.com/momaek/tolato/server/internal/node"
+	agentnode "github.com/momaek/tolato/server/internal/node"
 	"github.com/momaek/tolato/server/internal/store"
 )
 
@@ -128,8 +128,9 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			ack := model.WSMessage{
 				Type: "register_ack",
 				Payload: model.AgentAuthResponse{
-					NodeID: existingNode.ID,
-					Secret: existingNode.AgentSecret,
+					NodeID:         existingNode.ID,
+					Secret:         existingNode.AgentSecret,
+					MetricsVersion: 1,
 				},
 			}
 			if err := conn.WriteJSON(ack); err != nil {
@@ -137,14 +138,17 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				return
 			}
 
-			ac := deps.NodeManager.RegisterConn(existingNode.ID, conn)
-			installSystemHandlers(deps, existingNode.ID, clientIP, ac)
+			ac := deps.NodeManager.RegisterConn(existingNode.ID, conn, func(ac *agentnode.AgentConn) {
+				installSystemHandlers(deps, existingNode.ID, clientIP, ac)
+			})
 			defer func() {
-				deps.NodeManager.RemoveConn(existingNode.ID)
+				removed := deps.NodeManager.RemoveConn(existingNode.ID, ac)
 				// A dropped WS doesn't prove the node is gone (a network blip looks
 				// identical to a crash), so defer the offline decision to the
 				// heartbeat-threshold monitor instead of alerting on every reconnect.
-				deps.Notifier.OnDisconnect(existingNode.ID)
+				if removed {
+					deps.Notifier.OnDisconnect(existingNode.ID)
+				}
 				log.Printf("Agent disconnected (reconnect): node=%s", existingNode.ID)
 			}()
 
@@ -187,7 +191,7 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 				return
 			}
 
-			var msg node.AgentFrame
+			var msg agentnode.AgentFrame
 			if err := json.Unmarshal(raw, &msg); err != nil {
 				log.Printf("Failed to parse agent message: %v", err)
 				continue
@@ -233,8 +237,9 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			ack := model.WSMessage{
 				Type: "register_ack",
 				Payload: model.AgentAuthResponse{
-					NodeID: node.ID,
-					Secret: agentSecret,
+					NodeID:         node.ID,
+					Secret:         agentSecret,
+					MetricsVersion: 1,
 				},
 			}
 			if err := conn.WriteJSON(ack); err != nil {
@@ -243,13 +248,17 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			}
 
 			// Register connection
-			ac := deps.NodeManager.RegisterConn(node.ID, conn)
-			installSystemHandlers(deps, node.ID, clientIP, ac)
+			ac := deps.NodeManager.RegisterConn(node.ID, conn, func(ac *agentnode.AgentConn) {
+				ac.ConfigureExporter(reg)
+				installSystemHandlers(deps, node.ID, clientIP, ac)
+			})
 			defer func() {
-				deps.NodeManager.RemoveConn(node.ID)
+				removed := deps.NodeManager.RemoveConn(node.ID, ac)
 				// See the reconnect path above: let the monitor's threshold decide
 				// offline so flaps don't fire spurious offline/recovery pairs.
-				deps.Notifier.OnDisconnect(node.ID)
+				if removed {
+					deps.Notifier.OnDisconnect(node.ID)
+				}
 				log.Printf("Agent disconnected (new): node=%s", node.ID)
 			}()
 
@@ -268,8 +277,8 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 //
 // clientIP is the public source IP captured at WebSocket upgrade time, or
 // empty when the connection came from a private/loopback address.
-func installSystemHandlers(deps *Deps, nodeID, clientIP string, ac *node.AgentConn) {
-	ac.SetSystemHandlers(node.SystemHandlers{
+func installSystemHandlers(deps *Deps, nodeID, clientIP string, ac *agentnode.AgentConn) {
+	ac.SetSystemHandlers(agentnode.SystemHandlers{
 		OnHeartbeat: func(payload json.RawMessage) {
 			handleAgentHeartbeat(deps, nodeID, payload)
 		},
