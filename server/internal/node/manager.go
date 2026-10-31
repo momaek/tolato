@@ -80,10 +80,11 @@ type AgentConn struct {
 
 	writeMu sync.Mutex
 
-	mu       sync.Mutex
-	pending  map[string]chan *AgentFrame // one-shot request id → reply
-	streams  map[string]chan *AgentFrame // long-lived stream id → frames
-	handlers SystemHandlers
+	mu              sync.Mutex
+	pending         map[string]chan *AgentFrame // one-shot request id → reply
+	streams         map[string]chan *AgentFrame // long-lived stream id → frames
+	handlers        SystemHandlers
+	servicesVersion int
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -305,6 +306,7 @@ func (ac *AgentConn) dispatch(msg *AgentFrame) {
 		var reg model.AgentRegisterPayload
 		if json.Unmarshal(msg.Payload, &reg) == nil {
 			ac.ConfigureExporter(reg)
+			ac.SetServicesVersion(reg.ServicesVersion)
 		}
 		if ac.handlers.OnReRegister != nil {
 			ac.handlers.OnReRegister(msg.Payload)

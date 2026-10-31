@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-
 	"github.com/momaek/tolato/agent/internal/collector"
 	"github.com/momaek/tolato/agent/internal/executor"
 	"github.com/momaek/tolato/agent/internal/files"
 	"github.com/momaek/tolato/agent/internal/identity"
+	"github.com/momaek/tolato/agent/internal/services"
 	"github.com/momaek/tolato/agent/internal/terminal"
 )
 
@@ -68,6 +68,7 @@ type WSMessage struct {
 
 // RegisterPayload is sent from agent to server on connect.
 type RegisterPayload struct {
+	ServicesVersion        int     `json:"services_version,omitempty"`
 	NodeExporterEnabled    bool    `json:"node_exporter_enabled,omitempty"`
 	MetricsIntervalSeconds float64 `json:"metrics_interval_seconds,omitempty"`
 	Hostname               string  `json:"hostname"`
@@ -160,6 +161,7 @@ type Client struct {
 	ident         *identity.Identity
 
 	nodeExporter *metricsConfig
+	services     *services.Manager
 	collector    *collector.Collector
 	executor     *executor.Executor
 
@@ -342,6 +344,9 @@ func (c *Client) sendRegister() error {
 		MemoryTotalMB:       sysInfo.MemoryTotalMB,
 		DiskTotalGB:         sysInfo.DiskTotalGB,
 	}
+	if c.services != nil {
+		payload.ServicesVersion = 1
+	}
 
 	if c.nodeExporter != nil {
 		payload.MetricsIntervalSeconds = c.nodeExporter.interval.Seconds()
@@ -435,6 +440,8 @@ func (c *Client) readLoop(conn *websocket.Conn, metricsReady chan<- int) error {
 			c.handlePTYClose(msg)
 		case "file_op":
 			go c.handleFileOp(msg)
+		case "service":
+			go c.handleService(conn, msg)
 		default:
 			log.Printf("[ws] unknown message type: %s", msg.Type)
 		}

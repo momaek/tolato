@@ -114,6 +114,7 @@ const (
 // --- Agent -> Server payloads ---
 
 type AgentRegisterPayload struct {
+	ServicesVersion        int     `json:"services_version,omitempty"`
 	NodeExporterEnabled    bool    `json:"node_exporter_enabled,omitempty"`
 	MetricsIntervalSeconds float64 `json:"metrics_interval_seconds,omitempty"`
 	Hostname               string  `json:"hostname"`

@@ -56,7 +56,19 @@ func (s *Store) Save(id *Identity) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, data, 0600)
+	f, err := os.CreateTemp(dir, ".identity-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), s.path)
 }
 
 // Path returns the identity file path (for logging).

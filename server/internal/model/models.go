@@ -263,8 +263,8 @@ type RegistrationToken struct {
 // --- Core: Audit Logs ---
 
 type AuditLog struct {
-	ID          uint      `json:"id" gorm:"primaryKey;autoIncrement"`
-	NodeID      string    `json:"node_id" gorm:"type:text;not null;index"`
+	ID          uint      `json:"id" gorm:"primaryKey;autoIncrement;index:idx_audit_logs_node_time_id,priority:3"`
+	NodeID      string    `json:"node_id" gorm:"type:text;not null;index;index:idx_audit_logs_node_time_id,priority:1"`
 	NodeName    string    `json:"node_name" gorm:"type:text"`
 	UserID      string    `json:"user_id,omitempty" gorm:"type:text;index"` // acting user; for api/cli it's the key owner
 	Actor       string    `json:"actor,omitempty" gorm:"type:text;index"`   // username snapshot for display; survives user deletion
@@ -285,7 +285,7 @@ type AuditLog struct {
 	// run id, the person it acted for). Stored verbatim and never interpreted;
 	// the GIN index serves the audit page's exact-match filter.
 	Metadata  map[string]string `json:"metadata,omitempty" gorm:"type:jsonb;serializer:json;index:idx_audit_logs_metadata,type:gin"`
-	CreatedAt time.Time         `json:"created_at" gorm:"autoCreateTime;index"`
+	CreatedAt time.Time         `json:"created_at" gorm:"autoCreateTime;index;index:idx_audit_logs_node_time_id,priority:2"`
 }
 
 // OutputDigest stands in for a stream of command output that was not kept:

@@ -53,7 +53,7 @@ func ExternalListNodes(deps *Deps) gin.HandlerFunc {
 			return
 		}
 
-		nodes, _, err := store.ListNodesScoped(1, 200, "", visibleIDs, unrestricted)
+		nodes, err := store.ListExternalNodesScoped(c.Query("name"), c.Query("ip"), visibleIDs, unrestricted)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: "db_error", Message: "Failed to list nodes"})
 			return
@@ -66,6 +66,9 @@ func ExternalListNodes(deps *Deps) gin.HandlerFunc {
 				Name:          n.Name,
 				Alias:         n.Alias,
 				IP:            n.IP,
+				CountryCode:   n.CountryCode,
+				City:          n.City,
+				ASN:           n.ASN,
 				Status:        n.Status,
 				OS:            n.OS,
 				CPUCores:      n.CPUCores,
@@ -102,6 +105,9 @@ func ExternalGetNode(deps *Deps) gin.HandlerFunc {
 			Name:          n.Name,
 			Alias:         n.Alias,
 			IP:            n.IP,
+			CountryCode:   n.CountryCode,
+			City:          n.City,
+			ASN:           n.ASN,
 			OS:            n.OS,
 			Kernel:        n.Kernel,
 			AgentVersion:  n.AgentVersion,
