@@ -119,6 +119,24 @@ func ListNodesScoped(page, pageSize int, status string, visibleIDs []string, unr
 	return nodes, total, err
 }
 
+// ListExternalNodesScoped preserves the v1 array contract without truncating
+// fleets. Exact optional filters apply in SQL, inside the permission scope.
+func ListExternalNodesScoped(name, ip string, visibleIDs []string, unrestricted bool) ([]model.Node, error) {
+	q := DB.Model(&model.Node{})
+	if !unrestricted {
+		q = q.Where("id IN ?", visibleIDs)
+	}
+	if name != "" {
+		q = q.Where("LOWER(name) = LOWER(?) OR LOWER(alias) = LOWER(?)", name, name)
+	}
+	if ip != "" {
+		q = q.Where("ip = ?", ip)
+	}
+	var nodes []model.Node
+	err := q.Order("created_at DESC, id ASC").Find(&nodes).Error
+	return nodes, err
+}
+
 // GetNodeByID returns a single node by ID.
 func GetNodeByID(id string) (*model.Node, error) {
 	var node model.Node

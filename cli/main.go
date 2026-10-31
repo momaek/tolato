@@ -27,6 +27,9 @@ Usage:
   tolato profile remove <name> [--force]
   tolato nodes list [--status online|offline] [--json]
   tolato nodes get <node> [--json]
+  tolato commands <node> [--since <RFC3339> | --cursor <token>] [--page-size 100]
+  tolato services status|restart|stop <node>
+  tolato services install|upgrade <node> --binary-url <https-url> --sha256 <digest> [--config <json-file>]
   tolato exec <node> [--meta key=value]... [--redact-output] -- <command>...
   tolato cp <file> <node>:<path>     upload (path must be absolute)
   tolato cp <node>:<path> <file>     download ("-" is stdin / stdout)
@@ -118,6 +121,10 @@ func run(args []string) error {
 		return runExec(client, args[1:])
 	case "cp":
 		return runCp(client, args[1:])
+	case "commands":
+		return runCommands(client, args[1:])
+	case "services":
+		return runServices(client, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
