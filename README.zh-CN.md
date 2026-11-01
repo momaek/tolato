@@ -230,6 +230,7 @@ Web UI 里也内置了一个对话界面，能操作同样的节点，适合手�
 
 ## 文档
 
+- [Patato 集成](docs/patato-integration.md) —— 地区查询、执行记录游标、本机身份证明和 patato-node 托管
 - [设计总览](docs/design.md)
 - [循环架构](docs/loop-architecture.md) —— 网页对话循环的 goroutine + channel 模型
 - [前端架构](docs/frontend-architecture.md)

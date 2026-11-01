@@ -18,6 +18,9 @@ type Node struct {
 	Name          string   `json:"name"`
 	Alias         *string  `json:"alias,omitempty"`
 	IP            string   `json:"ip"`
+	CountryCode   string   `json:"country_code,omitempty"`
+	City          string   `json:"city,omitempty"`
+	ASN           string   `json:"asn,omitempty"`
 	Status        string   `json:"status"`
 	OS            string   `json:"os"`
 	Kernel        string   `json:"kernel,omitempty"`

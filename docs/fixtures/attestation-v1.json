@@ -1,0 +1,12 @@
+{
+  "secret": "test-only-agent-secret",
+  "now": 1793448000,
+  "claims": {
+    "node_id": "fixture-node",
+    "audience": "patato",
+    "nonce": "0123456789abcdef0123456789abcdef",
+    "issued_at": 1793448000,
+    "expires_at": 1793448060
+  },
+  "token": "ta1.eyJub2RlX2lkIjoiZml4dHVyZS1ub2RlIiwiYXVkaWVuY2UiOiJwYXRhdG8iLCJub25jZSI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwiaXNzdWVkX2F0IjoxNzkzNDQ4MDAwLCJleHBpcmVzX2F0IjoxNzkzNDQ4MDYwfQ.O5tevJxQbJzFoCy1pHsYqF4cXzC-LzIiiVJd5FXl3PM"
+}

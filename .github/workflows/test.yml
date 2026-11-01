@@ -5,6 +5,8 @@ on:
     paths:
       - 'agent/**'
       - 'server/**'
+      - 'cli/**'
+      - 'docs/fixtures/**'
       - 'scripts/install.sh'
       - '.github/workflows/test.yml'
       - '.github/workflows/release-agent.yml'
@@ -13,6 +15,8 @@ on:
     paths:
       - 'agent/**'
       - 'server/**'
+      - 'cli/**'
+      - 'docs/fixtures/**'
       - 'scripts/install.sh'
       - '.github/workflows/test.yml'
       - '.github/workflows/release-agent.yml'
@@ -37,6 +41,25 @@ jobs:
       - run: go test -race ./...
         working-directory: agent
       - run: bash -n scripts/install.sh
+      - name: Root-only socket permissions and Linux service lifecycle
+        if: runner.os == 'Linux'
+        working-directory: agent
+        run: |
+          go test -c -o "$RUNNER_TEMP/attestation.test" ./internal/attestation
+          go test -c -o "$RUNNER_TEMP/services.test" ./internal/services
+          (cd internal/attestation && sudo "$RUNNER_TEMP/attestation.test" -test.v)
+          sudo "$RUNNER_TEMP/services.test" -test.v
+
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: cli/go.sum
+      - run: go test -race ./...
+        working-directory: cli
 
   server:
     runs-on: ubuntu-latest

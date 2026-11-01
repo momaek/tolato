@@ -229,6 +229,7 @@ The web UI also has a built-in chat that drives the same nodes, for when you're 
 
 ## Docs
 
+- [Patato integration](docs/patato-integration.md) — inventory, activity cursors, machine proofs and managed patato-node
 - [Design overview](docs/design.md)
 - [Loop architecture](docs/loop-architecture.md) — web chat loop goroutine + channel model
 - [Frontend architecture](docs/frontend-architecture.md)

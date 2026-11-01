@@ -2,20 +2,23 @@ package main
 
 import (
 	"fmt"
-	"github.com/alecthomas/kingpin/v2"
-	"github.com/momaek/tolato/agent/internal/nodeexporter"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/alecthomas/kingpin/v2"
+	"github.com/momaek/tolato/agent/internal/attestation"
 	"github.com/momaek/tolato/agent/internal/client"
 	"github.com/momaek/tolato/agent/internal/collector"
 	"github.com/momaek/tolato/agent/internal/executor"
 	"github.com/momaek/tolato/agent/internal/identity"
+	"github.com/momaek/tolato/agent/internal/nodeexporter"
+	"github.com/momaek/tolato/agent/internal/services"
 )
 
 func main() {
@@ -27,6 +30,8 @@ func main() {
 	)
 
 	enabled := kingpin.Flag("node-exporter.enabled", "Enable embedded node_exporter collection over the server WebSocket.").Default("false").Bool()
+	attestationSocket := kingpin.Flag("attestation.socket", "Root-only Unix socket for local machine proofs (disabled when empty).").String()
+	managedServices := kingpin.Flag("managed-services.enabled", "Supervise patato-node and allow audited service management (Linux root only).").Default("false").Bool()
 	interval := kingpin.Flag("node-exporter.interval", "Metrics collection interval (minimum 5s).").Default("30s").Duration()
 	timeout := kingpin.Flag("node-exporter.timeout", "Collection deadline; timed-out collectors cannot overlap subsequent runs.").Default("10s").Duration()
 	kingpin.Flag("server", "Server WebSocket URL (required, e.g. ws://localhost:8080/ws/agent)").StringVar(&serverURL)
@@ -80,6 +85,28 @@ func main() {
 	col := collector.NewCollector()
 	exec := executor.NewExecutor()
 	wsClient := client.NewClient(serverURL, token, store, ident, col, exec)
+	if *managedServices {
+		manager, err := services.New(filepath.Join(dataDir, "services", services.Name))
+		if err != nil {
+			log.Fatalf("initialize managed services: %v", err)
+		}
+		defer manager.Close()
+		wsClient.EnableServices(manager)
+	}
+	if *attestationSocket != "" {
+		listener, err := attestation.Listen(*attestationSocket)
+		if err != nil {
+			log.Fatalf("initialize attestation socket: %v", err)
+		}
+		server := &http.Server{Handler: attestation.Handler(store.Load), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+		defer server.Close()
+		go func() {
+			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+				log.Printf("attestation socket: %v", err)
+				wsClient.Stop()
+			}
+		}()
+	}
 
 	if *enabled {
 		if *interval < 5*time.Second || *interval > time.Hour || *timeout <= 0 || *timeout > *interval {

@@ -5,11 +5,21 @@ import (
 	"time"
 
 	"github.com/momaek/tolato/server/internal/model"
+	"gorm.io/gorm"
 )
 
 // CreateAuditLog creates a new audit log entry.
 func CreateAuditLog(log *model.AuditLog) error {
-	return DB.Create(log).Error
+	// Coordinate per-node commit order with polling watermarks. A sequence ID
+	// alone is not a commit watermark: another transaction can commit a larger
+	// ID while this insert is still in flight. Transaction-scoped locks work
+	// across server instances and only serialize writes for the same node.
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", "tolato.audit."+log.NodeID).Error; err != nil {
+			return err
+		}
+		return tx.Create(log).Error
+	})
 }
 
 // AuditLogFilter narrows an audit log listing. Nil and empty fields don't

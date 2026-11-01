@@ -40,7 +40,14 @@ func (c *Client) handleUpdate(msg WSMessage) {
 	if res.OK && res.NewVersion != res.OldVersion {
 		// Let the result frame flush over the socket before we exec away.
 		time.Sleep(500 * time.Millisecond)
+		// exec replaces the agent without running main's deferred cleanup. Stop
+		// supervised children first; the replacement reloads their manifest.
+		resume := func() {}
+		if c.services != nil {
+			resume = c.services.PrepareExec()
+		}
 		if err := restartSelf(); err != nil {
+			resume()
 			log.Printf("[update] restart failed: %v", err)
 		}
 	}

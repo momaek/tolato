@@ -26,6 +26,7 @@ VERSION="${TOLATO_AGENT_VERSION:-latest}"
 TOKEN=""
 SERVER=""
 NODE_EXPORTER_ARG=""
+INTEGRATION_ARGS=""
 
 # ----- parse args -------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -35,6 +36,8 @@ while [[ $# -gt 0 ]]; do
     --server)   SERVER="$2"; shift 2 ;;
     --server=*) SERVER="${1#*=}"; shift ;;
     --node-exporter.enabled) NODE_EXPORTER_ARG=" --node-exporter.enabled"; shift ;;
+    --attestation.enabled) INTEGRATION_ARGS+=" --attestation.socket ${DATA_DIR}/attestation/agent.sock"; shift ;;
+    --managed-services.enabled) INTEGRATION_ARGS+=" --managed-services.enabled"; shift ;;
     -h|--help)
       sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
@@ -154,7 +157,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=${INSTALL_DIR}/${BIN_NAME} --server ${WS_URL} --token ${TOKEN} --data-dir ${DATA_DIR}${NODE_EXPORTER_ARG}
+ExecStart=${INSTALL_DIR}/${BIN_NAME} --server ${WS_URL} --token ${TOKEN} --data-dir ${DATA_DIR}${NODE_EXPORTER_ARG}${INTEGRATION_ARGS}
 Restart=always
 RestartSec=5
 # Note: --token is only used on first run; subsequent restarts reuse the stored identity.
@@ -171,6 +174,6 @@ EOF
 else
   cat <<EOF
 >>> systemd not detected. Run manually:
-    ${INSTALL_DIR}/${BIN_NAME} --server ${WS_URL} --token ${TOKEN} --data-dir ${DATA_DIR}${NODE_EXPORTER_ARG}
+    ${INSTALL_DIR}/${BIN_NAME} --server ${WS_URL} --token ${TOKEN} --data-dir ${DATA_DIR}${NODE_EXPORTER_ARG}${INTEGRATION_ARGS}
 EOF
 fi

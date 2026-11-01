@@ -250,6 +250,7 @@ func AgentWSHandler(deps *Deps) gin.HandlerFunc {
 			// Register connection
 			ac := deps.NodeManager.RegisterConn(node.ID, conn, func(ac *agentnode.AgentConn) {
 				ac.ConfigureExporter(reg)
+				ac.SetServicesVersion(reg.ServicesVersion)
 				installSystemHandlers(deps, node.ID, clientIP, ac)
 			})
 			defer func() {
