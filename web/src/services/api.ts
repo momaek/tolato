@@ -269,9 +269,23 @@ export async function getToolCallOutput(
 
 // --- Nodes ---
 
+// Server caps page_size at 100 (anything larger falls back to 20).
+const NODES_PAGE_SIZE = 100
+
+// Returns every node the caller can see. /nodes is paginated, but callers
+// (node page search/filters, chat node picker, audit-log filter, onboarding)
+// all need the full list, so walk every page and merge.
 export async function getNodes(): Promise<NodeListItem[]> {
-  const res = await api.get<PaginatedResponse<NodeListItem>>('/nodes')
-  return res.data.items ?? []
+  const all: NodeListItem[] = []
+  for (let page = 1; ; page++) {
+    const res = await api.get<PaginatedResponse<NodeListItem>>('/nodes', {
+      params: { page, page_size: NODES_PAGE_SIZE },
+    })
+    const items = res.data.items ?? []
+    all.push(...items)
+    if (items.length === 0 || page >= (res.data.total_pages ?? 0)) break
+  }
+  return all
 }
 
 export async function getNode(id: string): Promise<NodeDetail> {
